@@ -79,7 +79,7 @@ register database => sub {
     my $dbh = DBI->connect('dbi:Pg:database=' . $dbname
                            . ';host=' . $self->host,
                            $username, $password)
-        or croak DBI->errstr;
+        or croak $DBI::errstr;
 
     return $dbh;
 };
