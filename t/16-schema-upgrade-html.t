@@ -155,14 +155,14 @@ is join("\n", @$out), q{<!DOCTYPE html>
         <link rel="shortcut icon" href="favicon.ico" type="image/x-icon" />
         
         
-        <link rel="stylesheet" href="js/dojo/resources/dojo.css" type="text/css" />
-        <link rel="stylesheet" href="js/dijit/themes/claro/claro.css" type="text/css" />
+        <link rel="stylesheet" href="/js/dojo/resources/dojo.css" type="text/css" />
+        <link rel="stylesheet" href="/js/dijit/themes/claro/claro.css" type="text/css" />
 
         
-            <link rel="stylesheet" href="css/ledgersmb.css" type="text/css" />
+            <link rel="stylesheet" href="/css/ledgersmb.css" type="text/css" />
         
         
-            <link rel="stylesheet" href="css/setup/stylesheet.css" type="text/css" />
+            <link rel="stylesheet" href="/css/setup/stylesheet.css" type="text/css" />
         
         
         <script type="text/javascript">
@@ -175,8 +175,8 @@ is join("\n", @$out), q{<!DOCTYPE html>
                 
             };
        </script>
-        <script type="text/javascript" src="js/dojo/dojo.js"></script>
-        <script type="text/javascript" src="js/lsmb/main.js"></script>
+        <script type="text/javascript" src="/js/dojo/dojo.js"></script>
+        <script type="text/javascript" src="/js/lsmb/main.js"></script>
         
         <meta name="robots" content="noindex,nofollow" />
 </head>
@@ -247,14 +247,14 @@ is join("\n", @$out), q{<!DOCTYPE html>
         <link rel="shortcut icon" href="favicon.ico" type="image/x-icon" />
         
         
-        <link rel="stylesheet" href="js/dojo/resources/dojo.css" type="text/css" />
-        <link rel="stylesheet" href="js/dijit/themes/claro/claro.css" type="text/css" />
+        <link rel="stylesheet" href="/js/dojo/resources/dojo.css" type="text/css" />
+        <link rel="stylesheet" href="/js/dijit/themes/claro/claro.css" type="text/css" />
 
         
-            <link rel="stylesheet" href="css/ledgersmb.css" type="text/css" />
+            <link rel="stylesheet" href="/css/ledgersmb.css" type="text/css" />
         
         
-            <link rel="stylesheet" href="css/setup/stylesheet.css" type="text/css" />
+            <link rel="stylesheet" href="/css/setup/stylesheet.css" type="text/css" />
         
         
         <script type="text/javascript">
@@ -267,8 +267,8 @@ is join("\n", @$out), q{<!DOCTYPE html>
                 
             };
        </script>
-        <script type="text/javascript" src="js/dojo/dojo.js"></script>
-        <script type="text/javascript" src="js/lsmb/main.js"></script>
+        <script type="text/javascript" src="/js/dojo/dojo.js"></script>
+        <script type="text/javascript" src="/js/lsmb/main.js"></script>
         
         <meta name="robots" content="noindex,nofollow" />
 </head>
@@ -339,14 +339,14 @@ is join("\n", @$out), q{<!DOCTYPE html>
         <link rel="shortcut icon" href="favicon.ico" type="image/x-icon" />
         
         
-        <link rel="stylesheet" href="js/dojo/resources/dojo.css" type="text/css" />
-        <link rel="stylesheet" href="js/dijit/themes/claro/claro.css" type="text/css" />
+        <link rel="stylesheet" href="/js/dojo/resources/dojo.css" type="text/css" />
+        <link rel="stylesheet" href="/js/dijit/themes/claro/claro.css" type="text/css" />
 
         
-            <link rel="stylesheet" href="css/ledgersmb.css" type="text/css" />
+            <link rel="stylesheet" href="/css/ledgersmb.css" type="text/css" />
         
         
-            <link rel="stylesheet" href="css/setup/stylesheet.css" type="text/css" />
+            <link rel="stylesheet" href="/css/setup/stylesheet.css" type="text/css" />
         
         
         <script type="text/javascript">
@@ -359,8 +359,8 @@ is join("\n", @$out), q{<!DOCTYPE html>
                 
             };
        </script>
-        <script type="text/javascript" src="js/dojo/dojo.js"></script>
-        <script type="text/javascript" src="js/lsmb/main.js"></script>
+        <script type="text/javascript" src="/js/dojo/dojo.js"></script>
+        <script type="text/javascript" src="/js/lsmb/main.js"></script>
         
         <meta name="robots" content="noindex,nofollow" />
 </head>
@@ -429,14 +429,14 @@ is join("\n", @$out), q{<!DOCTYPE html>
         <link rel="shortcut icon" href="favicon.ico" type="image/x-icon" />
         
         
-        <link rel="stylesheet" href="js/dojo/resources/dojo.css" type="text/css" />
-        <link rel="stylesheet" href="js/dijit/themes/claro/claro.css" type="text/css" />
+        <link rel="stylesheet" href="/js/dojo/resources/dojo.css" type="text/css" />
+        <link rel="stylesheet" href="/js/dijit/themes/claro/claro.css" type="text/css" />
 
         
-            <link rel="stylesheet" href="css/ledgersmb.css" type="text/css" />
+            <link rel="stylesheet" href="/css/ledgersmb.css" type="text/css" />
         
         
-            <link rel="stylesheet" href="css/setup/stylesheet.css" type="text/css" />
+            <link rel="stylesheet" href="/css/setup/stylesheet.css" type="text/css" />
         
         
         <script type="text/javascript">
@@ -449,8 +449,8 @@ is join("\n", @$out), q{<!DOCTYPE html>
                 
             };
        </script>
-        <script type="text/javascript" src="js/dojo/dojo.js"></script>
-        <script type="text/javascript" src="js/lsmb/main.js"></script>
+        <script type="text/javascript" src="/js/dojo/dojo.js"></script>
+        <script type="text/javascript" src="/js/lsmb/main.js"></script>
         
         <meta name="robots" content="noindex,nofollow" />
 </head>
@@ -536,14 +536,14 @@ is join("\n", @$out), q{<!DOCTYPE html>
         <link rel="shortcut icon" href="favicon.ico" type="image/x-icon" />
         
         
-        <link rel="stylesheet" href="js/dojo/resources/dojo.css" type="text/css" />
-        <link rel="stylesheet" href="js/dijit/themes/claro/claro.css" type="text/css" />
+        <link rel="stylesheet" href="/js/dojo/resources/dojo.css" type="text/css" />
+        <link rel="stylesheet" href="/js/dijit/themes/claro/claro.css" type="text/css" />
 
         
-            <link rel="stylesheet" href="css/ledgersmb.css" type="text/css" />
+            <link rel="stylesheet" href="/css/ledgersmb.css" type="text/css" />
         
         
-            <link rel="stylesheet" href="css/setup/stylesheet.css" type="text/css" />
+            <link rel="stylesheet" href="/css/setup/stylesheet.css" type="text/css" />
         
         
         <script type="text/javascript">
@@ -556,8 +556,8 @@ is join("\n", @$out), q{<!DOCTYPE html>
                 
             };
        </script>
-        <script type="text/javascript" src="js/dojo/dojo.js"></script>
-        <script type="text/javascript" src="js/lsmb/main.js"></script>
+        <script type="text/javascript" src="/js/dojo/dojo.js"></script>
+        <script type="text/javascript" src="/js/lsmb/main.js"></script>
         
         <meta name="robots" content="noindex,nofollow" />
 </head>

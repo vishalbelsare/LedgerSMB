@@ -21,7 +21,7 @@ __PACKAGE__->self_register(
                   id => 'setup-login',
               });
 
-sub url { return '/setup.pl'; }
+sub url { return '/setup/'; }
 
 sub _verify {
     my ($self) = @_;

@@ -154,6 +154,7 @@ my @modules =
           'LedgerSMB::Report::Unapproved::Drafts',
           'LedgerSMB::Report::co::Balance_y_Mayor',
           'LedgerSMB::Report::co::Caja_Diaria',
+          'LedgerSMB::Routes::setup',
           'LedgerSMB::Scripts::budget_reports',
           'LedgerSMB::Scripts::parts',
           'LedgerSMB::Scripts::contact_reports', 'LedgerSMB::Scripts::file',

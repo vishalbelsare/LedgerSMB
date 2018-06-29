@@ -46,7 +46,7 @@ $driver->get($base_url . '/login.pl');
 
 ok($driver->find_element_by_name('password'), 'got a password');
 
-$driver->get($base_url . '/setup.pl');
+$driver->get($base_url . '/setup/');
 
-ok($driver->find_element_by_name('s_password'), 'got a user');
+ok($driver->find_element_by_name('password'), 'got a user');
 

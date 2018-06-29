@@ -54,6 +54,7 @@ find(\&collect, 'lib');
 
 @on_disk =
     grep { ! m#^lib/LedgerSMB/Sysconfig.pm# } # LedgerSMB::Sysconfig false fail
+    grep { ! m#^lib/Dancer2/Plugin/SessionDatabase.pm# }
     @on_disk;
 
 plan tests => scalar(@on_disk);
@@ -78,7 +79,7 @@ my @exception_modules =
      'LedgerSMB::X12', 'LedgerSMB::X12::EDI850', 'LedgerSMB::X12::EDI894',
 
      # Exclude, reports functions which don't exist
-     'LedgerSMB::Sysconfig',
+     'LedgerSMB::Sysconfig', 'Dancer2::Plugin::SessionDatabase',
     );
 
 

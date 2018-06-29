@@ -13,7 +13,7 @@ Scenario: Redirecting / to /login.pl
   Then I should see the application login page
 
 
-Scenario: Viewing setup.pl
+Scenario: Viewing /setup
   When I navigate to the setup login page
   Then I should see the setup login page
 

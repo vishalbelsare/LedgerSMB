@@ -26,7 +26,7 @@ if (@missing) {
 
     ok($driver->find_element_by_name('password'), 'got a password');
 
-    $driver->get('http://localhost:5000/setup.pl');
+    $driver->get('http://localhost:5000/setup/');
 
-    ok($driver->find_element_by_name('s_password'), 'got a user');
+    ok($driver->find_element_by_name('password'), 'got a user');
 }
