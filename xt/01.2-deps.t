@@ -12,7 +12,11 @@ BEGIN {
        Test::More::plan(skip_all =>'Must have Test::Dependencies version 0.20 or higher, had version ' . $Test::Dependencies::VERSION);
        exit 0;
    }
-   Test::Dependencies->import(exclude => [ qw/ LedgerSMB PageObject / ], style => 'light');
+   Test::Dependencies->import(
+       # Dancer2::Plugin::SessionDatabase is defined in our own codebase
+       exclude => [ qw/ LedgerSMB PageObject
+                        Dancer2::Plugin::SessionDatabase / ],
+       style => 'light');
   };
   if ($@){
        require Test::More;
@@ -37,5 +41,7 @@ push @on_disk, 'bin/ledgersmb-server.psgi';
 ok_dependencies($file, \@on_disk,
                 phases => 'runtime',
                 ignores => [ 'LaTeX::Driver',
-                             'Starman', 'TeX::Encode::charmap'] );
+                             'Starman', 'TeX::Encode::charmap',
+                             # used through configuration
+                             'Dancer2::Session::Cookie' ] );
 
