@@ -365,6 +365,26 @@ post '/upgrade' => sub {
 post '/load-templates' => sub {
     'Todo'
 };
+=head2 /system-information [GET]
+
+=cut
+
+get '/system-information' => require_login sub {
+    ### Todo: factor into 'require_database'??
+    my $database = LedgerSMB::Database->new(
+        username => session->read('logged_in_user'),
+        password => session->read('__auth_extensible_pass'),
+        dbname => param('database'));
+
+    template 'system-information', {
+        info => {
+            db => $database->get_info->{system_info},
+            system => LedgerSMB::system_info()->{system},
+            environment => \%ENV,
+            modules => \%INC,
+        },
+    };
+};
 
 =head2 /setup [GET]
 
