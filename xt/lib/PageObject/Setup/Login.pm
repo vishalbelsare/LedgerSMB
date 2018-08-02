@@ -27,7 +27,7 @@ sub _verify {
     my ($self) = @_;
 
     $self->find('*labeled', text => $_)
-        for ("Password", "Database", "DB admin login");
+        for ("Password", "DB admin login");
     return $self;
 };
 
