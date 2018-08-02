@@ -19,6 +19,7 @@ use Dancer2::Plugin::SessionDatabase;
 use File::Spec;
 use HTML::Escape;
 use Locale::Country;
+use PGObject;
 use Try::Tiny;
 use URI::Escape qw(uri_escape_utf8);
 
@@ -28,6 +29,7 @@ use LedgerSMB::Database;
 use LedgerSMB::Database::Config;
 use LedgerSMB::Entity::Person::Employee;
 use LedgerSMB::Entity::User;
+use LedgerSMB::PGDate;
 use LedgerSMB::Sysconfig;
 use LedgerSMB::Template::DB;
 
@@ -76,7 +78,7 @@ hook before_template_render => sub {
     # a function 'html()' which performs the same function on partial data
     $tokens->{html} = sub { return escape_html shift };
     $tokens->{ledgersmb_version} = $LedgerSMB::VERSION;
-    $tokens->{username} = logged_in_user ? logged_in_user->{username} : '';
+    $tokens->{username} = logged_in_user ? logged_in_user()->{username} : '';
 };
 
 
@@ -108,7 +110,7 @@ sub _list_databases {
                    WHERE datallowconn
                          AND NOT datistemplate
                   ORDER BY datname};
-    my $sth = database->prepare($query);
+    my $sth = database()->prepare($query);
     my $databases = [];
 
     $sth->execute;
@@ -281,8 +283,8 @@ post '/create-company' => require_login sub {
 
     my $dbname = param('database');
     my $database = LedgerSMB::Database->new(
-        username => session->read('logged_in_user'),
-        password => session->read('__auth_extensible_pass'),
+        username => session()->read('logged_in_user'),
+        password => session()->read('__auth_extensible_pass'),
         dbname => $dbname);
     my $info = $database->get_info;
 
@@ -372,8 +374,8 @@ post '/load-templates' => sub {
 get '/system-information' => require_login sub {
     ### Todo: factor into 'require_database'??
     my $database = LedgerSMB::Database->new(
-        username => session->read('logged_in_user'),
-        password => session->read('__auth_extensible_pass'),
+        username => session()->read('logged_in_user'),
+        password => session()->read('__auth_extensible_pass'),
         dbname => param('database'));
 
     template 'system-information', {

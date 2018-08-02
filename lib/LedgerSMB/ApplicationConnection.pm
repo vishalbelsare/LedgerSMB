@@ -186,7 +186,7 @@ sub load_templateset {
     return;
 }
 
-=head1 COPYRIGHT
+=head1 LICENSE AND COPYRIGHT
 
 Copyright (C) 2018 The LedgerSMB Core Team
 
