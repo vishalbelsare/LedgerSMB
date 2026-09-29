@@ -4,20 +4,14 @@
      [% IF request.target_div == 'company_div' %]data-dojo-props="selected:true"[% END %]
 
      >
-        <div class="listtop"><strong>[%
-    IF (entity_id && entity_class == 1) ;
-        text("Edit Vendor") ;
-    ELSIF (entity_class == 1) ;
-        text("Add Vendor") ;
-    ELSIF (entity_id && entity_class == 2) ;
-        text("Edit Customer") ;
-    ELSE ;
-        text("Add Customer") ;
-    END ;
+  <div class="listtop"><strong>[%
+      IF entity_id.defined ;
+      text("Edit Company");
+      ELSE ;
+      text("Add Company");
+      END;
     %]</strong></div>
 <form data-dojo-type="lsmb/Form" id="company" method="post" action="[% request.script %]">
-<div data-dojo-type="lsmb/layout/TableContainer"
-     data-dojo-props="cols:2">
 [% PROCESS input element_data = {
                   id = 'company-target-div'
                 type = "hidden"
@@ -31,12 +25,18 @@
                 value = entity_id
         } %]
         [% PROCESS input element_data = {
+                  id = 'company-entity-class'
+                type = "hidden"
+                name = "entity_class"
+                value = entity_class
+        } %]
+        [% PROCESS input element_data = {
                   id = 'company-company-id'
                 type = "hidden"
                 name = "id"
                 value = company.id
         } %]
-[% PROCESS input element_data = {
+        [% PROCESS input element_data = {
                   id = 'company-form-id'
                 type = "hidden"
                 name = "form_id"
@@ -48,52 +48,23 @@
                 name = "account_class"
                 value = account_class
         } %]
-<div class=" col-2 ">
-<div class="input_line">
-<div class="input_group1">
+  <div class="two-column-grid" style="width:fit-content">
         [% PROCESS input element_data = {
-                label = '_none_'
-                title = text('Control Code') #'
+                label = text('Control Code') #'
                   id = 'company-control-code'
                 type = "text"
                 name = "control_code"
                 value = company.control_code
                 size = "20"
         } %]
-        [% IF !created_as_class;
-                created_as_class = entity_class;
-        END; # IF !created_as_class %]
-</div>
-<div class="input_group2">
-        [% company_entity_class = company.entity_class;
-        IF !company_entity_class;
-              company_entity_class = request.entity_class;
-        END;
-        PROCESS select element_data = {
-                id = 'company-entity-class'
-                name = "entity_class"
-                options = entity_classes
-                default_values = [company_entity_class]
-                text_attr = 'class'
-                value_attr = 'id'
-                title = text('Class')
-                label = '_none_'
-        } %]
-</div>
-</div>
-<div class="input_line">
-<div class="input_group1">
         [% PROCESS input element_data = {
-                title = text('Name')
-                label = '_none_'
+                label = text('Name')
                 type= "text"
                 name = "legal_name"
                 value = company.legal_name
                 size = "20"
                 required = 'true'
         } %]
-</div>
-<div class="input_group2">
        [%
                 company_country_id = company.country_id;
                 IF !company_country_id;
@@ -106,55 +77,37 @@
                         default_values = [company_country_id]
                         options = country_list
                         name = "country_id"
-                        title = text('Country')
-                        label = '_none_'
+                        label = text('Country')
                         required = 'true'
                         default_blank = 1
         } %]
-</div>
-</div>
-<div class="input_line">
-<div class="input_group1">
                 [% INCLUDE input element_data = {
-                        label = '_none_'
-                        title = text('Tax Number/SSN'),
+                        label = text('Tax Number/SSN'),
                         name = "tax_id",
                         value = company.tax_id,
                         type = "text",
                         size = "19"
                 } #' %]
-</div>
 [% IF sic_list.size > 0 %]
-<div class="input_group2">
                 [% INCLUDE select element_data = {
-                        label = '_none_'
-                        title = text('SIC'),
+                        label = text('SIC'),
                         name = "sic_code",
                         options = sic_list
                         default_values = [ company.sic_code ],
                         default_blank = 1
                         class = 'sic'
                 } %]
-</div>
 [% END %]
-</div>
-<div class="input_line"
-     id="sales-tax-info">
-<div class="input_group1">
      [% INCLUDE input element_data = {
-         label = '_none_'
-         title = text('Sales Tax ID') #'
+         label = text('Sales Tax ID')
           name = 'sales_tax_id'
           type = 'text'
          class = 'taxnumber'
           size = '19'
          value = company.sales_tax_id
      } %]
-</div>
-<div class="input_group2">
      [% INCLUDE input element_data = {
-         title = text('License Number') #'
-         label = '_none_'
+         label = text('License Number')
           name = 'license_number'
           type = 'text'
          class = 'taxnumber'
@@ -162,17 +115,13 @@
          value = company.license_number
      } %]
 </div>
-</div>
-</div>
-</div>
-<div class="input_line">
-            <hr/>
+  <hr/>
 <div class="input_group1">
         [% PROCESS button element_data = {
-                text = text('Generate Control Code') #'
+                text = text('Generate Control Code')
                   id = 'company-generate-control-code'
                 type = "submit"
-                name = "action"
+                name = "__action"
                 value = "generate_control_code"
                 class = "submit"
         } %]
@@ -180,21 +129,28 @@
                   id = 'company-action-retrieve'
                 text = text('Retrieve')
                 type = 'submit'
-                name = 'action'
+                name = '__action'
                value = 'get_by_cc'
                class = 'submit'
         } %]
-                [% INCLUDE button element_data = {
+        [% INCLUDE button element_data = {
                         text = text('Save')
                         id = 'company-action-save'
                         class="submit"
                         type="submit"
-                        name="action"
+                        name="__action"
                         value="save_company"
-                        accesskey="S"
-                        title="Save [Alt-S]"
-                } %]
-</div>
+        };
+        IF may_delete AND entity_id.defined AND NOT company.is_used ;
+        INCLUDE button element_data = {
+               text = text('Delete')
+                 id = 'company-action-delete'
+               class="submit"
+                type="submit"
+                name="__action"
+               value="delete_entity"
+        };
+        END %]
 </div>
 </form>
 [% FOREACH n = notes %]

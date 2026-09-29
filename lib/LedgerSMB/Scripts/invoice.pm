@@ -75,33 +75,45 @@ sub invoices_outstanding {
     # which does not work well with Moose
     delete $request->{on_hold} if $request->{on_hold} eq 'on';
     return $request->render_report(
-        LedgerSMB::Report::Invoices::Outstanding->new(%$request)
-        );
+        LedgerSMB::Report::Invoices::Outstanding->new(
+            %$request,
+            formatter_options => $request->formatter_options,
+            from_date => $request->parse_date( $request->{from_date} ),
+            to_date => $request->parse_date( $request->{to_date} ),
+        ));
 }
 
 =item invoice_search
 
-This produces the transactions earch report.  See
+This produces the transactions search report.  See
 LedgerSMB::Report::Invoices::Transactions for expected properties.
 
 =cut
 
-sub  invoice_search{
+sub invoice_search {
+
     my ($request) = @_;
     $request->{is_approved} //= 'Y'; # backwards-compatibility to 1.4
+
     # the line below is needed because we are using trinary boolean logic
     # which does not work well with Moose
     delete $request->{on_hold} if $request->{on_hold} eq 'on';
+
     return $request->render_report(
-        LedgerSMB::Report::Invoices::Transactions->new(%$request)
-        );
+        LedgerSMB::Report::Invoices::Transactions->new(
+            %$request,
+            formatter_options => $request->formatter_options,
+            from_date => $request->parse_date( $request->{from_date} ),
+            to_date => $request->parse_date( $request->{to_date} ),
+        )
+    );
 }
 
 =back
 
 =head1 LICENSE AND COPYRIGHT
 
-Copyright (C) 2012 The LedgerSMB Core Team
+Copyright (C) 2012-2025 The LedgerSMB Core Team
 
 This file is licensed under the GNU General Public License version 2, or at your
 option any later version.  A copy of the license should have been included with

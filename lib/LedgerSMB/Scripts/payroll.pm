@@ -23,7 +23,6 @@ use warnings;
 use LedgerSMB::I18N;
 use LedgerSMB::Payroll::Income_Type;
 use LedgerSMB::Report::Payroll::Income_Types;
-use LedgerSMB::Template::UI;
 
 =head1 METHODS
 
@@ -44,12 +43,12 @@ with different inputs.
 
 sub show_income_type {
     my ($request) = @_;
-    my @country_list = LedgerSMB::I18N::location_list_country_localized($request);
+    my @country_list = $request->enabled_countries->@*;
     @{$request->{pics}} = $request->call_procedure(
        funcname => 'payroll_pic__list', args => [$request->{country_id}]
     ) if $request->{country_id};
 
-    my $template = LedgerSMB::Template::UI->new_UI;
+    my $template = $request->{_wire}->get('ui');
     return $template->render($request, 'payroll/income', $request);
 }
 
@@ -87,9 +86,9 @@ Displays the income type search screen
 
 sub search_income_type {
     my ($request) = @_;
-    my @country_list = LedgerSMB::I18N::location_list_country_localized($request);
+    my @country_list = $request->enabled_countries->@*;
 
-    return LedgerSMB::Template::UI->new_UI
+    return $request->{_wire}->get('ui')
         ->render($request, 'payroll/income_search', $request);
 }
 
@@ -102,8 +101,10 @@ Displays income type search results
 sub income_type_results {
     my ($request) = @_;
     return $request->render_report(
-        LedgerSMB::Report::Payroll::Income_Types->new(%$request)
-        );
+        LedgerSMB::Report::Payroll::Income_Types->new(
+            %$request,
+            formatter_options => $request->formatter_options
+        ));
 }
 
 =back

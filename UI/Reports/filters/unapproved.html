@@ -15,11 +15,9 @@
       action="[% script %]"
       method="get">
 <div class="listtop" id="title_div">[% text('Search Unapproved Transactions') %]</div>
-<div data-dojo-type="lsmb/layout/TableContainer"
-     data-dojo-props="cols:1">
-<div class="input" id="batch_class_div">
+<div class="two-column-grid" style="width: fit-content">
         [% INCLUDE select element_data = {
-                title = text('Transaction Type') # '
+                label = text('Transaction Type')
                 options = batch_classes
                 value_attr = "value"
                 text_attr = "text"
@@ -27,36 +25,28 @@
                 default_values = [class_id]
                 default_blank = 1
         } %]
-</div>
-<div class="input" id="reference_div">
         [% INCLUDE input element_data = {
-                title = text('Reference') #'
+                label = text('Reference')
                 size = 20
                 value = reference
                 name = "reference"
         } %]
-        </div>
-<div class="input" id="date_div">
         [% INCLUDE input element_data = {
-                title = text('From Date')
-                type = "text",
-                class = "date",
+                label = text('From Date')
+                type = "date",
                 size = 12,
                 value = from_date,
                 name = "from_date"
         } %]
         [% INCLUDE input element_data = {
-            title = text('To Date')
-            type = "text",
-            class = "date",
+            label = text('To Date')
+            type = "date",
             size = 12,
             value = to_date,
             name = "to_date"
         } %]
-</div>
-<div class="input" id="amounts_div">
         [% INCLUDE input element_data = {
-                title = "Minimum Value"
+                label = "Minimum Value"
                 name = "amount_gt"
                 class = "numeric"
                 size = 20
@@ -64,19 +54,18 @@
                 type = "text"
         } %]
         [% INCLUDE input element_data = {
-                title = "Maximum Value"
+                label = "Maximum Value"
                 name = "amount_lt"
                 value = amount_lt
                 size = 20
                 class = "numeric"
                 type = "text"
         } %]
-        </div>
 </div>
 <div class="input" id="buttons_div">
         [% INCLUDE button element_data = {
                 text = text('Search')
-                name = "action"
+                name = "__action"
                 value = action
                 class = "submit"
                 type = "submit"

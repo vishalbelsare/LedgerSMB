@@ -1,3 +1,7 @@
+
+use v5.38;
+use experimental 'try';
+
 =head1 NAME
 
 LedgerSMB::old_code - dispatching from new code to old code
@@ -23,18 +27,14 @@ LedgerSMB::old_code - dispatching from new code to old code
 
 package LedgerSMB::old_code;
 
-
-use strict;
-use warnings;
 use CGI::Parse::PSGI qw(parse_cgi_output);
 use IO::File;
 use LedgerSMB::Form;
 use Log::Any;
 use POSIX 'SEEK_SET';
 use Symbol;
-use Feature::Compat::Try;
 
-use base qw(Exporter);
+use parent qw(Exporter);
 our @EXPORT_OK = qw(dispatch);
 
 # make sure the package exists after 'use'-ing this module:
@@ -55,14 +55,9 @@ Wraps a "call" to old code, returning a PSGI triplet for the response.
 
 =cut
 
-sub dispatch {
-    my $script = shift;
-    my $entrypoint = shift;
-    my $user = shift;
-    my $form_args = shift;
-    my @entrypoint_args = @_;
-
+sub dispatch($script, $entrypoint, $user, $form_args, @entrypoint_args) {
     my $stdout = IO::File->new_tmpfile;
+    binmode $stdout, ':utf8';
     if (my $cpid = fork()) {
         waitpid $cpid, 0;
         seek($stdout, 0, SEEK_SET)
@@ -71,6 +66,11 @@ sub dispatch {
         return parse_cgi_output($stdout);
     }
     else {
+        # Do not close the database handle at the end:
+        #   the caller process may still need it.
+        $form_args->{dbh}->{InactiveDestroy} = 1
+            if $form_args->{dbh};
+
         # make 100% sure any "die"-s don't bubble up higher than this point in
         # the stack: we're a fork()ed process and should under no circumstance
         # end up acting like another worker. When we are done, we need to
@@ -81,7 +81,8 @@ sub dispatch {
             $script_module =~ s/\.pl//;
             $lsmb_legacy::form = Form->new();
             $lsmb_legacy::form->{$_} = $form_args->{$_} for (keys %$form_args);
-            $lsmb_legacy::logger = Log::Any->get_logger(category => "lsmb.$script_module.$lsmb_legacy::form->{action}");
+            $lsmb_legacy::form->{script} = $script;
+            $lsmb_legacy::logger = Log::Any->get_logger(category => "lsmb.$script_module.$lsmb_legacy::form->{__action}");
             %lsmb_legacy::myconfig = %$user;
             $lsmb_legacy::form->{_locale} =
                 $lsmb_legacy::locale =
@@ -114,8 +115,10 @@ sub dispatch {
                 my $ref = qualify_to_ref $entrypoint, 'lsmb_legacy';
                 &{*{$ref}}($lsmb_legacy::form, $lsmb_legacy::locale);
             }
+            $form_args->{dbh}->commit if $form_args->{dbh};
         }
         catch ($e) {
+            $form_args->{dbh}->rollback if $form_args->{dbh};
             warn "Error dispatching call to old code: $_\n";
         };
         exit;
@@ -131,5 +134,3 @@ option any later version.  A copy of the license should have been included with
 your software.
 
 =cut
-
-1;

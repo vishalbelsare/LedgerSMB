@@ -18,7 +18,7 @@ is no previous report from which to get an opening balance.
      | accno   |  debit_bc |  credit_bc  |
      | 1060    |  1000.00  |             |
      | 2620    |           |  1000.00    |
-  When I navigate the menu and select the item at "Cash > Reconciliation"
+  When I navigate the menu and select the item at "Cash & Banking > Reconciliation"
   Then I should see the New Reconciliation Report screen.
   When I select "1060 Checking Account" from the drop down "Account"
    And I enter "1000.00" into "Statement Balance"
@@ -72,7 +72,7 @@ Scenario: Search for reconciliation report and delete it,
  Given reconciliation reports with these properties:
        | Account Number | Statement Date | Statement Balance | Approved | Submitted |
        | 1060           | 2018-01-01     | 101.00            | no       | no        |
-  When I navigate the menu and select the item at "Cash > Reports > Reconciliation"
+  When I navigate the menu and select the item at "Cash & Banking > Reports > Reconciliation"
   Then I should see the Search Reconciliation Reports screen
   When I press "Search"
   Then I should see the Reconciliation Search Report screen
@@ -90,4 +90,27 @@ Scenario: Search for reconciliation report and delete it,
   When I press "Search"
   Then I should see the Reconciliation Search Report screen
    And I expect the report to contain 0 rows
+
+
+Scenario: Update with new GL transaction on a new line
+  Given an existing and empty reconciliation report
+   When I open the reconciliation report
+    And I enter a GL transaction with a balance of 100.00 into the reconciliation period
+    And I update the screen
+   Then I expect the reconciliation report to show one uncleared line
+
+Scenario: Update with new AR transaction on a new line
+  Given an existing and empty reconciliation report
+   When I open the reconciliation report
+    And I enter an AR payment with a balance of 100.00 into the reconciliation period
+    And I update the screen
+   Then I expect the reconciliation report to show one uncleared line
+
+Scenario: Update with new GL transaction on an existing line
+  Given an existing reconciliation report
+    And a GL transaction with a balance of 100.00 into the reconciliation period
+   When I open the reconciliation report
+    And I mark all lines cleared
+    And I enter a GL transaction with a balance of 50.00 into the reconciliation period
+   Then I expect the reconciliation report to show one uncleared line
 

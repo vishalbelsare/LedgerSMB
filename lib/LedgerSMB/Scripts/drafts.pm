@@ -21,7 +21,7 @@ which have not been approved yet.
 use strict;
 use warnings;
 
-use LedgerSMB::DBObject::Draft;
+use LedgerSMB::Scripts::reports;
 use LedgerSMB::Report::Unapproved::Drafts;
 
 our $VERSION = '0.1';
@@ -42,8 +42,6 @@ amount_ge: total greater than or equal to
 =cut
 
 sub search {
-    use LedgerSMB::Scripts::reports;
-
     my $request = shift @_;
     $request->{search_type} = 'drafts';
     $request->{report_name} = 'unapproved';
@@ -73,11 +71,28 @@ sub approve {
         list_drafts($request);
         return;
     }
-    my $draft= LedgerSMB::DBObject::Draft->new(%$request);
+    my $sth = $request->{dbh}->prepare(
+        q|select workflow_id from transactions where id = ?|
+        ) or die $request->{dbh}->errstr;
     for my $row (1 .. $request->{rowcount_}){
-        if ($draft->{"select_$row"}){
-             $draft->{id} = $draft->{"select_$row"};
-             $draft->approve;
+        my $id = $request->{"select_$row"};
+        if ($id){
+            $request->{dbh}->do(
+                q|update ar
+                     set invnumber = setting_increment('sinumber')
+                   where id = ? and invnumber is null|,
+                {},
+                $id)
+                or die $request->{dbh}->errstr;
+            $request->call_procedure(
+                funcname => 'draft_approve',
+                args     => [ $id ]);
+            $sth->execute( $id )
+                or die $sth->errstr;
+            my ($workflow_id) = $sth->fetchrow_array;
+            my $wf = $request->{_wire}->get('workflows')
+                ->fetch_workflow( 'AR/AP', $workflow_id );
+            $wf->execute_action( 'approve' ) if $wf;
         }
     }
     return search($request);
@@ -106,11 +121,11 @@ sub delete {
         list_drafts($request);
         return;
     }
-    my $draft= LedgerSMB::DBObject::Draft->new(%$request);
-    for my $row (1 .. $draft->{rowcount_}){
-        if ($draft->{"select_$row"}){
-             $draft->{id} = $draft->{"select_$row"};
-             $draft->delete;
+    for my $row (1 .. $request->{rowcount_}){
+        if ($request->{"select_$row"}){
+            $request->call_procedure(
+                funcname => 'draft_delete',
+                args     => [ $request->{"select_$row"} ]);
         }
     }
     return search($request);
@@ -140,8 +155,14 @@ sub list_drafts {
 
     $request->open_form;
     return $request->render_report(
-        LedgerSMB::Report::Unapproved::Drafts->new(%$request)
-        );
+        LedgerSMB::Report::Unapproved::Drafts->new(
+            $request->%{ qw( reference type language _locale ) },
+            formatter_options => $request->formatter_options,
+            from_date => $request->parse_date( $request->{from_date} ),
+            to_date => $request->parse_date( $request->{to_date} ),
+            amount_gt => $request->parse_amount( $request->{amount_gt} ),
+            amount_lt => $request->parse_amount( $request->{amount_lt} ),
+        ));
 }
 
 

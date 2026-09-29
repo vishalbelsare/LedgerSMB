@@ -23,7 +23,7 @@ Instantiates a new template. Accepts the following arguments:
 
 =item user (optional)
 
-A LedgerSMB::User object defining user preferences.
+A hash with user preferences.
 
 =item template
 
@@ -33,10 +33,11 @@ the database instead of from disk.
 Based on the specified format, an appropriate extension is appended
 to resolve to the correct template file.
 
-=item format
+=item format_plugin
 
-The format to be used.  Currently HTML, PS, PDF, TXT, CSV, ODS, XLS, XLSX
-are supported, subject to their dependencies being available.
+The formatter to be used.  Currently HTML, PS, PDF, TXT, CSV, ODS, XLS, XLSX
+are supported, through the plugins in LedgerSMB::Template::Plugin modules,
+subject to their dependencies being available.
 
 =item format_options (optional)
 
@@ -62,6 +63,10 @@ gettext function.
 =item language (optional)
 
 The language for template selection.
+
+=item formatter_options (optional)
+
+C<numberformat> and C<dateformat>.
 
 =item path (optional)
 
@@ -123,7 +128,7 @@ desired file extention
 
 =over
 
-=item preprocess ($rawvars, $escape)
+=item preprocess ($rawvars, $escape, $formatter_options)
 
 Preprocess for rendering. This is not an object method, it is a standalone
 subroutine.
@@ -298,9 +303,6 @@ use Template::Parser;
 use Template::Provider;
 use Scalar::Util qw(blessed reftype);
 
-use parent qw( Exporter );
-our @EXPORT_OK = qw( preprocess );
-
 my $logger = Log::Any->get_logger(category => 'LedgerSMB::Template');
 
 sub new {
@@ -316,39 +318,13 @@ sub new {
     $logger->trace('output_options, keys: ' . join '|', keys %{$args{output_options}});
 
     $self->{$_} = $args{$_}
-        for (qw( template format language debug locale
-                 format_options output_options ));
+        for (qw( template format_plugin language debug locale
+                 format_options output_options formatter_options ));
     $self->{user} = $args{user};
     $self->{include_path} = $args{path};
     if ($self->{language}){ # Language takes precedence over locale
         $self->{locale} = LedgerSMB::Locale->get_handle($self->{language});
     }
-
-    if (lc $self->{format} eq 'pdf') {
-        $self->{format} = 'LaTeX';
-        $self->{format_options}{filetype} = 'pdf';
-    } elsif (lc $self->{format} eq 'ps' or lc $self->{format} eq 'postscript') {
-        $self->{format} = 'LaTeX';
-        $self->{format_options}{filetype} = 'ps';
-    } elsif (lc $self->{format} eq 'xlsx'){
-        $self->{format} = 'XLSX';
-        $self->{format_options}{filetype} = 'xlsx';
-    } elsif (lc $self->{format} eq 'xls'){
-        $self->{format} = 'XLSX';
-        $self->{format_options}{filetype} = 'xls';
-    } elsif ($self->{format} =~ /edi$/i){
-        $self->{format_options}{extension} = lc $self->{format};
-        $self->{format_options}{filetype} = lc $self->{format};
-        $self->{format} = 'TXT';
-    } else {
-        $self->{format_options}{filetype} = lc $self->{format};
-    }
-
-    if ($self->{format} !~ /^\p{IsAlnum}+$/) {
-        die 'Invalid format';
-    }
-    use_module("LedgerSMB::Template::$self->{format}")
-       or die "Failed to load module $self->{format}";
 
     return $self;
 }
@@ -360,7 +336,7 @@ sub preprocess {
     #  and that the current code is the result of extensive
     #  profiling work.
     #
-    my ($rawvars, $escape) = @_;
+    my ($rawvars, $escape, $formatter_options) = @_;
     return undef unless defined $rawvars;
 
     if (not ref $rawvars) {
@@ -368,14 +344,14 @@ sub preprocess {
     }
 
     if (blessed $rawvars and $rawvars->can('to_output') ){
-        return $escape->( $rawvars->to_output );
+        return $escape->( $rawvars->to_output( %{ $formatter_options // {} } ) );
     }
 
     my $reftype = (reftype $rawvars) // ''; # '' is falsy, but works with EQ
     if ($reftype eq 'HASH') { # Hashes and objects
         return {
             map { $_ => (ref $rawvars->{$_})
-                      ? preprocess( $rawvars->{$_}, $escape )
+                      ? preprocess( $rawvars->{$_}, $escape, $formatter_options )
                       : $escape->($rawvars->{$_}) }
             grep { not /^(?:_|dbh$)/ }
             keys %{$rawvars}
@@ -384,7 +360,7 @@ sub preprocess {
 
     if ( $reftype eq 'ARRAY' ) {
         return [ map { (ref $_)
-                           ? preprocess( $_, $escape )
+                           ? preprocess( $_, $escape, $formatter_options )
                            : $escape->($_)
                  } @{$rawvars} ];
     }
@@ -432,6 +408,7 @@ sub get_template_args {
                       format => $extension,
                       language_code => $self->{language},
                       PARSER => $parser,
+                      _dbh => $self->{dbh}
                   }),
               # We need this provider in order to allow the templates to
               # depend on 'dynatable.*'
@@ -515,16 +492,21 @@ sub _render {
     my $cvars = shift // {};
     $vars->{USER} = $self->{user};
 
-    my $format = "LedgerSMB::Template::$self->{format}";
-    my $escape = $format->can('escape');
+    my $escape = $self->{format_plugin}->can('escape');
     my $cleanvars;
 
     if ($escape) {
         $cleanvars = {
-            %{ preprocess($vars, $escape) },
-              %{$self->{additional_vars} // {}},
-              %$cvars,
-              text => sub { return $escape->($self->_maketext(@_)); },
+            %{ preprocess($vars,
+                          sub { $self->{format_plugin}->escape(@_) },
+                          $self->{formatter_options},
+                   ) },
+            %{$self->{additional_vars} // {}},
+            %$cvars,
+            escape => sub { $self->{format_plugin}->escape(@_) },
+            text => sub {
+                return $self->{format_plugin}->escape($self->_maketext(@_));
+            },
         };
     }
     else {
@@ -532,6 +514,7 @@ sub _render {
             ( %$vars,
               %{$self->{additional_vars} // {}},
               %$cvars,
+              escape => sub { $_[0] },
               text => sub { return $self->_maketext(@_); },
             )
         };
@@ -544,8 +527,9 @@ sub _render {
     }
     my $output;
     my $config;
-    ($output, $config) = $format->can('setup')->($self, $cleanvars,
-                                                 \$self->{output});
+    ($output, $config) = $self->{format_plugin}->setup(
+        $self, $cleanvars, \$self->{output}
+        );
 
     my $arghash = $self->get_template_args(
         $config->{input_extension},
@@ -553,9 +537,8 @@ sub _render {
     my $template = Template->new($arghash)
         || die Template->error();
 
-    my $initialize_template = $format->can('initialize_template');
-    $initialize_template->($self, $config, $template)
-        if defined $initialize_template;
+    $self->{format_plugin}->initialize_template($self, $config, $template)
+        if $self->{format_plugin}->can('initialize_template');
 
     if (! $template->process(
               $self->get_template_source($config->{input_extension}),
@@ -566,8 +549,8 @@ sub _render {
         die "Template error: $err" if $err;
     }
 
-    $format->can('postprocess')->($self, $output, $config);
-    $self->{mimetype} = $format->can('mimetype')->($config);
+    $self->{format_plugin}->postprocess($self, $output, $config);
+    $self->{mimetype} = $self->{format_plugin}->mimetype($config);
     return;
 }
 

@@ -19,7 +19,7 @@ To run the '66' tests, the following works with the right `PostgreSQL`,
 ```
 
 Note that the '66' tests may be run at a much smaller granularity
-as documented in the [specific `README` file](66-cucumber/README.md).
+as documented in the [specific `README` file](../xt/66-cucumber/README.md).
 
 # Test summary
 
@@ -34,18 +34,6 @@ as documented in the [specific `README` file](66-cucumber/README.md).
      89: Clean up test LSMB database
 90 - 99: Packaging checks
 ```
-
-Special notes on specific test cases:
-
-## `43-dbtest.t`
-
-This runs defined test cases from `sql/modules/test/`.  If new
-scripts are added, they must be listed in this script as well.
-
-## `62-api.t`
-
-Runs on the database non-destructively, by rolling back commits.
-Uses request hashes defined in `xt/data/62-request-data`.
 
 # ENVIRONMENT VARIABLES
 

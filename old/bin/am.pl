@@ -35,11 +35,9 @@
 package lsmb_legacy;
 use LedgerSMB::AM;
 use LedgerSMB::Form;
-use LedgerSMB::User;
 use LedgerSMB::GL;
 use LedgerSMB::Legacy_Util;
-use LedgerSMB::Template::UI;
-use LedgerSMB::Sysconfig;
+use LedgerSMB::PGDate;
 
 # end of main
 
@@ -70,421 +68,30 @@ sub form_footer_buttons {
 
     if ( $form->{id} ) {
         $button{'save'} =
-          { ndx => 3, key => 'S', value => $locale->text('Save') };
+          { ndx => 3, value => $locale->text('Save') };
         $button{'save_as_new'} =
-          { ndx => 7, key => 'N', value => $locale->text('Save as new') };
+          { ndx => 7, value => $locale->text('Save as new') };
 
         if ( $form->{orphaned} ) {
             $button{'delete'} =
-              { ndx => 16, key => 'D', value => $locale->text('Delete') };
+              { ndx => 16, value => $locale->text('Delete') };
         }
     }
     else {
         $button{'save'} =
-          { ndx => 3, key => 'S', value => $locale->text('Save') };
+          { ndx => 3, value => $locale->text('Save') };
     }
 
     for ( sort { $button{$a}->{ndx} <=> $button{$b}->{ndx} } keys %button ) {
         push @{$buttons}, {
-            name => 'action',
+            name => '__action',
             value => $_,
-            accesskey => $button{$_}{key},
-            title => "$button{$_}{value} [Alt-$button{$_}{key}]",
+            title => $button{$_}{value},
             text => $button{$_}{value},
             };
     }
 
 }
-
-sub add_gifi {
-    $form->{title} = "Add";
-
-    # construct callback
-    $form->{callback} = "reports.pl?action=list_gifi";
-
-    $form->{coa} = 1;
-
-    my %hiddens;
-    my @buttons;
-    &gifi_header(\%hiddens);
-    &gifi_footer(\%hiddens, \@buttons);
-
-    my $template = LedgerSMB::Template::UI->new_UI;
-    LedgerSMB::Legacy_Util::render_psgi(
-        $form,
-        $template->render($form, 'am-gifi-form',
-                          {
-                              form => $form,
-                              buttons => \@buttons,
-                              hiddens => \%hiddens,
-                          }));
-}
-
-sub edit_gifi {
-
-    $form->{title} = "Edit";
-
-    AM->get_gifi( \%myconfig, \%$form );
-
-    $form->error( $locale->text('Account does not exist!') )
-      unless $form->{accno};
-
-    my %hiddens;
-    my @buttons;
-    &gifi_header(\%hiddens);
-    &gifi_footer(\%hiddens, \@buttons);
-
-    my $template = LedgerSMB::Template::UI->new_UI;
-    LedgerSMB::Legacy_Util::render_psgi(
-        $form,
-        $template->render($form, 'am-gifi-form',
-                          {
-                              form => $form,
-                              buttons => \@buttons,
-                              hiddens => \%hiddens,
-                          }));
-}
-
-sub gifi_header {
-    my $hiddens = shift;
-
-    my $title_msg="$form->{title} GIFI";
-    # $locale->text('Add GIFI')
-    # $locale->text('Edit GIFI')
-
-    $form->{title} = $locale->maketext($title_msg);
-
-    for (qw(accno description)) { $form->{$_} = $form->quote( $form->{$_} ) }
-
-    $hiddens->{id} = $form->{accno};
-    $hiddens->{type} = 'gifi';
-
-}
-
-sub gifi_footer {
-    my ($hiddens, $buttons) = @_;
-
-    $hiddens->{$_} = $form->{$_} foreach qw(callback path login sessionid);
-
-    # type=submit $locale->text('Save')
-    # type=submit $locale->text('Copy to COA')
-    # type=submit $locale->text('Delete')
-
-    my %button = ();
-
-    $button{'save'} = { ndx => 3, key => 'S', value => $locale->text('Save') };
-
-    if ( $form->{accno} ) {
-        if ( $form->{orphaned} ) {
-            $button{'delete'} =
-              { ndx => 16, key => 'D', value => $locale->text('Delete') };
-        }
-    }
-
-    for ( sort { $button{$a}->{ndx} <=> $button{$b}->{ndx} } keys %button ) {
-        push @{$buttons}, {
-            name => 'action',
-            value => $_,
-            accesskey => $button{$_}{key},
-            title => "$button{$_}{value} [Alt-$button{$_}{key}]",
-            text => $button{$_}{value},
-            };
-    }
-
-}
-
-sub save_gifi {
-
-    $form->isblank( "accno", $locale->text('GIFI missing!') );
-    AM->save_gifi( \%myconfig, \%$form );
-    $form->redirect( $locale->text('GIFI saved!') );
-
-}
-
-sub delete_gifi {
-
-    AM->delete_gifi( \%myconfig, \%$form );
-    $form->redirect( $locale->text('GIFI deleted!') );
-
-}
-
-sub add_business {
-
-    $form->{title} = "Add";
-
-    $form->{callback} = "$form->{script}?action=add_business"
-      unless $form->{callback};
-
-    my %hiddens;
-    my @buttons;
-    my $checked = &business_header(\%hiddens);
-    &form_footer_buttons(\%hiddens, \@buttons);
-
-    my $template = LedgerSMB::Template::UI->new_UI;
-    LedgerSMB::Legacy_Util::render_psgi(
-        $form,
-        $template->render($form, 'am-business-form',
-                          {
-                              form => $form,
-                              buttons => \@buttons,
-                              hiddens => \%hiddens,
-                          }));
-}
-
-sub edit_business {
-
-    $form->{title} = "Edit";
-
-    AM->get_business( \%myconfig, \%$form );
-
-    $form->{orphaned} = 1;
-
-    my %hiddens;
-    my @buttons;
-    my $checked = &business_header(\%hiddens);
-    &form_footer_buttons(\%hiddens, \@buttons);
-
-    my $template = LedgerSMB::Template::UI->new_UI;
-    LedgerSMB::Legacy_Util::render_psgi(
-        $form,
-        $template->render($form, 'am-business-form',
-                          {
-                              form => $form,
-                              buttons => \@buttons,
-                              hiddens => \%hiddens,
-                          }));
-}
-
-sub business_header {
-    my $hiddens = shift;
-
-    my $title_msg="$form->{title} Business";
-    # $locale->text('Add Business')
-    # $locale->text('Edit Business')
-    $form->{title} = $locale->maketext($title_msg);
-
-    $form->{description} = $form->quote( $form->{description} );
-    $form->{discount} =
-      $form->format_amount( \%myconfig, $form->{discount} * 100 );
-
-    $hiddens->{id} = $form->{id};
-    $hiddens->{type} = 'business';
-
-}
-
-sub save_business {
-
-    $form->isblank( "description", $locale->text('Description missing!') );
-    AM->save_business( \%myconfig, \%$form );
-    $form->redirect( $locale->text('Business saved!') );
-
-}
-
-sub delete_business {
-
-    AM->delete_business( \%myconfig, \%$form );
-    $form->redirect( $locale->text('Business deleted!') );
-
-}
-
-sub add_sic {
-
-    $form->{title} = "Add";
-
-    $form->{callback} = "$form->{script}?action=add_sic"
-      unless $form->{callback};
-
-    my %hiddens;
-    my @buttons;
-    my $checked = &sic_header(\%hiddens);
-    &form_footer_buttons(\%hiddens, \@buttons);
-
-    my $template = LedgerSMB::Template::UI->new_UI;
-    LedgerSMB::Legacy_Util::render_psgi(
-        $form,
-        $template->render($form, 'am-sic-form',
-                          {
-                              form => $form,
-                              heading => $checked,
-                              buttons => \@buttons,
-                              hiddens => \%hiddens,
-                          }));
-}
-
-sub edit_sic {
-
-    $form->{title} = "Edit";
-
-    $form->{code} =~ s/\\'/'/g; # ' # kludge the single quote for syntax highlighting
-    $form->{code} =~ s/\\\\/\\/g;
-
-    AM->get_sic( \%myconfig, \%$form );
-    $form->{id} = $form->{code};
-    $form->{orphaned} = 1;
-
-    my %hiddens;
-    my @buttons;
-    my $checked = &sic_header(\%hiddens);
-    &form_footer_buttons(\%hiddens, \@buttons);
-
-    my $template = LedgerSMB::Template::UI->new_UI;
-    LedgerSMB::Legacy_Util::render_psgi(
-        $form,
-        $template->render($form, 'am-sic-form',
-                          {
-                              form => $form,
-                              heading => $checked,
-                              buttons => \@buttons,
-                              hiddens => \%hiddens,
-                          }));
-}
-
-sub sic_header {
-    my $hiddens = shift;
-
-    my $title_msg="$form->{title} SIC";
-    # $locale->text('Add SIC')
-    # $locale->text('Edit SIC')
-    $form->{title} = $locale->maketext($title_msg);
-
-    for (qw(code description)) { $form->{$_} = $form->quote( $form->{$_} ) }
-
-    $checked = ( $form->{sictype} eq 'H' ) ? "checked" : "";
-
-    $hiddens->{type} = 'sic';
-    $hiddens->{id} = $form->{code};
-
-    $checked;
-}
-
-sub save_sic {
-
-    $form->isblank( "code",        $locale->text('Code missing!') );
-    $form->isblank( "description", $locale->text('Description missing!') );
-    AM->save_sic( \%myconfig, \%$form );
-    $form->redirect( $locale->text('SIC saved!') );
-
-}
-
-sub delete_sic {
-
-    AM->delete_sic( \%myconfig, \%$form );
-    $form->redirect( $locale->text('SIC deleted!') );
-
-}
-
-sub add_language {
-
-    $form->{title} = "Add";
-
-    $form->{callback} = "$form->{script}?action=add_language"
-      unless $form->{callback};
-
-    my %hiddens;
-    my @buttons;
-    &language_header(\%hiddens);
-    &form_footer_buttons(\%hiddens, \@buttons);
-
-    my $template = LedgerSMB::Template::UI->new_UI;
-    LedgerSMB::Legacy_Util::render_psgi(
-        $form,
-        $template->render($form, 'am-language-form',
-                          {
-                              form => $form,
-                              buttons => \@buttons,
-                              hiddens => \%hiddens,
-                          }));
-}
-
-
-sub edit_language {
-
-    $form->{title} = "Edit";
-
-    $form->{code} =~ s/\\'/'/g; #' # kludge the single quote for syntax highlighting
-    $form->{code} =~ s/\\\\/\\/g;
-
-    AM->get_language( \%myconfig, \%$form );
-    $form->{id} = $form->{code};
-    $form->{orphaned} = 1;
-
-    my %hiddens;
-    my @buttons;
-    &language_header(\%hiddens);
-    &form_footer_buttons(\%hiddens, \@buttons);
-
-    my $template = LedgerSMB::Template::UI->new_UI;
-    LedgerSMB::Legacy_Util::render_psgi(
-        $form,
-        $template->render($form, 'am-language-form',
-                          {
-                              form => $form,
-                              buttons => \@buttons,
-                              hiddens => \%hiddens,
-                          }));
-}
-
-sub language_header {
-    my $hiddens = shift;
-
-    my $title_msg="$form->{title} Language";
-    # $locale->text('Add Language')
-    # $locale->text('Edit Language')
-    $form->{title} = $locale->maketext($title_msg);
-
-    for (qw(code description)) { $form->{$_} = $form->quote( $form->{$_} ) }
-
-    $hiddens->{type} = 'language';
-    $hiddens->{id} = $form->{code};
-}
-
-sub save_language {
-
-    $form->isblank( "code",        $locale->text('Code missing!') );
-    $form->isblank( "description", $locale->text('Description missing!') );
-
-    $form->{code} =~ s/(\.\.|\*)//g;
-
-    AM->save_language( \%myconfig, \%$form );
-
-    $form->redirect( $locale->text('Language saved!') );
-
-}
-
-sub delete_language {
-
-    $form->{title} = $locale->text('Confirm!');
-    for (qw(action nextsub)) { delete $form->{$_} }
-
-    my %hiddens;
-    $hiddens{$_} = $form->{$_} foreach keys %$form;
-    my @buttons = ({
-        name => 'action',
-        value => 'yes_delete_language',
-        text => $locale->text('Delete Language'),
-        });
-    my $template = LedgerSMB::Template::UI->new_UI;
-    LedgerSMB::Legacy_Util::render_psgi(
-        $form,
-        $template->render($form, 'form-confirmation',
-                          {
-                              form => $form,
-                              buttons => \@buttons,
-                              hiddens => \%hiddens,
-                              query => $locale->text(
-                                  'Deleting a language will also delete the templates for the language [_1]',
-                                  $form->{id})
-                          }));
-}
-
-sub yes_delete_language {
-
-    AM->delete_language( \%myconfig, \%$form );
-
-    $form->redirect( $locale->text('Language deleted!') );
-
-}
-
 
 sub taxes {
 
@@ -522,12 +129,13 @@ sub display_taxes {
 
     my @rows;
     my $sametax = '';
+    $form->{_setting_decimal_places} //= $form->get_setting('decimal_places');
     for ( split( / /, $form->{taxaccounts} ) ) {
 
         ( $null, $i ) = split /_/, $_;
 
         $form->{"taxrate_$i"} =
-          $form->format_amount( \%myconfig, $form->{"taxrate_$i"}, LedgerSMB::Setting->new(%$form)->get('decimal_places'),'0');
+          $form->format_amount( \%myconfig, $form->{"taxrate_$i"});
 
         $hiddens{"taxdescription_$i"} = $form->{"taxdescription_$i"};
         $hiddens{"old_validto_$i"} = $form->{"old_validto_$i"};
@@ -560,7 +168,7 @@ sub display_taxes {
         $hiddens{$taxmodule};
     }
 
-    my $template = LedgerSMB::Template::UI->new_UI;
+    my $template = $form->{_wire}->get('ui');
     LedgerSMB::Legacy_Util::render_psgi(
         $form,
         $template->render($form, 'am-taxes',
@@ -653,85 +261,6 @@ sub save_taxes {
 
 }
 
-sub add_warehouse {
-
-    $form->{title} = "Add";
-
-    $form->{callback} = "$form->{script}?action=add_warehouse"
-      unless $form->{callback};
-
-    my %hiddens;
-    my @buttons;
-    my $rows = &warehouse_header(\%hiddens);
-    &form_footer_buttons(\%hiddens, \@buttons);
-
-    my $template = LedgerSMB::Template::UI->new_UI;
-    LedgerSMB::Legacy_Util::render_psgi(
-        $form,
-        $template->render($form, 'am-warehouse-form',
-                          {
-                              form => $form,
-                              row_count => $rows,
-                              buttons => \@buttons,
-                              hiddens => \%hiddens,
-                          }));
-}
-
-sub edit_warehouse {
-
-    $form->{title} = "Edit";
-
-    AM->get_warehouse( \%myconfig, \%$form );
-
-    my %hiddens;
-    my @buttons;
-    my $rows = &warehouse_header(\%hiddens);
-    &form_footer_buttons(\%hiddens, \@buttons);
-
-    my $template = LedgerSMB::Template::UI->new_UI;
-    LedgerSMB::Legacy_Util::render_psgi(
-        $form,
-        $template->render($form, 'am-warehouse-form',
-                          {
-                              form => $form,
-                              row_count => $rows,
-                              buttons => \@buttons,
-                              hiddens => \%hiddens,
-                          }));
-}
-
-sub warehouse_header {
-    my $hiddens = shift;
-
-    my $title_msg="$form->{title} Warehouse";
-    # $locale->text('Add Warehouse')
-    # $locale->text('Edit Warehouse')
-    $form->{title} = $locale->maketext($title_msg);
-
-    $form->{description} = $form->quote( $form->{description} );
-
-    $hiddens->{id} = $form->{id};
-    $hiddens->{type} = 'warehouse';
-
-    my $rows = $form->numtextrows( $form->{description}, 60 );
-    $rows;
-}
-
-sub save_warehouse {
-
-    $form->isblank( "description", $locale->text('Description missing!') );
-    AM->save_warehouse( \%myconfig, \%$form );
-
-    $form->redirect( $locale->text( 'Warehouse saved!'));
-}
-
-sub delete_warehouse {
-
-    AM->delete_warehouse( \%myconfig, \%$form );
-
-    $form->redirect( $locale->text( 'Warehouse deleted!'));
-}
-
 sub recurring_transactions {
 
     # $locale->text('Day')
@@ -753,7 +282,7 @@ sub recurring_transactions {
 
     AM->recurring_transactions( \%myconfig, \%$form );
 
-    $href = "$form->{script}?action=recurring_transactions";
+    $href = "$form->{script}?__action=recurring_transactions";
     for (qw(direction oldsort path login sessionid)) {
         $href .= qq|&$_=$form->{$_}|;
     }
@@ -799,6 +328,7 @@ sub recurring_transactions {
     my @transactions;
     my $j;
     my $k;
+    $form->{_setting_decimal_places} //= $form->get_setting('decimal_places');
     foreach my $transaction ( sort keys %{ $form->{transactions} } ) {
         my $transaction_count = scalar( @{ $form->{transactions}{$transaction} } );
         push @transactions, {type => $transaction,
@@ -845,7 +375,7 @@ sub recurring_transactions {
               : $locale->text('Next Number');
             $column_data{reference} = {
                 text => $reference,
-                href => qq|am.pl?action=edit_recurring&id=$ref->{id}&vc=$ref->{vc}&module=$ref->{module}&transaction=$ref->{transaction}&recurringnextdate=$ref->{nextdate}|,
+                href => qq|am.pl?__action=edit_recurring&id=$ref->{id}&vc=$ref->{vc}&module=$ref->{module}&transaction=$ref->{transaction}&recurringnextdate=$ref->{nextdate}|,
                 };
 
             my $module = "$ref->{module}.pl";
@@ -859,14 +389,14 @@ sub recurring_transactions {
 
             $column_data{id} = {
                 text => $ref->{id},
-                href => qq|$module?action=edit&id=$ref->{id}&vc=$ref->{vc}&type=$type&readonly=1|,
+                href => qq|$module?__action=edit&id=$ref->{id}&vc=$ref->{vc}&type=$type|,
                 };
 
             $column_data{repeat} = $repeat;
             $column_data{howmany} =
                 $form->format_amount( \%myconfig, $ref->{howmany} );
             $column_data{amount} =
-                $form->format_amount( \%myconfig, $ref->{amount}, LedgerSMB::Setting->new(%$form)->get('decimal_places') );
+                $form->format_amount( \%myconfig, $ref->{amount}, $form->{_setting_decimal_places} );
 
             my @temp_split;
             my @f = split /:/, $ref->{recurringemail};
@@ -900,14 +430,14 @@ sub recurring_transactions {
 
     my @buttons;
     push @buttons, {
-        name => 'action',
+        name => '__action',
         value => 'process_transactions',
         text => $locale->text('Process Transactions'),
         type => 'submit',
         class => 'submit',
     };
 
-    my $template = LedgerSMB::Template::UI->new_UI;
+    my $template = $form->{_wire}->get('ui');
     LedgerSMB::Legacy_Util::render_psgi(
         $form,
         $template->render($form, 'am-list-recurring',
@@ -937,7 +467,7 @@ sub edit_recurring {
         oe => 'prepare_order',
     );
 
-    $form->{callback} = "$form->{script}?action=recurring_transactions";
+    $form->{callback} = "$form->{script}?__action=recurring_transactions";
 
     $form->{type} = "transaction";
 
@@ -971,12 +501,13 @@ sub edit_recurring {
         &{ $prepare{ $form->{module} } };
     }
 
-    $form->{selectformat} = qq|<option value="html">html\n|;
-    if ( LedgerSMB::Sysconfig::latex() ) {
-        $form->{selectformat} .= qq|
-            <option value="postscript">| . $locale->text('Postscript') . qq|
-        <option value="pdf">| . $locale->text('PDF');
-    }
+    $form->{selectformat} =
+        join('',
+             map {
+                 my $val = lc $_;
+                 qq|<option value="$val">$_|
+             } $form->{_wire}->get( 'output_formatter' )->get_formats
+        );
 
     &schedule;
 
@@ -987,17 +518,11 @@ sub process_transactions {
     my $pt = Form->new;
     for ( keys %$form ) { $pt->{$_} = $form->{$_} }
 
-    my $defaultprinter;
-    while ( my ( $key, $value ) = each LedgerSMB::Sysconfig::printer()->%* ) {
-        if ( $value =~ /lpr/ ) {
-            $defaultprinter = $key;
-            last;
-        }
-    }
-
+    my $defaultprinter = $form->{_wire}->get( 'printers' )->fallback;
     $myconfig{vclimit} = 0;
     %f = &formnames;
 
+    $form->{_setting_decimal_places} //= $form->get_setting('decimal_places');
     for ( my $i = 1 ; $i <= $pt->{lastndx} ; $i++ ) {
         if ( $pt->{"ndx_$i"} ) {
             $id = $pt->{"ndx_$i"};
@@ -1016,8 +541,8 @@ sub process_transactions {
             # forward to removing this code. --CT
             for ( keys %$form ) { delete $form->{$_}; }
             for (qw(header dbversion company dbh login path sessionid _auth
-                    stylesheet timeout id _locale)
-            ) {
+                    stylesheet timeout id _locale _wire _req _user)
+                ) {
                 $form->{$_} = $pt->{$_};
             }
             # post, print, email
@@ -1064,12 +589,12 @@ sub process_transactions {
                         for ( 1 .. $form->{rowcount} - 1 ) {
                             $form->{"amount_$_"} =
                               $form->format_amount( \%myconfig,
-                                $form->{"amount_$_"}, LedgerSMB::Setting->new(%$form)->get('decimal_places') );
+                                $form->{"amount_$_"}, $form->{_setting_decimal_places} );
                         }
                         for ( 1 .. $form->{paidaccounts} ) {
                             $form->{"paid_$_"} =
                               $form->format_amount( \%myconfig,
-                                $form->{"paid_$_"}, LedgerSMB::Setting->new(%$form)->get('decimal_places') );
+                                $form->{"paid_$_"}, $form->{_setting_decimal_places} );
                         }
 
                     }
@@ -1077,7 +602,7 @@ sub process_transactions {
                     delete $form->{"$form->{ARAP}_links"};
                     for (qw(acc_trans invoice_details)) { delete $form->{$_} }
                     for (
-                        qw(department employee language month partsgroup project years)
+                        qw(employee language month partsgroup project years)
                       )
                     {
                         delete $form->{"all_$_"};
@@ -1093,6 +618,8 @@ sub process_transactions {
                     $form->{duedate} =
                       $form->add_date( \%myconfig, $form->{transdate},
                         $pt->{overdue}, "days" );
+                    # set create date
+                    $form->{crdate} = LedgerSMB::PGDate->now->to_output();
 
                     if ( $pt->{payment} ) {
 
@@ -1113,9 +640,14 @@ sub process_transactions {
                         $form->{paidaccounts} = -1;
                     }
 
-                    for (qw(id recurring intnotes printed emailed)) {
+                    for (qw(id workflow_id recurring intnotes)) {
                         delete $form->{$_};
                     }
+                    my $wf = $form->{_conn}->workflows->create(
+                        'AR/AP',
+                        { transdate => $form->{transdate} }
+                        );
+                    $form->{workflow_id} = $wf->id;
 
                     ( $form->{ $form->{ARAP} } ) = split /--/,
                       $form->{ $form->{ARAP} };
@@ -1127,11 +659,6 @@ sub process_transactions {
                     for (qw(invnumber reference)) {
                         $form->{$_} = $form->unquote( $form->{$_} );
                     }
-                    # Make sure the transaction isn't posted as a draft
-                    $form->{approved} = 1;
-                    # Make sure the posting procedure doesn't override
-                    # the 'approved' status
-                    $form->{separate_duties} = 0;
 
                     if ( $pt->{invoice} ) {
                         if ( $pt->{arid} ) {
@@ -1180,89 +707,102 @@ sub process_transactions {
                     }
                     $form->info( " ..... " . $locale->text('done') );
 
+                    # posting the transaction above changed the workflow
+                    # as stored on disk; update the workflow stored in
+                    # memory. Also, we can't use the "post_and_approve"
+                    # action because that's only available when
+                    # "separate_duties" *isn't* enabled, so execute 2 actions
+                    # which are guaranteed to exist, separately
+                    $wf = $form->{_conn}->workflows->fetch('AR/AP', $form->{workflow_id} );
+                    # Make sure the transaction isn't posted as a draft
+                    $wf->execute_action( 'post' )
+                        if $wf->state eq 'INITIAL';
+                    $wf->execute_action( 'approve' )
+                        unless $wf->state eq 'POSTED';
+
                     # print form
-                    if ( LedgerSMB::Sysconfig::latex() && $ok ) {
+                    if ( $ok ) {
+                        # this needs a PDF/Postscript output plugin
+                        # to be in place. If it's not, the print will fail,
+                        # which seems the appropriate way to inform the
+                        # user since they already configured the recurring
+                        # print...
                         $ok = &print_recurring( \%$pt, $defaultprinter );
                     }
 
                     &email_recurring( \%$pt ) if $ok;
 
                 }
-                else {
+                # Recurring orders are broken (see #5295)
+                # else {
 
-                    # order
-                    $form->{script} = "oe.pl";
-                    $form->{module} = "oe";
+                #     # order
+                #     $form->{script} = "oe.pl";
+                #     $form->{module} = "oe";
 
-                    $ordnumber = "ordnumber";
-                    if ( $pt->{customer_id} ) {
-                        $form->{vc}   = "customer";
-                        $form->{type} = "sales_order";
-                        $ordfld       = "sonumber";
-                        $flabel       = $locale->text('Sales Order');
-                    }
-                    else {
-                        $form->{vc}   = "vendor";
-                        $form->{type} = "purchase_order";
-                        $ordfld       = "ponumber";
-                        $flabel       = $locale->text('Purchase Order');
-                    }
-                    require "old/bin/$form->{script}";
+                #     $ordnumber = "ordnumber";
+                #     if ( $pt->{customer_id} ) {
+                #         $form->{vc}   = "customer";
+                #         $form->{type} = "sales_order";
+                #         $ordfld       = "sonumber";
+                #         $flabel       = $locale->text('Sales Order');
+                #     }
+                #     else {
+                #         $form->{vc}   = "vendor";
+                #         $form->{type} = "purchase_order";
+                #         $ordfld       = "ponumber";
+                #         $flabel       = $locale->text('Purchase Order');
+                #     }
+                #     require "old/bin/$form->{script}";
 
-                    &order_links;
-                    &prepare_order;
+                #     &order_links;
+                #     &prepare_order;
 
-                    for ( keys %$form ) {
-                        $form->{$_} = $form->unquote( $form->{$_} );
-                    }
+                #     for ( keys %$form ) {
+                #         $form->{$_} = $form->unquote( $form->{$_} );
+                #     }
 
-                    $form->{$ordnumber} = $pt->{reference};
-                    $form->{transdate} = $pt->{nextdate};
+                #     $form->{$ordnumber} = $pt->{reference};
+                #     $form->{transdate} = $pt->{nextdate};
 
-                    # calculate reqdate
-                    $form->{reqdate} =
-                      $form->add_date( \%myconfig, $form->{transdate},
-                        $pt->{req}, "days" )
-                      if $form->{reqdate};
+                #     # calculate reqdate
+                #     $form->{reqdate} =
+                #       $form->add_date( \%myconfig, $form->{transdate},
+                #         $pt->{req}, "days" )
+                #       if $form->{reqdate};
 
-                    for (qw(id recurring intnotes printed emailed)) {
-                        delete $form->{$_};
-                    }
-                    for ( 1 .. $form->{rowcount} ) {
-                        delete $form->{"orderitems_id_$_"};
-                    }
+                #     for (qw(id recurring intnotes)) {
+                #         delete $form->{$_};
+                #     }
+                #     for ( 1 .. $form->{rowcount} ) {
+                #         delete $form->{"orderitems_id_$_"};
+                #     }
 
-                    $form->{$ordnumber} =
-                      $form->update_defaults( \%myconfig, "$ordfld" )
-                      unless $form->{$ordnumber};
-                    $form->{reference} = $form->{$ordnumber};
-                    for ( "$ordnumber", "reference" ) {
-                        $form->{$_} = $form->unquote( $form->{$_} );
-                    }
-                    $form->{closed} = 0;
+                #     $form->{$ordnumber} =
+                #       $form->update_defaults( \%myconfig, "$ordfld" )
+                #       unless $form->{$ordnumber};
+                #     $form->{reference} = $form->{$ordnumber};
+                #     for ( "$ordnumber", "reference" ) {
+                #         $form->{$_} = $form->unquote( $form->{$_} );
+                #     }
+                #     $form->{closed} = 0;
 
-                    $form->info(
-                        "\n"
-                          . $locale->text(
-                            'Saving [_1] [_2]',
-                            $flabel, $form->{$ordnumber}
-                          )
-                    );
-                    if ( $ok = OE->save( \%myconfig, \%$form ) ) {
-                        $form->info( " ..... " . $locale->text('done') );
-                    }
-                    else {
-                        $form->info( " ..... " . $locale->text('failed') );
-                    }
+                #     $form->info(
+                #         "\n"
+                #           . $locale->text( 'Saving [_1] [_2]',
+                #             $flabel, $form->{$ordnumber}
+                #           )
+                #     );
+                #     if ( $ok = OE->save( \%myconfig, \%$form ) ) {
+                #         $form->info( " ..... " . $locale->text('done') );
+                #     }
+                #     else {
+                #         $form->info( " ..... " . $locale->text('failed') );
+                #     }
 
-                    # print form
-                    if ( LedgerSMB::Sysconfig::latex() && $ok ) {
-                        &print_recurring( \%$pt, $defaultprinter );
-                    }
+                #     &email_recurring( \%$pt );
 
-                    &email_recurring( \%$pt );
-
-                }
+                # }
 
             }
             else {
@@ -1297,7 +837,11 @@ sub process_transactions {
 
                 $form->{rowcount} = $j;
 
-                for (qw(id recurring)) { delete $form->{$_} }
+                for (qw(id workflow_id recurring)) { delete $form->{$_} }
+
+                my $wf = $form->{_conn}->workflows->create(
+                    'GL', { transdate => $form->{transdate} });
+                $form->{workflow_id} = $wf->id;
                 $form->info(
                     "\n"
                       . $locale->text(
@@ -1306,8 +850,22 @@ sub process_transactions {
                       )
                 );
                 $ok = GL->post_transaction( \%myconfig, \%$form, $locale );
-                $form->info( " ..... " . $locale->text('done') );
 
+                # posting the transaction above changed the workflow
+                # as stored on disk; update the workflow stored in
+                # memory. Also, we can't use the "post_and_approve"
+                # action because that's only available when
+                # "separate_duties" *isn't* enabled, so execute 2 actions
+                # which are guaranteed to exist, separately
+                $wf = $form->{_conn}->workflows->fetch(
+                    'GL',
+                    $form->{workflow_id} );
+                # Make sure the transaction isn't posted as a draft
+                $wf->execute_action( 'post' )
+                    if $wf->state eq 'INITIAL';
+                $wf->execute_action( 'approve' )
+                    unless $wf->state eq 'POSTED';
+                $form->info( " ..... " . $locale->text('done') );
             }
 
             AM->update_recurring( \%myconfig, \%$pt, $id ) if $ok;
@@ -1315,7 +873,7 @@ sub process_transactions {
         }
     }
 
-    $form->{callback} = "am.pl?action=recurring_transactions&header=1";
+    $form->{callback} = "am.pl?__action=recurring_transactions&header=1";
     $form->{header} = 1;
     $form->redirect;
 
@@ -1345,14 +903,13 @@ sub print_recurring {
         @f = split /:/, $pt->{recurringprint};
         for ( $j = 0 ; $j <= $#f ; $j += 3 ) {
             $media = $f[ $j + 2 ];
-            $media ||= $myconfig->{printer}
-              if ${LedgerSMB::Sysconfig::printer}{ $myconfig->{printer} };
+            $media ||= $myconfig->{printer};
             $media ||= $defaultprinter;
 
 
 
             $form->info( "\n" . $f{ $f[$j] } );
-            $form->{callback} = "$form->{script}?action=reprint&module=$form->{module}&type=$form->{type}&id=$form->{id}&formname=$f[$j]&format=$f[$j+1]&media=$media&vc=$form->{vc}&ARAP=$form->{ARAP}";
+            $form->{callback} = "$form->{script}?__action=reprint&module=$form->{module}&type=$form->{type}&id=$form->{id}&formname=$f[$j]&format=$f[$j+1]&media=$media&vc=$form->{vc}&ARAP=$form->{ARAP}";
             $ok = !( $form->_redirect() );
 
             if ($ok) {
@@ -1404,7 +961,7 @@ sub email_recurring {
 
             $message = $form->escape( $pt->{message}, 1 );
 
-            $form->{callback} = "$form->{script}?action=reprint&module=$form->{module}&type=$form->{type}&id=$form->{id}&formname=$f[$j]&format=$f[$j+1]&media=email&vc=$form->{vc}&ARAP=$form->{ARAP}&message=$message&immediate=1&header=1";
+            $form->{callback} = "$form->{script}?__action=reprint&module=$form->{module}&type=$form->{type}&id=$form->{id}&formname=$f[$j]&format=$f[$j+1]&media=email&vc=$form->{vc}&ARAP=$form->{ARAP}&message=$message&immediate=1&header=1";
             $ok = !( $form->_redirect() );
 
             if ($ok) {

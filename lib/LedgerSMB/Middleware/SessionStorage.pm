@@ -28,14 +28,16 @@ use warnings;
 use parent qw ( Plack::Middleware );
 
 use Cookie::Baker;
+use HTTP::Status qw( HTTP_BAD_REQUEST );
 use Plack::Request;
 use Plack::Util;
 use Plack::Util::Accessor
-    qw( domain cookie cookie_path duration inner_serialize );
+    qw( cookie cookie_path domain duration inner_serialize secret store force_create );
 use Session::Storage::Secure;
+use String::Random;
+use URI;
 
 use LedgerSMB::PSGI::Util;
-use LedgerSMB::Sysconfig;
 
 =head1 METHODS
 
@@ -43,60 +45,38 @@ use LedgerSMB::Sysconfig;
 
 Implements C<Plack::Component->prepare_app()>.
 
+=cut
+
+sub prepare_app {
+    my $self = shift;
+    my $store = Session::Storage::Secure->new(
+        secret_key => $self->secret,
+        default_duration => 24*60*60*90, # 90 days
+        );
+    $self->store( $store );
+}
+
 =head2 $self->call($env)
 
 Implements C<Plack::Middleware->call()>.
 
-=head2 Internal routines to go around samesite bug in some browsers
-
-=head3 _isSameSiteNoneIncompatible
-
-Check is browser is incompatible with samesite cookie attribute
-
-=head3 _hasWebKitSameSiteBug
-
-Check if the browser has the samesite cookie attribute bug
-
-=head3 _dropsUnrecognizedSameSiteCookies
-
-Check if dropping samesite=strict required
-
-=head3 _isIosVersion
-
-Check if the browser is running on iOS
-
-=head3 _isMacosxVersion
-
-Check if the browser is runnig on MACOS
-
-=head3 _isSafari
-
-Check if the browser is Safari
-
-=head3 _isMacEmbeddedBrowser
-
-Check if the browser is an embedded MACOS browser
-
-=head3 _isChromiumBased
-
-Check if the browser is Chrome
-
-=head3 _isChromiumVersionAtLeast
-
-Check minimum Chrome version
-
-
 =cut
 
-# this variable exists to deal with the code in old/
-our $store;
+sub _prefix_path {
+    my ($self, $env) = @_;
+    my $token = $env->{'lsmb.session'}->{company_path}  ?
+        $env->{'lsmb.session'}->{company_path} . '/' : '';
 
-sub prepare_app {
-    # delay initializing $store to allow LedgerSMB::Sysconfig to be loaded
-    $store = Session::Storage::Secure->new(
-        secret_key => LedgerSMB::Sysconfig::cookie_secret,
-        default_duration => 24*60*60*90, # 90 days
-        );
+    if ($self->cookie_path) {
+        return $self->cookie_path . $token;
+    }
+    else {
+        my $path  = ($env->{SCRIPT_NAME} =~ s|[^/]*$||r);
+        $path .= $token
+            if $path !~ m/$token/;
+
+        return $path;
+    }
 }
 
 sub call {
@@ -104,32 +84,44 @@ sub call {
     my ($env) = @_;
     my $req = Plack::Request->new($env);
 
-    my $cookie      = $req->cookies->{$self->cookie};
-    my $session     = $store->decode($cookie);
+    my $referer            = $req->headers->header( 'referer' );
+    my $referer_uri        = $referer ? URI->new( $referer ) : undef;
+    my $referer_user       = $referer_uri ? $referer_uri->query_param( 'user' ) : '';
+    my $cookie             = $req->cookies->{$self->cookie};
+    my $session            = (not $self->force_create) ? $self->store->decode($cookie) : undef;
+    my $session_user       = $session ? $session->{login} : '';
 
-    my $secure = defined($env->{HTTPS}) && $env->{HTTPS} eq 'ON';
-    my $path =
-        $self->cookie_path //
-        LedgerSMB::PSGI::Util::cookie_path($env->{SCRIPT_NAME});
+    if ($referer_user
+        and $session_user
+        and $session_user ne $referer_user) {
+        return [ HTTP_BAD_REQUEST,
+                 [ 'Content-Type' => 'text/plain' ],
+                 [ "Browser expects session for user '$referer_user', ",
+                   "but session for user '$session_user' found" ]
+            ];
+    }
+
+    $session->{csrf_token} //= String::Random->new->randpattern('.' x 23);
     $env->{'lsmb.session'} = $session;
+    my $secure = defined($env->{HTTPS}) && $env->{HTTPS} eq 'ON';
     return Plack::Util::response_cb(
         $self->app->($env), sub {
             my $res = shift;
 
             if (! $self->inner_serialize) {
+                my $path = $self->_prefix_path( $env );
                 my $_cookie_attributes = {
-                    value    => $store->encode(
+                    value    => $self->store->encode(
                         $env->{'lsmb.session'},
                         time + ($env->{'lsmb.session.duration'}
                                 // $self->duration)),
                     httponly => 1,
                     path     => $path,
                     secure   => $secure,
+                    samesite => 'Strict',
                     expires  => ($env->{'lsmb.session.expire'}
                                     ? '1' : undef),
                 };
-                $_cookie_attributes->{samesite} = 'strict'
-                    if !_isSameSiteNoneIncompatible($env->{'HTTP_USER_AGENT'});
                 Plack::Util::header_push(
                     $res->[1], 'Set-Cookie',
                     bake_cookie(
@@ -140,76 +132,10 @@ sub call {
         });
 }
 
-# Classes of browsers known to be incompatible with samesite cookie attribute.
-
-sub _isSameSiteNoneIncompatible {
-    my $useragent = shift;
-    return _hasWebKitSameSiteBug($useragent)
-        || _dropsUnrecognizedSameSiteCookies($useragent);
-}
-
-sub _hasWebKitSameSiteBug {
-    my $useragent = shift;
-    return _isIosVersion($useragent, { major => 12 })
-        || (    _isMacosxVersion($useragent, { major => 10, minor => 14 })
-            && (_isSafari($useragent) || _isMacEmbeddedBrowser($useragent)));
-}
-
-sub _dropsUnrecognizedSameSiteCookies {
-    my $useragent = shift;
-    return  _isChromiumBased($useragent)
-        &&  _isChromiumVersionAtLeast($useragent, { major => 51 })
-        && !_isChromiumVersionAtLeast($useragent, { major => 67 });
-}
-
-# Regex parsing of User-Agent
-
-sub _isIosVersion{
-    my ($useragent,$version) = @_;
-    # Extract digits from first capturing group.
-    return $useragent =~ /\(iP.+; CPU .*OS (\d+)[_\d]*.*\) AppleWebKit\//
-        ? $1 eq "$version->{major}"
-        : 0;
-}
-
-sub _isMacosxVersion{
-    my ($useragent,$version) = @_;
-    # Extract digits from first and second capturing groups.
-    return $useragent =~ /\(Macintosh;.*Mac OS X (\d+)_(\d+)[_\d]*.*\) AppleWebKit\//
-         ?    $1 eq "$version->{major}"
-           && $2 eq "$version->{minor}"
-         : 0;
-}
-
-sub _isSafari {
-    my $useragent = shift;
-    return $useragent =~ /Version\/.* Safari\//
-        && !_isChromiumBased($useragent);
-}
-
-sub _isMacEmbeddedBrowser {
-    my $useragent = shift;
-    return $useragent =~ /^Mozilla\/[\.\d]+ \(Macintosh;.*Mac OS X [_\d]+\)
-                          AppleWebKit\/[\.\d]+ \(KHTML, like Gecko\)\$/x;
-}
-
-sub _isChromiumBased {
-    my $useragent = shift;
-    return $useragent =~ /Chrom(e|ium)/;
-}
-
-sub _isChromiumVersionAtLeast{
-    my ($useragent,$version) = @_;
-    # Extract digits from first capturing group.
-    return $useragent =~ /Chrom[^ \/]+\/(\d+)[\.\d]* /
-         ? $1 >= $version->{major}
-         : 0;
-}
-
 
 =head1 LICENSE AND COPYRIGHT
 
-Copyright (C) 2020 The LedgerSMB Core Team
+Copyright (C) 2020-2024 The LedgerSMB Core Team
 
 This file is licensed under the GNU General Public License version 2, or at your
 option any later version.  A copy of the license should have been included with

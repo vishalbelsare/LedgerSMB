@@ -47,6 +47,7 @@ sub _before_dispatch {
     my ($self) = shift;
     $self->db(LedgerSMB::Database->new(
                   connect_data => $self->config->get('connect_data'),
+                        schema => $self->config->get('schema'),
               ));
     return @_;
 }
@@ -59,13 +60,17 @@ sub _decode {
 
 sub connect_data_from_arg {
     my ($self, $arg) = @_;
+    if (!$arg) {
+        $self->logger->error('Missing database');
+        exit(1);
+    }
     # patterns to process:
     #  dbname[?connection_parameters]
     #  [user@]host[:port]/dbname (host can be 'ipv6': "[::]")
     $arg =~ m!^
         (postgresql://)?
         (((?<user>[^@]+)@)?
-         (?<host>\[[:0-9a-zA-Z]+\]|[\w.]+)
+         (?<host>\[[:0-9a-zA-Z]+\]|[\w.-]+)
          (:(?<port>\d+))?/)?
         ((?<dbname>[a-z0-9A-Z_% -]+)
          (\#(?<schema>[a-z0-9A-Z_% -]+))?
@@ -95,12 +100,13 @@ sub connect_data_from_arg {
 sub dispatch {
     my ($self, $command, @args) = @_;
 
-    $command //= 'help';
-    my $dispatch = $self->can($command);
-    die "Unknown command '$command'"
+    my $func = $command // 'help';
+    $func =~ tr/\-/_/;
+    my $dispatch = $self->can($func);
+    die "Unknown command '$command' ($func)"
         if (not $dispatch
             or ($command eq 'run')
-            or ($command !~ m/^([a-zA-Z]+)$/));
+            or ($func !~ m/^([a-zA-Z_]+)$/));
 
     return $self->help($command, @args)
         if $command eq 'help';

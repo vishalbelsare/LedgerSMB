@@ -25,37 +25,37 @@ __PACKAGE__->self_register(
 
 
 my %menu_path_pageobject_map = (
-    "Contacts > Add Contact" => '',
     "Contacts > Search" => 'PageObject::App::Search::Contact',
+    "Contacts > Add Entity" => 'PageObject::App::Contacts::EditContact',
 
-    "AR > Add Transaction" => 'PageObject::App::AR::Transaction',
-    "AR > Import Batch" => 'PageObject::App::BatchImport',
-    "AR > Sales Invoice" => 'PageObject::App::AR::Invoice',
-    "AR > Credit Note" => 'PageObject::App::AR::Note',
-    "AR > Credit Invoice" => 'PageObject::App::AR::CreditInvoice',
-    "AR > Add Return" => 'PageObject::App::AR::Return',
-    "AR > Search" => 'PageObject::App::Search::AR',
-    "AR > Reports > Outstanding" => '',
-    "AR > Reports > AR Aging" => '',
-    "AR > Reports > Customer History" => 'PageObject::App::AR::PurchaseHistorySearch',
+    "Accounts Receivable > Add Transaction" => 'PageObject::App::AR::Transaction',
+    "Accounts Receivable > Import Batch" => 'PageObject::App::BatchImport',
+    "Accounts Receivable > Sales Invoice" => 'PageObject::App::AR::Invoice',
+    "Accounts Receivable > Credit Note" => 'PageObject::App::AR::Note',
+    "Accounts Receivable > Credit Invoice" => 'PageObject::App::AR::CreditInvoice',
+    "Accounts Receivable > Add Return" => 'PageObject::App::AR::Return',
+    "Accounts Receivable > Search" => 'PageObject::App::Search::AR',
+    "Accounts Receivable > Reports > Outstanding" => '',
+    "Accounts Receivable > Reports > AR Aging" => '',
+    "Accounts Receivable > Reports > Customer History" => 'PageObject::App::AR::PurchaseHistorySearch',
 
-    "AP > Add Transaction" => 'PageObject::App::AP::Transaction',
-    "AP > Import Batch" => 'PageObject::App::BatchImport',
-    "AP > Vendor Invoice" => 'PageObject::App::AP::Invoice',
-    "AP > Debit Note" => 'PageObject::App::AP::Note',
-    "AP > Debit Invoice" => 'PageObject::App::AP::DebitInvoice',
-    "AP > Search" => 'PageObject::App::Search::AP',
-    "AP > Reports > Outstanding" => '',
-    "AP > Reports > AP Aging" => '',
-    "AP > Reports > Customer History" => '',
+    "Accounts Payable > Add Transaction" => 'PageObject::App::AP::Transaction',
+    "Accounts Payable > Import Batch" => 'PageObject::App::BatchImport',
+    "Accounts Payable > Vendor Invoice" => 'PageObject::App::AP::Invoice',
+    "Accounts Payable > Debit Note" => 'PageObject::App::AP::Note',
+    "Accounts Payable > Debit Invoice" => 'PageObject::App::AP::DebitInvoice',
+    "Accounts Payable > Search" => 'PageObject::App::Search::AP',
+    "Accounts Payable > Reports > Outstanding" => '',
+    "Accounts Payable > Reports > AP Aging" => '',
+    "Accounts Payable > Reports > Customer History" => '',
 
-    "Cash > Receipt" => 'PageObject::App::Cash::SelectVC',
-    "Cash > Payment" => 'PageObject::App::Cash::SelectVC',
-    "Cash > Vouchers > Payments" => 'PageObject::App::Cash::Vouchers::Payments',
-    "Cash > Reconciliation" => 'PageObject::App::Cash::Reconciliation::NewReport',
-    "Cash > Reports > Payments" => 'PageObject::App::Cash::PaymentSearch',
-    "Cash > Reports > Receipts" => 'PageObject::App::Cash::PaymentSearch',
-    "Cash > Reports > Reconciliation" => 'PageObject::App::Search::Reconciliation',
+    "Cash & Banking > Receipt" => 'PageObject::App::Cash::SelectVC',
+    "Cash & Banking > Payment" => 'PageObject::App::Cash::SelectVC',
+    "Cash & Banking > Batches > Payments" => 'PageObject::App::Cash::Batches::Payments',
+    "Cash & Banking > Reconciliation" => 'PageObject::App::Cash::Reconciliation::NewReport',
+    "Cash & Banking > Reports > Payments" => 'PageObject::App::Cash::PaymentSearch',
+    "Cash & Banking > Reports > Receipts" => 'PageObject::App::Cash::PaymentSearch',
+    "Cash & Banking > Reports > Reconciliation" => 'PageObject::App::Search::Reconciliation',
 
     "Fixed Assets > Asset Classes > Add Class" => 'PageObject::App::FixedAssets::EditClass',
     "Fixed Assets > Asset Classes > List Classes" => 'PageObject::App::FixedAssets::SearchClass',
@@ -74,7 +74,7 @@ my %menu_path_pageobject_map = (
 
     "Budgets > Add Budget" => 'PageObject::App::Budget',
     "Budgets > Search" => 'PageObject::App::Search::Budget',
-    "HR > Employees > Search" => 'PageObject::App::Search::Contact',
+    "HR > Employees > Search" => 'PageObject::App::Search::Employee',
 
     "Order Entry > Sales Order" => "PageObject::App::Orders::Sales",
     "Order Entry > Purchase Order" => "PageObject::App::Orders::Purchase",
@@ -92,18 +92,18 @@ my %menu_path_pageobject_map = (
     "General Journal > Search" => 'PageObject::App::Search::GL',
     "General Journal > Chart of Accounts" => 'PageObject::App::Search::ReportDynatable',
     "General Journal > Year End" => 'PageObject::App::Closing',
-    # Time cards
-    "Reports > Balance Sheet" => 'PageObject::App::Report::Filters::BalanceSheet',
+    "General Journal > Reports > Balance Sheet" => 'PageObject::App::Report::Filters::BalanceSheet',
 
-    "Goods and Services > Search" => 'PageObject::App::Search::GoodsServices',
-    "Goods and Services > Add Part" => 'PageObject::App::Parts::Part',
-    "Goods and Services > Add Service" => 'PageObject::App::Parts::Service',
-    "Goods and Services > Add Assembly" => 'PageObject::App::Parts::Assembly',
-    "Goods and Services > Add Overhead" => 'PageObject::App::Parts::Overhead',
-    "Goods and Services > Enter Inventory" => 'PageObject::App::Parts::AdjustSetup',
+    "Goods & Services > Search" => 'PageObject::App::Search::GoodsServices',
+    "Goods & Services > Add Part" => 'PageObject::App::Parts::Part',
+    "Goods & Services > Add Service" => 'PageObject::App::Parts::Service',
+    "Goods & Services > Add Assembly" => 'PageObject::App::Parts::Assembly',
+    "Goods & Services > Add Overhead" => 'PageObject::App::Parts::Overhead',
+    "Goods & Services > Enter Inventory" => 'PageObject::App::Parts::AdjustSetup',
 
     "Preferences" => 'PageObject::App::Preference',
 
+    # Time cards
     "Timecards > Generate > Sales Orders" => 'PageObject::App::Timecards::ToSalesOrders',
     "System > Currency > Edit currencies" => 'PageObject::App::System::Currency::EditCurrencies',
     "System > Currency > Edit rate types" => 'PageObject::App::System::Currency::EditRateTypes',
@@ -131,7 +131,7 @@ sub _verify {
 sub click_menu {
     my ($self, $paths) = @_;
 
-    my $maindiv = $self->session->page->body->maindiv->find('./*');
+    my $maindiv = $self->session->page->body->maindiv->content;
     subtest "Menu '" . join(' > ', @$paths) . "' useable" => sub {
 
         my $tgt_class = $menu_path_pageobject_map{join(' > ', @$paths)};
@@ -143,39 +143,38 @@ sub click_menu {
            "$tgt_class can be 'use'-d dynamically");
 
         my $item =
-            $self->find("//*[\@id='top_menu']//*[\@role='tree']/parent::*");
+            $self->find(q{//*[@id='menudiv']//*[@role='tree']});
         ok($item, "Menu tree loaded");
 
-        my $role = 'tree';
+        my @steps;
         for my $path (@$paths) {
+            my $parent = ''; # 'and ./ancestor::*[@role="tree" and ./ancestor::*[@id="menudiv"]]';
+            $parent = "and ./ancestor::*[.//*[\@role='treeitem' and normalize-space(string(.))=normalize-space('$_') $parent]]" for @steps;
+            my $xpath =
+                ".//*[\@role='treeitem' and normalize-space(string(.))=normalize-space('$path') $parent]";
+
             $self->session->wait_for(
                 sub {
-                    my $xpath =
-                        "./*[\@class='dijitTreeNodeContainer']" .
-                        "/*[contains(\@class,'dijitTreeNode')" .
-                        "   and ./*[contains(\@class,'dijitTreeRow')" .
-                        "           and .//*[normalize-space(text())" .
-                        "                    =normalize-space('$path')]]]";
+                    # The XPath also finds hidden tags, which we don't want to consider
+                    my @elms = grep { $_->is_displayed } $item->find_all($xpath);
+                    die "Too many elements found for $xpath"
+                        unless scalar(@elms) < 2;
 
-                    my $item1 = $item->find($xpath);
+                    my $item1 = shift @elms;
                     my $valid = $item1 && ($item1->get_text ne '');
+
                     $item = $item1 if $valid;
                     return $valid;
                 });
 
-            my $label = $item->get_attribute('id') . '_label';
-            ok($label,"Found label $label");
+            # menu item found; held in $item
+            my $expanded = $item->get_attribute('aria-expanded');
+            $item->click unless ($expanded and $expanded eq 'true');
 
-            my $submenu = $item->find(".//*[\@id='$label']");
-            my $text = $submenu->get_text;
-
-            ok($submenu && $text,"Submenu found '" . $text . "'");
-            my $expanded = $item->find(
-                ".//*[contains(\@class,'dijitTreeContent')" .
-                "     and ./*[\@id='$label']]");
-            $expanded =  $expanded->get_attribute('class') =~ m/\bdijitTreeContentExpanded\b/;
-            $submenu->click unless $expanded;
-            $role = 'group';
+            # the node and its children are siblings in the DOM tree
+            # continue the search from one level up...
+            $item = $item->find('..');
+            push @steps, $path;
         }
     };
 
@@ -187,9 +186,16 @@ sub close_menus {
     my ($self) = @_;
 
     my @nodes = $self->find_all(
-        './/*[contains(@class,"dijitTreeContentExpanded")]' .
-        '/*[@role="treeitem"]');
+        './/*[@role="treeitem" and @aria-expanded="true"]');
     $_->click for reverse @nodes;
+
+    # wait for the transition to close, to complete
+    # $self->session->wait_for(
+    #     sub {
+    #         my @open = $self->find_all(
+    #             './/*[@role="treeitem" and @aria-expanded="true"]');
+    #         return scalar(@open) == 0;
+    #     });
 }
 
 __PACKAGE__->meta->make_immutable;

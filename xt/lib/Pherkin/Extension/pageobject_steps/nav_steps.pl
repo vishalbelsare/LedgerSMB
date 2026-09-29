@@ -37,20 +37,21 @@ When qr/I navigate to the (.*) page/, sub {
 };
 
 When qr/^I update the page$/, sub {
-    my $maindiv = S->{ext_wsl}->page->body->maindiv->find('./*');
-    S->{ext_wsl}->page->body->maindiv
-        ->find('*button', text => 'Update')->click;
-    S->{ext_wsl}->page->body->maindiv->wait_for_content(replaces => $maindiv);
+    my $button = S->{ext_wsl}->page->body->maindiv
+        ->find('*button', text => 'Update');
+
+    $button->click;
+    S->{ext_wsl}->page->body->maindiv->wait_for_content(replaces => $button);
 };
 
 When qr/^I (click "(.+)" to )?save the page( as new)?$/, sub {
-    my $maindiv = S->{ext_wsl}->page->body->maindiv->find('./*');
     my $text = ($3) ? 'Save as new' :
                ($1) ? $2
                     : 'Save';
-    S->{ext_wsl}->page->body->maindiv
-        ->find('*button', text => $text)->click;
-    S->{ext_wsl}->page->body->maindiv->wait_for_content(replaces => $maindiv);
+    my $button = S->{ext_wsl}->page->body->maindiv
+        ->find('*button', text => $text);
+    $button->click;
+    S->{ext_wsl}->page->body->maindiv->wait_for_content(replaces => $button);
 };
 
 Then qr/I should see the (.*) page/, sub {
@@ -103,22 +104,26 @@ my %screens = (
     'Chart of Accounts' => 'PageObject::App::Search::ReportDynatable',
     'Contact Search Report' => 'PageObject::App::Search::ReportDynatable',
     'Contact Search' => 'PageObject::App::Search::Contact',
-    'Create New Batch' => 'PageObject::App::Cash::Vouchers::Payments',
+    'Create New Batch' => 'PageObject::App::Cash::Batches::Payments',
     'Edit Contact' => 'PageObject::App::Contacts::EditContact',
     'Edit currencies' => 'PageObject::App::System::Currency::EditCurrencies',
+    'Edit Employee' => 'PageObject::App::Contacts::EditEmployee',
     'Edit rate types' => 'PageObject::App::System::Currency::EditRateTypes',
     'Edit rates' => 'PageObject::App::System::Currency::EditRates',
-    'Employee search' => 'PageObject::App::Search::Contact',
+    'Employee Search Report' => 'PageObject::App::Search::ReportDynatable',
+    'Employee Search' => 'PageObject::App::Search::Employee',
     'Enter Inventory' => ' PageObject::App::Parts::AdjustSetup',
-    'Filtering Payments' => 'PageObject::App::Cash::Vouchers::Payments::Filter',
+    'Filtering Payments' => 'PageObject::App::Cash::Batches::Payments::Filter',
     'GL entry'  => 'PageObject::App::GL::JournalEntry',
     'GL search' => 'PageObject::App::Search::GL',
+    'GL report' => 'PageObject::App::Search::ReportDynatable',
     'New Reconciliation Report' => 'PageObject::App::Cash::Reconciliation::NewReport',
+    'Search AP Report' => 'PageObject::App::Search::ReportDynatable',
     'Single Payment Vendor Selection' => 'PageObject::App::Cash::SelectVC',
     'Single Payment Customer Selection' => 'PageObject::App::Cash::SelectVC',
     'Single Payment Entry' => 'PageObject::App::Cash::Entry',
     'Payment Batch Summary' => 'PageObject::App::Search::ReportDynatable',
-    'Payments Detail' => 'PageObject::App::Cash::Vouchers::Payments::Detail',
+    'Payments Detail' => 'PageObject::App::Cash::Batches::Payments::Detail',
     'Preferences' => 'PageObject::App::Preference',
     'Purchase History Report' => 'PageObject::App::Search::ReportDynatable',
     'Purchase History Search' => 'PageObject::App::AR::PurchaseHistorySearch',
@@ -185,7 +190,7 @@ When qr/I open the parts screen for '(.*)'/, sub {
     my $partnumber = $1;
 
     S->{ext_wsl}->page->body->menu->click_menu(
-        ['Goods and Services', 'Search']
+        ['Goods & Services', 'Search']
     );
     S->{ext_wsl}->page->body->maindiv->content->search(
         'Part Number' => $partnumber
@@ -211,7 +216,7 @@ Then qr/I expect to see the '(.*)' value of '(.*)'/, sub {
     my $elm = S->{ext_wsl}->page->body->maindiv
         ->content->find(qq|.//*[\@id="$id" or \@title="$id"
                                 or \@alt="$id"]
-        |);
+        |, scheme => 'xpath');
     ok(defined $elm, "value-defining element ($id) found");
     my $actual = $elm->get_text || $elm->get_attribute('value');
     $actual =~ s/^\s+|\s+$//g;

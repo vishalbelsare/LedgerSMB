@@ -1,11 +1,12 @@
-[% INCLUDE "ui-header.html"
+[% WRAPPER "ui-header.html"
        stylesheet="ledgersmb.css"
-       include_stylesheet=["setup.css"] ;
+       include_stylesheet=["system/setup.css"] ;
     PROCESS "elements.html"
 %]<body id="setup-template-info" class="lsmb [% dojo_theme %]">
-<div class="setupconsole" data-dojo-type="lsmb/main">
+<div><div class="setupconsole">
 <h2>[% text('Database Management Console') %]</h2>
 <form data-dojo-type="lsmb/SimpleForm" action="setup.pl" method="post">
+  <input type="hidden" name="csrf_token" value="[% csrf_token %]" />
 <div class="listtop">[% text('Select Templates to Load') %]</div>
 [%
 PROCESS input element_data = {
@@ -24,11 +25,11 @@ PROCESS select element_data = {
       label = text('Templates')
 } %]<br />
 [% PROCESS button element_data = {
-      name = "action"
+      name = "__action"
      value = templates_action
       text = text('Load Templates') #'
 } %]
 </form>
-</div>
+</div></div>
 </body>
-[% end_html %]
+[% END %]

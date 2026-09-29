@@ -1,10 +1,10 @@
-[% INCLUDE "ui-header.html"
+[% WRAPPER "ui-header.html"
        stylesheet="ledgersmb.css";
        PROCESS elements.html;
        PROCESS 'dynatable.html' %]
 
 <body id="setup-migration_step" class="lsmb [% dojo_theme%]">
-  <div class="setupconsole" data-dojo-type="lsmb/main">
+  <div><div class="setupconsole">
     <h1 style="font-weight: bold; margin-bottom: 1em; text-align: center">
         [% text('Database Management Console') %]
     </h1>
@@ -13,6 +13,7 @@
           method="post"
           action="[% form.script %]"
           id="migration-step-dynatable">
+      <input type="hidden" name="csrf_token" value="[% csrf_token %]" />
     [% FOREACH header IN headers %]<div class="listtop">
              [% INCLUDE decorated_text element_data = {
                     msg => header };
@@ -30,6 +31,6 @@
             }; END %]
     [% FOREACH button IN buttons; PROCESS button element_data=button; END %]
     </form>
-  </div>
+  </div></div>
 </body>
-[% end_html %]
+[% END %]

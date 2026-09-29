@@ -1,8 +1,9 @@
+
+use v5.38;
+use experimental 'try';
+
 package LedgerSMB::FileFormats::OFX::BankStatement;
 
-use warnings;
-use strict;
-use Feature::Compat::Try;
 use XML::LibXML;
 
 =head1 NAME
@@ -85,15 +86,13 @@ not identified as a OFX document.
 
 =cut
 
-sub new {
-    my ($class, $content) = @_;
-    return unless defined $content;
+sub new($class, $fh) {
+    return unless defined $fh;
 
     my ($dom, $is_ofx);
     try {
-        $dom = XML::LibXML->load_xml(
-            string => $content
-        );
+        binmode $fh; # remove all IO layers, as per the docs
+        $dom = XML::LibXML->load_xml(IO => $fh);
         $is_ofx = $dom->find('/processing-instruction("OFX")')
     }
     catch ($e) { }
@@ -110,8 +109,7 @@ Returns the XML::LibXML DOM tree representing the input xml.
 
 =cut
 
-sub dom {
-    my ($self) = @_;
+sub dom($self) {
     return $self->{dom};
 }
 
@@ -128,9 +126,7 @@ following elements:
 
 =cut
 
-sub transactions {
-    my ($self) = @_;
-
+sub transactions($self) {
     my $transactions = $self->dom->find('//STMTTRNRS/STMTRS/BANKTRANLIST/STMTTRN');
 
     my @transactions = map {{
@@ -153,5 +149,3 @@ option any later version.  A copy of the license should have been included with
 your software.
 
 =cut
-
-1;

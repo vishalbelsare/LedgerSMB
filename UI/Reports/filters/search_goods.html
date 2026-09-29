@@ -220,7 +220,7 @@ default_values = [partsgroup_id]
               [% label_pos = -1; # apparently, there's something leaky
                      PROCESS input element_data = {
                      label=text('From')
-                     class="date"
+                     type="date"
                      name="from_date"
                      id="from_date"
                      size="11"
@@ -232,7 +232,7 @@ default_values = [partsgroup_id]
               [% label_pos = -1; # apparently, there's something leaky
                      PROCESS input element_data = {
                      label=text('To')
-                     class="date"
+                     type="date"
                      name="to_date"
                      id="to_date"
                      size="11"
@@ -249,10 +249,10 @@ default_values = [partsgroup_id]
       <legend>[% text('Include in Report') %]</legend>
       <div class="option">
              [% PROCESS input element_data = {
-           name = 'col_running_number'
+           name = 'col_id'
            type = 'checkbox'
           value = '1'
-          label = text('No.')
+          label = text('ID')
       } %]
       </div><div class="option">
        [% PROCESS input element_data = {
@@ -439,7 +439,7 @@ default_values = [partsgroup_id]
 
     </fieldset>
 [% PROCESS button element_data = {
-   name = 'action'
+   name = '__action'
   class = 'submit'
    type = 'submit'
   value = 'search'

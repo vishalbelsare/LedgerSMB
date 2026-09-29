@@ -30,7 +30,6 @@ package AA;
 use Log::Any;
 use LedgerSMB::File;
 use LedgerSMB::PGNumber;
-use LedgerSMB::Setting;
 
 my $logger = Log::Any->get_logger(category => "AA");
 
@@ -43,8 +42,6 @@ Post transaction uses the following variables in the $form variable:
  * dbh - the database connection handle
  * currency - The current users' currency
  * defaultcurrency - The "normal" currency
- * department - Unknown
- * department_id - ID for the department
  * exchangerate - Conversion between currency and defaultcurrency
  * invnumber - invoice number
  * reverse - ?
@@ -65,9 +62,6 @@ sub post_transaction {
     my $batch_class;
     my %paid;
     my $paidamount;
-    if ($form->{separate_duties}){
-        $form->{approved} = '0';
-    }
     for (1 .. $form->{rowcount}){
         $form->{"amount_$_"} = $form->parse_amount(
                $myconfig, $form->{"amount_$_"}
@@ -81,10 +75,6 @@ sub post_transaction {
 
     my $query;
     my $sth;
-
-    my $null;
-    ( $null, $form->{department_id} ) = split( /--/, $form->{department} );
-    $form->{department_id} *= 1;
 
     my $ml        = 1;
     my $table     = 'ar';
@@ -185,7 +175,7 @@ sub post_transaction {
             $amount{amount}{$i} = $amount;
             $diff = $amount{amount}{$i} - ( $amount - $diff );
 
-            ( $null, $project_id ) = split /--/, $form->{"projectnumber_$i"};
+            ( undef, $project_id ) = split /--/, $form->{"projectnumber_$i"};
             $project_id ||= undef;
             ($accno) = split /--/, $form->{"${ARAP}_amount_$i"};
 
@@ -267,8 +257,7 @@ sub post_transaction {
       ? $invamount
       : $form->round_amount( $paid * $form->{exchangerate}, 2 );
 
-    my $setting = LedgerSMB::Setting->new(%$form);
-    $form->{$_} = $setting->get($_)
+    $form->{$_} = $form->get_setting($_)
         for (qw/ fxgain_accno_id fxloss_accno_id /);
 
     #tshvr4 trunk svn-revison 6589,$form->login seems to contain id instead of name or '',so person_id not found,thus reports with join on person_id not working,quick fix,use employee_name
@@ -280,92 +269,135 @@ sub post_transaction {
 
     # check if id really exists
     if ( $form->{id} ) {
-        my $id = $dbh->quote( $form->{id} );
-        $keepcleared = 1;
-        $query       = qq|
-            SELECT id
-              FROM $table
-             WHERE id = $id|;
-        my ($exists) = $dbh->selectrow_array($query);
-        if ($exists and $form->{batch_id}) {
-           $query = "SELECT voucher__delete(id)
-                       FROM voucher
-                      where trans_id = ? and batch_class in (1, 2)";
-           $dbh->prepare($query)->execute($form->{id}) || $form->dberror($query);
-        } elsif ($exists) {
+        # delete detail records
+        $query = qq|SELECT draft__delete_lines(?)|;
+        $dbh->do($query, {}, $form->{id}) || $form->dberror($query);
+    }
+    else {
+        my $uid = localtime;
+        $uid .= "$$";
 
-           # delete detail records
+        $query = q|
+            INSERT INTO transactions (trans_type_code, approved, transdate, batch_id)
+            VALUES (?, false, ?, ?)
+            |;
+        $dbh->do($query, {}, $table, $form->{transdate}, $form->{batch_id}) or $form->dberror($query);
 
-        $dbh->do($query) || $form->dberror($query);
-            $query = qq|
-                DELETE FROM ac_tax_form
-                                       WHERE entry_id IN
-                                             (SELECT entry_id FROM acc_trans
-                              WHERE trans_id = $id)|;
+        ($accno) = split /--/, $form->{$ARAP};
+        $query = qq{
+            INSERT INTO open_item (item_number, item_type, account_id)
+            VALUES (? || '-' || currval('transactions_id_seq'), ?, (SELECT id FROM account WHERE accno = ?))
+            };
+        $dbh->do($query, {}, $ARAP, $table, $accno) or $form->dberror($query);
 
-            $dbh->do($query) || $form->dberror($query);
+        $query = qq|
+            INSERT INTO $table (trans_id, invnumber, open_item_id, person_id, entity_credit_account)
+                 VALUES (currval('transactions_id_seq'), '$uid', currval('open_item_id_seq'), ?, ?)|;
+        $sth = $dbh->prepare($query);
+        $sth->execute( $form->{employee_id}, $form->{"$form->{vc}_id"}) || $form->dberror($query);
 
-            $query = qq|
-                DELETE FROM acc_trans
-                 WHERE trans_id = $id|;
+        $query = qq|SELECT trans_id, open_item_id FROM $table WHERE invnumber = '$uid'|;
+        $sth   = $dbh->prepare($query);
+        $sth->execute || $form->dberror($query);
 
-            $dbh->do($query) || $form->dberror($query);
-            $dbh->do("DELETE FROM $table where id = $id");
-        }
+        ( $form->{id}, $form->{open_item_id} ) = $sth->fetchrow_array;
 
+        $query = <<~'SQL';
+           UPDATE transactions
+              SET workflow_id = ?,
+                  reversing = ?,
+                  transdate = ?,
+                  notes = ?
+            WHERE id = ?
+                  AND workflow_id IS NULL
+           SQL
+        $sth   = $dbh->prepare($query);
+        $sth->execute( $form->{workflow_id}, $form->{reversing}, $form->{transdate}, $form->{intnotes}, $form->{id} )
+            || $form->dberror($query);
     }
 
 
    if ($table eq 'ar') {
     $query = qq|
-      INSERT INTO ar
-        (invnumber, description, ordnumber, transdate, taxincluded,
-         amount_bc, netamount_bc, curr, amount_tc, netamount_tc, duedate,
-         notes, intnotes, ponumber, crdate, reverse,
-         person_id, entity_credit_account, approved,
-         setting_sequence
-        )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      RETURNING id
+      UPDATE ar
+         SET invnumber = ?,
+             ordnumber = ?,
+             taxincluded = ?,
+             amount_bc = ?,
+             netamount_bc = ?,
+             curr = ?,
+             amount_tc = ?,
+             netamount_tc = ?,
+             duedate = ?,
+             notes = ?,
+             ponumber = ?,
+             crdate = ?,
+             reverse = ?,
+             person_id = ?,
+             entity_credit_account = ?,
+             setting_sequence = ?
+       WHERE trans_id = ?
     |;
    }
    else {
     $query = qq|
-      INSERT INTO $table
-        (invnumber, description, ordnumber, transdate, taxincluded,
-         amount_bc, netamount_bc, curr, amount_tc, netamount_tc, duedate,
-         notes, intnotes, ponumber, crdate, reverse,
-         person_id, entity_credit_account, approved
-        )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      RETURNING id
+      UPDATE $table
+         SET invnumber = ?,
+             ordnumber = ?,
+             taxincluded = ?,
+             amount_bc = ?,
+             netamount_bc = ?,
+             curr = ?,
+             amount_tc = ?,
+             netamount_tc = ?,
+             duedate = ?,
+             notes = ?,
+             ponumber = ?,
+             crdate = ?,
+             reverse = ?,
+             person_id = ?,
+             entity_credit_account = ?
+       WHERE trans_id = ?
     |;
    }
 
     $form->{invnumber} = undef if $form->{invnumber} eq '';
     $form->{datepaid} = $form->{transdate} unless $form->{datepaid};
     my $datepaid = ($paid) ? qq|'$form->{datepaid}'| : undef;
+    my $approved = 1;
+    $approved = 0 if $form->get_setting('separate_duties');
 
     my @queryargs = (
-        $form->{invnumber},        $form->{description},
-        $form->{ordnumber},        $form->{transdate},
+        $form->{invnumber},
+        $form->{ordnumber},
         $form->{taxincluded},
         $invamount,                $invnetamount,
         $form->{currency},
         $fxinvamount,              $fxinvnetamount,
         $form->{duedate},
-        $form->{notes},            $form->{intnotes},
+        $form->{notes},
         $form->{ponumber},         $form->{crdate},
         $form->{reverse},          $form->{employee_id},
-        $form->{"$form->{vc}_id"}, $form->{approved}
+        $form->{"$form->{vc}_id"},
         );
-   if ($table eq 'ar') {
-       push @queryargs, $form->{setting_sequence}
-   }
+    if ($table eq 'ar') {
+        push @queryargs, $form->{setting_sequence}
+    }
+    push @queryargs, $form->{id};
 
-   $sth = $dbh->prepare($query) or $form->dberror($query);
-   $sth->execute(@queryargs) or $form->dberror($query);
-   ($form->{id}) = $sth->fetchrow_array() or $form->dberror($query);
+    $sth = $dbh->prepare($query) or $form->dberror($query);
+    $sth->execute(@queryargs) or $form->dberror($query);
+
+    my $query = q{
+          UPDATE transactions
+             SET description = ?,
+                 approved = ?,
+                 notes = ?
+           WHERE id = ?};
+    $dbh->do($query,
+             {},
+             $form->{description}, $approved, $form->{intnotes}, $form->{id})
+        or die $dbh->errstr;
 
     if (defined $form->{approved}) {
         if (!$form->{approved} && $form->{batch_id}){
@@ -380,13 +412,7 @@ sub post_transaction {
            # Change the below to die with localization in 1.4
            $form->error('Approved Batch') if $bref->{approved_by};
            $form->error('Locked Batch') if $bref->{locked_by};
-           $query = qq|
-        INSERT INTO voucher (batch_id, trans_id, batch_class)
-        VALUES (?, ?, (select id from batch_class where class = ?))|;
-           $dbh->prepare($query)->execute($form->{batch_id}, $form->{id},
-                $batch_class) || $form->dberror($query);
         }
-
     }
 
     my $ref;
@@ -416,7 +442,8 @@ sub post_transaction {
                 $form->{id},            $ref->{accno},
                 $ref->{amount_bc} * $ml, $ref->{curr},
                 $ref->{amount_tc} * $ml,
-                $form->{transdate}, $form->{approved},
+                $form->{transdate},
+                $approved,
                 $ref->{description},
                 $ref->{cleared}
             );
@@ -461,7 +488,9 @@ sub post_transaction {
             @queryargs = (
                 $form->{id}, $ref->{accno}, $ref->{amount_bc} * $ml,
                 $form->{currency}, $ref->{amount_tc} * $ml,
-                $form->{transdate}, $form->{approved}, $ref->{source}
+                $form->{transdate},
+                $approved,
+                $ref->{source}
             );
             $dbh->prepare($query)->execute(@queryargs)
               || $form->dberror($query);
@@ -475,16 +504,18 @@ sub post_transaction {
         ($accno) = split /--/, $form->{$ARAP};
         $query = qq|
             INSERT INTO acc_trans
-                     (trans_id, chart_id, amount_bc, curr, amount_tc,
-                      transdate, approved)
+                     (trans_id, chart_id, open_item_id,
+                      amount_bc, curr, amount_tc, transdate, approved)
               VALUES (?, (SELECT id FROM account
-                              WHERE accno = ?),
+                              WHERE accno = ?), ?,
                            ?, ?, ?, ?, ?)|;
         @queryargs =
-            ( $form->{id}, $accno,
+            ( $form->{id}, $accno, $form->{open_item_id},
               $invamount * -1 * $ml, $form->{currency},
               $invamount * -1 * $ml / $form->{exchangerate},
-            $form->{transdate}, $form->{approved} );
+              $form->{transdate},
+              $approved,
+            );
 
         $dbh->prepare($query)->execute(@queryargs)
           || $form->dberror($query);
@@ -503,8 +534,6 @@ sub post_transaction {
 
     IIAA->process_form_payments($myconfig, $form);
 
-    # save printed
-    $form->save_status($dbh);
     return 1 unless $dbh->errstr;
 }
 
@@ -548,8 +577,6 @@ meta_number:  customer/vendor number
 entity_id:  A specific entity id
 
 parts_id:  Show transactions including a specific part
-
-department_id:  Transactions for a department
 
 entity_credit_account: As an alternate for meta_number to identify a customer
 of vendor credit account
@@ -721,8 +748,8 @@ sub get_name {
     my $arap = ( $form->{vc} eq 'customer' ) ? 'ar' : 'ap';
     my $ARAP = uc $arap;
 
-    if (LedgerSMB::Setting->new(%$form)->get('show_creditlimit')){
-        $form->{creditlimit} = LedgerSMB::PGNumber->from_input('0') unless
+    if ($form->get_setting('show_creditlimit')){
+        $form->{creditlimit} = $form->parse_amount( $myconfig, '0') unless
           $form->{creditlimit} > 0;
         $form->{creditremaining} = $form->{creditlimit};
         # acc_trans.approved is only false in the case of batch payments which
@@ -920,8 +947,8 @@ sub save_intnotes {
     } else {
         $form->error('Bad arap in save_intnotes');
     }
-    my $sth = $form->{dbh}->prepare("UPDATE $table SET intnotes = ? " .
-                                      "where id = ?");
+    my $query = "UPDATE transactions SET notes = ? WHERE id = (select trans_id from $table where id = ?)";
+    my $sth = $form->{dbh}->prepare($query);
     $sth->execute($form->{intnotes}, $form->{id});
 }
 
@@ -942,7 +969,7 @@ sub save_employee {
         $form->error('Bad arap in save_employee');
     }
     my $sth = $form->{dbh}->prepare("UPDATE $table SET person_id = ? " .
-                                    "where id = ?");
+                                    "where trans_id = ?");
     my ($name, $person_id) = split(/--/, $form->{employee}, 2);
     $sth->execute($person_id, $form->{id});
 }

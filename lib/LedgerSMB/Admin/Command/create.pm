@@ -1,4 +1,7 @@
 
+use v5.38;
+use experimental 'try';
+
 package LedgerSMB::Admin::Command::create;
 
 =head1 NAME
@@ -7,21 +10,37 @@ LedgerSMB::Admin::Command::create - ledgersmb-admin 'create' command
 
 =cut
 
-use strict;
-use warnings;
-
 use LedgerSMB::Admin::Command;
+use LedgerSMB::Company;
 use LedgerSMB::Database;
 
 use Moose;
+use experimental 'try'; # Work around Moose re-enabling experimenal warnings
 extends 'LedgerSMB::Admin::Command';
 use namespace::autoclean;
 
-use Feature::Compat::Try;
+use File::Spec;
+use Getopt::Long qw(GetOptionsFromArray);
 
+has options => (is => 'ro', default => sub { {} });
 
-sub run {
-    my ($self, $dbname) = @_;
+sub _option_spec($self) {
+    return (
+        'prepare-only' => \$self->options->{'prepare-only'},
+    );
+}
+
+sub run($self, @args) {
+    my $options = {};
+
+    Getopt::Long::Configure(qw(bundling require_order));
+    GetOptionsFromArray(\@args, $self->options, $self->_option_spec());
+
+    my $dbname = shift @args;
+
+    return $self->help('create')
+        if !$dbname || $dbname eq 'help';
+
     my $logger = $self->logger;
     my $connect_data = {
         $self->config->get('connect_data')->%*,
@@ -38,11 +57,27 @@ sub run {
     my $log = LedgerSMB::Database::loader_log_filename;
     my $errlog = LedgerSMB::Database::loader_log_filename;
     try {
-        $self->db->create_and_load(
-            {
-                log    => $log,
-                errlog => $errlog,
-            });
+        unless ($self->options->{'prepare-only'}) {
+            $self->db->create();
+            $logger->warn('Database successfully created');
+        } else {
+            $logger->warn('Preparing existing database');
+        }
+        $self->db->load_base_schema();
+        $self->db->apply_changes();
+        $self->db->load_modules('LOADORDER');
+
+        open( my $fh, '<:raw',
+              File::Spec->catfile( $self->db->data_dir, 'menu.xml' ) )
+            or die "Unable to open 'menu.xml' menu definition file: $!";
+
+        my $dbh = $self->db->connect;
+        LedgerSMB::Company->new( dbh => $dbh, wire => undef )
+            ->menu
+            ->from_xml( $fh );
+        $dbh->commit;
+        $dbh->disconnect;
+        $logger->warn('Database successfully created and prepared');
     }
     catch ($e) {
         ###TODO remove database after failed creation
@@ -59,13 +94,11 @@ sub run {
 
 __PACKAGE__->meta->make_immutable;
 
-1;
-
 __END__
 
 =head1 SYNOPSIS
 
-   ledgersmb-admin create <db-uri>
+   ledgersmb-admin create [options] <db-uri>
 
 =head1 DESCRIPTION
 
@@ -74,6 +107,16 @@ C<db-uri>.
 
 The resulting database does not have any setup, settings or users. See the
 C<setup>, C<setting> and C<user> commands.
+
+=head1 OPTIONS
+
+=over
+
+=item B<--prepare-only>
+
+Prepares an existing database without attempting to create it. This is useful when the database has been pre-created and you only need to prepare it for use with LedgerSMB.
+
+=back
 
 =head1 SUBCOMMANDS
 

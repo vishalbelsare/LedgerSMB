@@ -30,11 +30,10 @@ use LedgerSMB::Business_Unit_Class;
 use LedgerSMB::Business_Unit;
 use LedgerSMB::Magic qw( MIN_PER_HOUR SEC_PER_HOUR SUNDAY SATURDAY );
 use LedgerSMB::PGDate;
+use LedgerSMB::PGNumber;
 use LedgerSMB::PGTimestamp;
 use LedgerSMB::Report::Timecards;
-use LedgerSMB::Sysconfig;
 use LedgerSMB::Template;
-use LedgerSMB::Template::UI;
 use LedgerSMB::Timecard;
 use LedgerSMB::Timecard::Type;
 
@@ -61,7 +60,7 @@ This begins the timecard workflow.  The following may be set as a default:
 sub new {
     my ($request) = @_;
     @{$request->{bu_class_list}} = LedgerSMB::Business_Unit_Class->list();
-    return LedgerSMB::Template::UI->new_UI
+    return $request->{_wire}->get('ui')
         ->render($request, 'timecards/entry_filter', $request);
 }
 
@@ -92,7 +91,7 @@ sub display {
         $request->setting->get_currencies;
     $tcard->{total} =
         ($tcard->{qty} // 0) + ($tcard->{non_billable} // 0);
-     my $template = LedgerSMB::Template::UI->new_UI;
+     my $template = $request->{_wire}->get('ui');
      return $template->render($request, 'timecards/timecard', $tcard);
 }
 
@@ -113,7 +112,7 @@ sub timecard_screen {
          );
          @{$request->{currencies}} =
              $request->setting->get_currencies;
-         my $startdate = LedgerSMB::PGDate->from_input($request->{date_from});
+         my $startdate = $request->parse_date($request->{date_from});
 
          my @dates = ();
          for (SUNDAY .. SATURDAY){
@@ -122,7 +121,7 @@ sub timecard_screen {
          }
          $request->{num_lines} = 1 unless $request->{num_lines};
          $request->{transdates} = \@dates;
-         my $template = LedgerSMB::Template::UI->new_UI;
+         my $template = $request->{_wire}->get('ui');
          return
              $template->render($request, 'timecards/timecard-week', $request);
     }
@@ -143,20 +142,31 @@ sub save {
     die $request->{_locale}->text('Please submit a start/end time or a qty')
         unless defined $request->{qty}
                or ($request->{checkedin} and $request->{checkedout});
-    $request->{qty} //= _get_qty($request->{checkedin}, $request->{checkedout});
-    my $timecard = LedgerSMB::Timecard->new(%$request);
+    $request->{qty} //= _get_qty($request, $request->{checkedin}, $request->{checkedout});
+    my $timecard = LedgerSMB::Timecard->new(
+        $request->%{ qw( id business_unit_id bu_class_id parts_id description
+                         serialnumber person_id notes jctype curr
+                         ) },
+        qty => $request->parse_amount( $request->{qty} ),
+        allocated => $request->parse_amount( $request->{allocated} ),
+        sellprice => $request->parse_amount( $request->{sellprice} ),
+        fxsellprice => $request->parse_amount( $request->{fxsellprice} ),
+        checkedin => $request->parse_timestamp( $request->{checkedin} ),
+        checkedout => $request->parse_timestamp( $request->{checkedout} ),
+        non_billable => $request->parse_amount( $request->{non_billable} ),
+        total => $request->parse_amount( $request->{total} ),
+        );
     $timecard->save;
     $request->{id} = $timecard->id;
     $request->merge($timecard->get($request->{id}));
     $request->{templates} = ['timecard'];
-    @{$request->{printers}} = LedgerSMB::Sysconfig::printer()->%*; # List context
     return display($request, $request);
 }
 
 sub _get_qty {
-    my ($checkedin, $checkedout) = @_;
-    my $when_in = LedgerSMB::PGDate->from_input($checkedin);
-    my $when_out = LedgerSMB::PGDate->from_input($checkedout);
+    my ($request, $checkedin, $checkedout) = @_;
+    my $when_in = $request->parse_date($checkedin);
+    my $when_out = $request->parse_date($checkedout);
     return ($when_in->epoch - $when_out->epoch) / SEC_PER_HOUR;
 }
 
@@ -171,19 +181,23 @@ sub save_week {
     for my $row(1 .. $request->{rowcount}){
         for my $dow (SUNDAY  .. SATURDAY){
             my $date = $request->{"transdate_$dow"};
-            my $hash = { transdate => LedgerSMB::PGDate->from_input($date),
-                         checkedin => LedgerSMB::PGDate->from_input($date), };
+            my $hash = {
+                transdate => $request->parse_date( $date ),
+                checkedin => $request->parse_date( $date ),
+            };
             $date =~ s#\D#_#g;
             next unless $request->{"partnumber_${date}_${row}"};
             $hash->{$_} = $request->{"${_}_${date}_${row}"}
                  for (qw(business_unit_id partnumber description qty curr
                                  non_billable));
-            $hash->{non_billable} ||= 0;
+            $hash->{non_billable} ||= LedgerSMB::PGNumber->bzero;
             $hash->{parts_id} =  LedgerSMB::Timecard->get_part_id(
                      $hash->{partnumber}
             );
             $hash->{jctype} ||= 1;
-            $hash->{total} = $hash->{qty} + $hash->{non_chargeable};
+            $hash->{qty} = $request->parse_amount( $hash->{qty} );
+            $hash->{non_billable} = $request->parse_amount( $hash->{non_billable} );
+            $hash->{total} = $hash->{qty} + $hash->{non_billable};
             my $timecard = LedgerSMB::Timecard->new(%$hash);
             $timecard->save;
         }
@@ -200,14 +214,22 @@ sub print {
     $request->{parts_id} =  LedgerSMB::Timecard->get_part_id(
            $request->{partnumber}
     );
-    my $timecard = LedgerSMB::Timecard->new(%$request);
+    my $timecard = LedgerSMB::Timecard->new(
+        $request->%{ qw( id business_unit_id bu_class_id parts_id
+                         description serialnumber person_id notes ) },
+        qty => $request->parse_amount( $request->{qty} ),
+        allocated => $request->parse_amount( $request->{allocated} ),
+        sellprice => $request->parse_amount( $request->{sellprice} ),
+        fxsellprice => $request->parse_amount( $request->{fxsellprice} ),
+        );
     my $template = LedgerSMB::Template->new( # printed document
         user     => $request->{_user},
         locale   => $request->{_locale},
         dbh      => $request->{dbh},
         path     => 'DB',
         template => 'timecard',
-        format   => $request->{format} || 'HTML',
+        format_plugin   =>
+              $request->{_wire}->get( 'output_formatter' )->get( $request->{format} || 'HTML'),
     );
 
     if (lc($request->{media}) eq 'screen') {
@@ -242,8 +264,10 @@ This generates a report of timecards.
 sub timecard_report{
     my ($request) = @_;
     return $request->render_report(
-        LedgerSMB::Report::Timecards->new(%$request)
-        );
+        LedgerSMB::Report::Timecards->new(
+            %$request,
+            formatter_options => $request->formatter_options
+        ));
 }
 
 =item generate_order

@@ -18,13 +18,13 @@ use strict;
 use warnings;
 
 use HTTP::Status qw( HTTP_BAD_REQUEST );
+use Log::Any qw($log);
 
 use LedgerSMB::DBObject::Reconciliation;
 use LedgerSMB::File;
 use LedgerSMB::Magic qw( FC_RECONCILIATION );
 use LedgerSMB::PGNumber;
 use LedgerSMB::Report::Reconciliation::Summary;
-use LedgerSMB::Template::UI;
 
 =over
 
@@ -62,7 +62,7 @@ and re-renders the reconciliation screen.
 sub update_recon_set {
     my ($request) = shift;
     my $recon = LedgerSMB::DBObject::Reconciliation->new(%$request);
-    $recon->{their_total} = LedgerSMB::PGNumber->from_input(
+    $recon->{their_total} = $request->parse_amount(
         $recon->{their_total}
     ) if defined $recon->{their_total};
     $recon->save() if !$recon->{submitted};
@@ -103,13 +103,8 @@ must be set:
 sub reject {
     my ($request) = @_;
 
-    my $recon_data = {
-        dbh => $request->{dbh},
-        report_id => $request->{report_id}
-    };
-
-    my $recon = LedgerSMB::DBObject::Reconciliation->new(%$recon_data);
-    $recon->reject;
+    my $wf = $request->conn->workflows->fetch( 'reconciliation', $request->{workflow_id} );
+    $wf->execute_action( 'reject' );
 
     return search($request);
 }
@@ -122,13 +117,15 @@ Submits the recon set to be approved.
 
 sub submit_recon_set {
     my ($request) = shift;
+    my $wf = $request->conn->workflows->fetch( 'reconciliation', $request->{workflow_id} );
+    $wf->execute_action( 'submit' );
+
     my $recon = LedgerSMB::DBObject::Reconciliation->new(%$request);
-    $recon->submit();
     my $can_approve = $request->is_allowed_role(
         {allowed_roles => ['reconciliation_approve']}
     );
     if ( !$can_approve ) {
-        my $template = LedgerSMB::Template::UI->new_UI;
+        my $template = $request->{_wire}->get('ui');
         return $template->render($request, 'reconciliation/submitted',
                                  $recon);
     }
@@ -164,8 +161,16 @@ Displays the search results
 sub get_results {
     my ($request) = @_;
     return $request->render_report(
-        LedgerSMB::Report::Reconciliation::Summary->new(%$request)
-        );
+        LedgerSMB::Report::Reconciliation::Summary->new(
+            $request->%{ qw( account_id approved submitted language _locale
+                             interval from_month from_year comparison_periods
+                             comparison_type comparisons ) },
+            formatter_options => $request->formatter_options,
+            balance_from => $request->parse_amount( $request->{balance_from} ),
+            balance_to => $request->parse_amount( $request->{balance_to} ),
+            from_date => $request->parse_date( $request->{from_date} ),
+            to_date => $request->parse_date( $request->{to_date} ),
+        ));
 }
 
 =item search($request)
@@ -193,7 +198,8 @@ sub search {
     $recon->set_dbh($request->{dbh});
     $recon->get_accounts();
 
-    my $template = LedgerSMB::Template::UI->new_UI;
+    $log->info('render');
+    my $template = $request->{_wire}->get('ui');
     return $template->render(
         $request,
         'Reports/filters/reconciliation_search',
@@ -216,8 +222,12 @@ sub _display_report {
     $request->close_form;
     $request->open_form;
 
-    my $file               = LedgerSMB::File->new();
-    $recon->{files}      =
+    my $file                 = LedgerSMB::File->new();
+    $recon->{upload_formats} = [
+        map { +{ name => $_->name } }
+        $request->{_wire}->get('reconciliation_importer')->configurations->@*
+        ];
+    $recon->{files}  =
         [ $file->list({ ref_key    => $request->{report_id},
                         file_class => FC_RECONCILIATION }) ];
     $recon->{file_links} = [ $file->list_links(
@@ -231,8 +241,8 @@ sub _display_report {
     $recon->{decimal_places} = $request->setting->get('decimal_places');
     _set_sort_options($recon, $request);
 
-    $recon->get;
     _process_upload($recon, $request) unless $recon->{submitted};
+    $recon->get;
     $recon->build_totals;
 
     if ($recon->{account_info}->{category} eq 'A') {
@@ -250,7 +260,7 @@ sub _display_report {
     /) {
         for my $bal_type (qw/ credits debits/) {
             $recon->{"$amt_name$bal_type"} = (
-                $recon->{"$amt_name$bal_type"}->to_output(money => 1)
+                $request->format_amount( $recon->{"$amt_name$bal_type"}, money => 1)
             );
         }
     }
@@ -264,7 +274,7 @@ sub _display_report {
             their_credits
             their_debits
         /) {
-            $line->{$element} = $line->{$element}->to_output(money => 1);
+            $line->{$element} = $request->format_amount( $line->{$element}, money => 1);
         }
     }
 
@@ -277,10 +287,10 @@ sub _display_report {
         our_total
         beginning_balance
     /) {
-        $recon->{$field} = $recon->{$field}->to_output(money => 1);
+        $recon->{$field} = $request->format_amount( $recon->{$field}, money => 1);
     }
 
-    my $template = LedgerSMB::Template::UI->new_UI;
+    my $template = $request->{_wire}->get('ui');
     return $template->render($request, 'reconciliation/report', $recon);
 }
 
@@ -304,7 +314,7 @@ sub new_report {
     $recon->set_dbh($request->{dbh});
     $recon->get_accounts();
 
-    my $template = LedgerSMB::Template::UI->new_UI;
+    my $template = $request->{_wire}->get('ui');
     return $template->render(
         $request,
         'reconciliation/new_report',
@@ -342,20 +352,22 @@ sub start_report {
     }
 
     my $recon_data = {
-        dbh => $request->{dbh},
-        chart_id => $request->{chart_id},
-        end_date => $request->{end_date},
-        total => $request->{total},
-        recon_fx => $request->{recon_fx},
+        account_id     => $request->{chart_id},
+        end_date       => $request->{end_date},
+        ending_balance => $request->{total},
+        recon_fx       => $request->{recon_fx},
     };
+    my $wf = $request->conn->workflows->create( 'reconciliation', $recon_data );
 
-    my $recon = LedgerSMB::DBObject::Reconciliation->new(%$recon_data);
-
-    # Insert new report into database
-    $recon->new_report;
+    my $recon = LedgerSMB::DBObject::Reconciliation->new(
+        dbh => $request->{dbh},
+        report_id => $wf->context->param( 'id' ),
+        workflow_id => $wf->id,
+        );
+    $recon->refresh_pending_transactions;
 
     # Format ending balance as a PGNumber - required for display
-    $recon->{their_total} = LedgerSMB::PGNumber->from_input($request->{total});
+    $recon->{their_total} = $request->parse_amount($request->{total});
     delete $recon->{total};
 
     return _display_report($recon, $request);
@@ -375,11 +387,9 @@ delete any non-approved reports.
 sub delete_report {
     my ($request) = @_;
 
-    my $recon = LedgerSMB::DBObject::Reconciliation->new(%$request);
+    my $wf = $request->conn->workflows->fetch( 'reconciliation', $request->{workflow_id} );
+    $wf->execute_action( 'delete' );
 
-    $recon->delete($request->{report_id});
-
-    delete($request->{report_id});
     return search($request);
 }
 
@@ -406,12 +416,12 @@ sub approve {
              [ q{'report_id' parameter missing} ]
         ] if ! $request->{report_id};
 
-    my $recon = LedgerSMB::DBObject::Reconciliation->new(%$request);
+    my $wf = $request->conn->workflows->fetch( 'reconciliation', $request->{workflow_id} );
+    $wf->execute_action( 'approve' );
 
-    my $code = $recon->approve;
-    my $template = $code == 0 ? 'reconciliation/approved'
-        : 'reconciliation/report';
-    return LedgerSMB::Template::UI->new_UI
+    my $recon = LedgerSMB::DBObject::Reconciliation->new(%$request);
+    my $template = 'reconciliation/approved';
+    return $request->{_wire}->get('ui')
         ->render($request, $template, $recon);
 }
 
@@ -430,23 +440,9 @@ sub pending {
 
     my $recon = LedgerSMB::DBObject::Reconciliation->new(%$request);
 
-    my $template= LedgerSMB::Template::UI->new_UI;
+    my $template= $request->{_wire}->get('ui');
     return $template->render($request, 'reconciliation/pending', {});
 }
-
-
-{
-    local ($!, $@) = (undef, undef);
-    my $do_ = 'scripts/custom/recon.pl';
-    if ( -e $do_ ) {
-        unless ( do $do_ ) {
-            if ($! or $@) {
-                warn "\nFailed to execute $do_ ($!): $@\n";
-                die (  "Status: 500 Internal server error (recon.pm)\n\n" );
-            }
-        }
-    }
-};
 
 
 # _process_upload($recon, $request)
@@ -456,15 +452,13 @@ sub pending {
 
 sub _process_upload {
     my ($recon, $request) = @_;
-    my $contents;
-    {
-        my $handle = eval { $request->upload('csv_file') };
-        local $/ = undef;
-        $contents = <$handle> if defined $handle;
-    }
+    my $handle = eval { $request->upload('csv_file') };
 
-    if ($contents) {
-        $recon->add_entries($recon->import_file($contents));
+    if ($handle) {
+        my $cfg = $request->{_wire}->get('reconciliation_importer')
+            ->get_configuration(name => $request->{'trx_format'});
+        my $entries = $cfg->process($handle);
+        $recon->add_entries($entries);
     }
 
     return;

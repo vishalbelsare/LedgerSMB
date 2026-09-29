@@ -12,7 +12,6 @@ list of matching accounts in a ul/li pair
 
 =cut
 
-use LedgerSMB::DBObject::Account;
 use LedgerSMB::Report::GL;
 use LedgerSMB::Report::COA;
 use LedgerSMB::Report::Contact::Purchase;
@@ -33,8 +32,12 @@ sub chart_of_accounts {
     my ($request) = @_;
 
     return $request->render_report(
-        LedgerSMB::Report::COA->new(_locale => $request->{_locale},
-                                    dbh => $request->{dbh})
+        LedgerSMB::Report::COA->new(
+            formatter_options => $request->formatter_options,
+            _locale => $request->{_locale},
+            _uri => $request->{_uri},
+            dbh => $request->{dbh}),
+        formatter_options => $request->formatter_options
         );
 }
 
@@ -74,8 +77,19 @@ occurs to here.
 sub delete_account {
     my ($request) = @_;
 
-    my $account =  LedgerSMB::DBObject::Account->new(%$request);
-    $account->delete;
+    if ($request->{charttype} eq 'A') {
+        $request->call_procedure(
+            funcname => 'account__delete',
+            args     => [ $request->{id} ],
+            );
+    } elsif ($request->{charttype} eq 'H') {
+        $request->call_procedure(
+            funcname => 'account_heading__delete',
+            args     => [ $request->{id} ],
+            );
+    } else {
+        die 'Unknown charttype';
+    }
     return chart_of_accounts($request);
 }
 
@@ -93,10 +107,38 @@ sub search {
          push @{$request->{business_units}}, $request->{"business_unit_$count"}
                if $request->{"business_unit_$count"};
     }
-    #tshvr4 trying to mix in period from_month from_year interval
+
+    my @report_keys = ( 'business_units',  # created above
+                        '_uri',            # to allow sorting
+                        qw( reference accno source memo
+                            description notes
+                            from_month from_year
+                            interval
+                            is_approved
+                            is_voided
+                            category
+                            order_by
+                            old_order_by
+                            order_dir ),
+                        grep { m/^(bc_|col_)/ } keys $request->%* );
+
+    my %parsed_dates = ();
+    if ($request->{from_date}) {
+        $parsed_dates{from_date} = $request->parse_date( $request->{from_date} );
+    }
+    if ($request->{to_date}) {
+        $parsed_dates{to_date} = $request->parse_date( $request->{to_date} );
+    }
+
     return $request->render_report(
-        LedgerSMB::Report::GL->new(%$request)
-        );
+        LedgerSMB::Report::GL->new(
+            $request->%{@report_keys},
+            formatter_options => $request->formatter_options,
+            from_amount => $request->parse_amount( $request->{from_amount} ),
+            to_amount => $request->parse_amount( $request->{to_amount} ),
+            locale => $request->{_locale},
+            %parsed_dates
+        ));
 }
 
 =head2 search_purchases
@@ -114,28 +156,19 @@ sub search_purchases {
                if $request->{"business_unit_$count"};
     }
     return $request->render_report(
-        LedgerSMB::Report::Contact::Purchase->new(%$request)
-        );
+        LedgerSMB::Report::Contact::Purchase->new(
+            %$request,
+            from_date => $request->parse_date( $request->{from_date} ),
+            to_date => $request->parse_date( $request->{to_date} ),
+            as_of => $request->parse_date( $request->{as_of} ),
+            formatter_options => $request->formatter_options
+        ));
 }
-
-
-{
-    local ($!, $@) = (undef, undef);
-    my $do_ = 'scripts/custom/journal.pl';
-    if ( -e $do_ ) {
-        unless ( do $do_ ) {
-            if ($! or $@) {
-                warn "\nFailed to execute $do_ ($!): $@\n";
-                die (  "Status: 500 Internal server error (journal.pm)\n\n" );
-            }
-        }
-    }
-};
 
 
 =head1 LICENSE AND COPYRIGHT
 
-Copyright (C) 2011-2018 The LedgerSMB Core Team
+Copyright (C) 2011-2023 The LedgerSMB Core Team
 
 This file is licensed under the GNU General Public License version 2, or at your
 option any later version.  A copy of the license should have been included with

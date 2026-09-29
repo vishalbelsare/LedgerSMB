@@ -58,10 +58,8 @@
              text = text('Add/Update'),
              class="submit"
              type="submit"
-             name="action"
+             name="__action"
              value="save_exchangerate"
-             accesskey="S"
-             title="Save [Alt-S]"
          } %]
 
       [% FOREACH button IN buttons;
@@ -79,18 +77,18 @@
       [% PROCESS input element_data = {
              name = "import_file"
              type = "file"
-             label = text('From File') #'
+             label = text('From File')
              class = "file"
          } %]
 
       [% PROCESS button element_data={
              text = text('Upload'),
+             'data-lsmb-doing' = text('Uploading...')
+             'data-lsmb-done' = text('Uploaded')
              class="submit"
              type="submit"
-             name="action"
+             name="__action"
              value="upload_exchangerates"
-             accesskey="U"
-             title="Upload [Alt-U]"
          } %]
 
     </form>

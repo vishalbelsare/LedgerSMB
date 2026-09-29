@@ -1,14 +1,15 @@
 #!perl
 
+requires 'perl', '5.38.0';
 
-requires 'perl', '5.32.0';
-
-requires 'Authen::SASL';
+requires 'Array::PrintCols';
+requires 'Archive::Zip';
+recommends 'Authen::SASL';
+requires 'Beam::Wire';
 requires 'CGI::Emulate::PSGI';
 requires 'CGI::Parse::PSGI';
-requires 'Config::IniFiles';
 requires 'Cookie::Baker', '0.10'; # for 'samesite' attribute
-requires 'DBD::Pg', '3.3.0';
+requires 'DBD::Pg', '3.5.0';      # Due to being able to escape '?' placeholders
 requires 'DBI', '1.635';
 requires 'Data::UUID';
 requires 'DateTime';
@@ -16,50 +17,101 @@ requires 'DateTime::Format::Duration::ISO8601', '0.008';
 requires 'DateTime::Format::Strptime';
 requires 'Email::MessageID';
 requires 'Email::Sender::Simple';
-requires 'Email::Sender::Transport::SMTP';
+requires 'Email::Sender', '2.601'; # 2.601 adds 'sasl_authenticator'
 requires 'Email::Stuffer';
-requires 'Feature::Compat::Try';
 requires 'File::Find::Rule';
 requires 'Hash::Merge';
 requires 'HTML::Entities';
 requires 'HTML::Escape';
+requires 'HTTP::AcceptLanguage';
 requires 'HTTP::Headers::Fast', '0.21'; # for content_is_text() method
+requires 'HTTP::Negotiate', '6.01';
 requires 'HTTP::Status';
-requires 'IO::Scalar';
+requires 'HTTP::Throwable::Factory';
 requires 'JSON::MaybeXS';
+requires 'JSONSchema::Validator', '0.010';
 recommends 'Cpanel::JSON::XS', '3.0206'; # 3.0206 adds 'allow_bignum' option
 recommends 'JSON::PP', '2.00'; # 1.99_01 adds 'allow_bignum'
+requires 'JSONSchema::Validator';
+
+# the modules below are sorted in the same order as the
+#   Locale::CLDR::* modules
+requires 'Lingua::Num2Word';
+requires 'Lingua::AFR::Num2Word';
+requires 'Lingua::ARA::Num2Word';
+requires 'Lingua::BUL::Num2Word';
+requires 'Lingua::CAT::Num2Word';
+requires 'Lingua::CES::Num2Word'; # iso 639 says cze
+requires 'Lingua::DAN::Num2Word';
+requires 'Lingua::DEU::Num2Word'; # iso 639 says ger
+requires 'Lingua::ELL::Num2Word'; # iso 639 says gre
+requires 'Lingua::ENG::Num2Word';
+requires 'Lingua::SPA::Num2Word';
+requires 'Lingua::EST::Num2Word';
+requires 'Lingua::FAS::Num2Word'; # iso 639 says per
+requires 'Lingua::FIN::Num2Word';
+requires 'Lingua::FRA::Num2Word'; # iso 639 says fre
+requires 'Lingua::HEB::Num2Word';
+requires 'Lingua::HUN::Num2Word';
+requires 'Lingua::HUN::Num2Word';
+requires 'Lingua::IND::Num2Word';
+requires 'Lingua::ISL::Num2Word'; # iso 639 says ice
+requires 'Lingua::ITA::Num2Word';
+requires 'Lingua::JPN::Num2Word';
+# requires 'Lingua::JAV::Num2Word';
+requires 'Lingua::LIT::Num2Word';
+requires 'Lingua::IND::Num2Word';
+# requires 'Lingua::MAY::Num2Word';
+requires 'Lingua::NOR::Num2Word'; # iso 639 says nob
+requires 'Lingua::NLD::Num2Word'; # iso 639 says dut
+requires 'Lingua::POL::Num2Word';
+requires 'Lingua::POR::Num2Word';
+requires 'Lingua::RUS::Num2Word';
+requires 'Lingua::SWE::Num2Word';
+requires 'Lingua::THA::Num2Word';
+requires 'Lingua::TUR::Num2Word';
+requires 'Lingua::UKR::Num2Word';
+requires 'Lingua::ZHO::Num2Word'; # iso 639 says chi
+
 requires 'List::MoreUtils';
-requires 'Locale::CLDR';
+requires 'Locale::CLDR', '0.44.1';
 # Keep thoss in sync with the languages defined in Pg-database.sql
-requires 'Locale::CLDR::Locales::Ar';
-requires 'Locale::CLDR::Locales::Bg';
-requires 'Locale::CLDR::Locales::Ca';
-requires 'Locale::CLDR::Locales::Cs';
-requires 'Locale::CLDR::Locales::Da';
-requires 'Locale::CLDR::Locales::De';
-requires 'Locale::CLDR::Locales::El';
-requires 'Locale::CLDR::Locales::En';
-requires 'Locale::CLDR::Locales::Es';
-requires 'Locale::CLDR::Locales::Et';
-requires 'Locale::CLDR::Locales::Fi';
-requires 'Locale::CLDR::Locales::Fr';
-requires 'Locale::CLDR::Locales::Hu';
-requires 'Locale::CLDR::Locales::Id';
-requires 'Locale::CLDR::Locales::Is';
-requires 'Locale::CLDR::Locales::It';
-requires 'Locale::CLDR::Locales::Lt';
-requires 'Locale::CLDR::Locales::Ms';
-requires 'Locale::CLDR::Locales::Nb';
-requires 'Locale::CLDR::Locales::Nl';
-requires 'Locale::CLDR::Locales::Pl';
-requires 'Locale::CLDR::Locales::Pt';
-requires 'Locale::CLDR::Locales::Ru';
-requires 'Locale::CLDR::Locales::Sv';
-requires 'Locale::CLDR::Locales::Tr';
-requires 'Locale::CLDR::Locales::Uk';
-requires 'Locale::CLDR::Locales::Zh';
+requires 'Locale::CLDR::Locales::Af', '0.44.1';
+requires 'Locale::CLDR::Locales::Ar', '0.44.1';
+requires 'Locale::CLDR::Locales::Bg', '0.44.1';
+requires 'Locale::CLDR::Locales::Ca', '0.44.1';
+requires 'Locale::CLDR::Locales::Cs', '0.44.1';
+requires 'Locale::CLDR::Locales::Da', '0.44.1';
+requires 'Locale::CLDR::Locales::De', '0.44.1';
+requires 'Locale::CLDR::Locales::El', '0.44.1';
+requires 'Locale::CLDR::Locales::En', '0.44.1';
+requires 'Locale::CLDR::Locales::Es', '0.44.1';
+requires 'Locale::CLDR::Locales::Et', '0.44.1';
+requires 'Locale::CLDR::Locales::Fa', '0.44.1';
+requires 'Locale::CLDR::Locales::Fi', '0.44.1';
+requires 'Locale::CLDR::Locales::Fr', '0.44.1';
+requires 'Locale::CLDR::Locales::He', '0.44.1';
+requires 'Locale::CLDR::Locales::Hu', '0.44.1';
+requires 'Locale::CLDR::Locales::Id', '0.44.1';
+requires 'Locale::CLDR::Locales::Is', '0.44.1';
+requires 'Locale::CLDR::Locales::It', '0.44.1';
+requires 'Locale::CLDR::Locales::Ja', '0.44.1';
+requires 'Locale::CLDR::Locales::Jv', '0.44.1';
+requires 'Locale::CLDR::Locales::Lt', '0.44.1';
+requires 'Locale::CLDR::Locales::Ms', '0.44.1';
+requires 'Locale::CLDR::Locales::Nb', '0.44.1';
+requires 'Locale::CLDR::Locales::Nl', '0.44.1';
+requires 'Locale::CLDR::Locales::Pl', '0.44.1';
+requires 'Locale::CLDR::Locales::Pt', '0.44.1';
+requires 'Locale::CLDR::Locales::Ru', '0.44.1';
+requires 'Locale::CLDR::Locales::Sv', '0.44.1';
+requires 'Locale::CLDR::Locales::Th', '0.44.1';
+requires 'Locale::CLDR::Locales::Tr', '0.44.1';
+requires 'Locale::CLDR::Locales::Uk', '0.44.1';
+requires 'Locale::CLDR::Locales::Zh', '0.44.1';
+requires 'Locale::Codes::Language';
 requires 'Locale::Maketext::Lexicon', '0.62';
+requires 'Locales';
 requires 'Log::Any';
 requires 'Log::Any::Adapter';
 requires 'Log::Any::Adapter::Log4perl';
@@ -68,8 +120,8 @@ requires 'Log::Log4perl::Layout::PatternLayout';
 requires 'LWP::Simple';
 requires 'MIME::Types';
 requires 'Module::Runtime';
-requires 'Moo';                           # for Email::Sender::Transport::SMTP workaround
-requires 'MooX::Types::MooseLike::Base';  # for Email::Sender::Transport::SMTP workaround
+requires 'Moo';
+requires 'Moo::Role';
 requires 'Moose';
 requires 'Moose::Role';
 requires 'Moose::Util::TypeConstraints';
@@ -83,17 +135,18 @@ requires 'PGObject', '2.3.2';
 requires 'PGObject::Simple', '3.1.0';
 requires 'PGObject::Simple::Role', '2.1.1';
 requires 'PGObject::Type::Registry';
-requires 'PGObject::Type::BigFloat', '2.0.1';
+requires 'PGObject::Type::BigFloat', '2.1.1';
 requires 'PGObject::Type::DateTime', '2.0.2';
 requires 'PGObject::Type::ByteString', '1.2.3';
 requires 'PGObject::Util::DBMethod', '1.1.0';
-requires 'PGObject::Util::DBAdmin', '1.6.1';
+requires 'PGObject::Util::DBAdmin', '1.6.2';
 requires 'Plack', '1.0031';
-requires 'Plack::App::File';
 requires 'Plack::Builder';
 requires 'Plack::Builder::Conditionals';
 requires 'Plack::Middleware::ConditionalGET';
+requires 'Plack::Middleware::HTTPExceptions';
 requires 'Plack::Middleware::ReverseProxy';
+requires 'Plack::Middleware::Static';
 requires 'Plack::Request';
 requires 'Plack::Request::WithEncoding';
 requires 'Plack::Util';
@@ -102,23 +155,30 @@ requires 'Pod::Find';
 requires 'Scope::Guard', '0.10';
 requires 'Session::Storage::Secure';
 requires 'String::Random';
+requires 'Sublike::Extended', '0.29';
 requires 'Template', '2.14';
 requires 'Template::Parser';
 requires 'Template::Provider';
 requires 'Text::CSV';
 requires 'Text::Markdown';
+requires 'Throwable';
+requires 'URI';
 requires 'URI::Escape';
-requires 'Workflow::Context', '1.57';
-requires 'Workflow::Exception', '1.57';
-requires 'Workflow::Factory', '1.57';
-requires 'Workflow::Persister::DBI', '1.57';
-requires 'Workflow::Persister::DBI::ExtraData', '1.57';
+requires 'Workflow', '2.10'; # 2.10 Fixes use of bare hash context initialization
+requires 'Workflow::Action', '2.10';
+requires 'Workflow::Condition', '2.10';
+requires 'Workflow::Context', '2.10';
+requires 'Workflow::Exception', '2.10';
+requires 'Workflow::Factory', '2.10';
+requires 'Workflow::Persister', '2.10';
 requires 'XML::LibXML';
 requires 'XML::LibXML::XPathContext';
-requires 'YAML';
+requires 'YAML::PP';
 requires 'namespace::autoclean';
 
+# Recommendations for performance:
 recommends 'Math::BigInt::GMP';
+recommends 'Class::C3::XS';
 
 feature 'starman', 'Standalone Server w/Starman' =>
     sub {
@@ -159,10 +219,9 @@ feature 'xls', 'Microsoft Excel' =>
 # Even with cpanm --notest, 'test' target of --installdeps
 # will be included, so put our testing requirements in develop...
 on 'develop' => sub {
-    requires 'App::Prove', '3.41'; # parallel testing of pipe and socket sources
     requires 'Capture::Tiny';
     requires 'DBD::Mock', '1.58';
-    requires 'File::Util';
+    requires 'File::Grep';
     requires 'HTML::Lint';
     requires 'HTML::Lint::Parser', '2.26';
     requires 'HTML::Lint::Pluggable';
@@ -173,30 +232,24 @@ on 'develop' => sub {
     requires 'Perl::Critic';
     requires 'Perl::Critic::Moose';
     requires 'Perl::Critic::Policy::Modules::RequireExplicitInclusion';
-    requires 'Pherkin::Extension::Weasel', '0.15';
-    requires 'Plack::Middleware::Pod'; # YLA - Generate browseable documentation
+    requires 'PPI', '1.291';
+    requires 'Pherkin::Extension::Weasel', '0.18';
     requires 'Pod::ProjectDocs';
-    requires 'Selenium::Remote::Driver';
+    requires 'Selenium::Client';
     requires 'TAP::Parser::SourceHandler::pgTAP', '3.33';
-    requires 'Test::BDD::Cucumber', '0.79';
-    if ($ENV{CI}) {
-        # Required to suppress a variable re-definition
-        requires 'Test::Dependencies', '0.30';
-    }
-    else {
-        requires 'Test::Dependencies', '0.25';
-    }
-    requires 'Test::Harness', '3.41'; # parallel testing of pipe and socket sources
+    requires 'Test::BDD::Cucumber', '0.87';
+    requires 'Test::Dependencies', '0.34';
     requires 'Test::Pod', '1.00';
     requires 'Test::Pod::Coverage';
     requires 'Test2::Harness';
+    requires 'Test2::Mock';
     requires 'Test2::V0';
     requires 'Test2::Plugin::Feature', '0.001112';
     requires 'Test2::Plugin::pgTAP';
     requires 'Text::Diff';
-    requires 'Weasel', '0.29';
-    requires 'Weasel::Driver::Selenium2', '0.12';
-    requires 'Weasel::Session', '0.11';
+    requires 'Weasel', '0.32';
+    requires 'Weasel::Driver::Selenium4', '0.01';
+    requires 'Weasel::Session', '0.32';
     requires 'Weasel::Widgets::Dojo', '0.07';
 
     feature 'debug', 'Debug pane' =>

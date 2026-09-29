@@ -32,10 +32,6 @@ key which can be used to create a database connection.
 When C<none>, the database connection created to authenticate the user
 is closed. No additional action is taken.
 
-=head2 default_company
-
-The default company to use.
-
 =cut
 
 use strict;
@@ -47,10 +43,9 @@ use HTTP::Status qw( is_server_error );
 use Plack::Request;
 use Plack::Util;
 use Plack::Util::Accessor
-    qw( provide_connection default_company schema );
+    qw( provide_connection factory );
 use Scope::Guard qw( guard );
 
-use LedgerSMB::Database;
 use LedgerSMB::PSGI::Util;
 
 =head1 METHODS
@@ -71,8 +66,7 @@ added to authenticate and create a database connection on demand.
 =head2 lsmb.db_cb($env, [$login, $password, [$company]])
 
 Returns a database handle connected to C<$company> using the credentials
-C<$login> and C<$password>, if supplied. If C<$company> isn't provided,
-the value of the C<default_company> attribute is used.
+C<$login> and C<$password>, if supplied.
 
 When C<$login> isn't provided, credentials are taken from the session
 storage available through C<$env->{'lsmb.session'}>.
@@ -95,14 +89,12 @@ sub _connect {
         return (undef, LedgerSMB::PSGI::Util::unauthorized());
     }
 
-    my $schema = $self->schema =~ s/'/''/gr;
-    my $dbh = $env->{'lsmb.db'} =
-        LedgerSMB::Database->new(
-            schema => $schema,
-            connect_data => \%creds
-        )->connect;
+    my $dbh = eval {
+        $env->{'lsmb.db'} = $self->factory->instance( %creds )->connect;
+    };
 
-    if (! defined $dbh) {
+    if (not defined $dbh
+        and DBI->errstr) {
         $env->{'psgix.logger'}->(
             {
                 level => 'error',
@@ -113,6 +105,9 @@ sub _connect {
             die q{Invalid credentials};
         }
         return (undef, LedgerSMB::PSGI::Util::unauthorized());
+    }
+    elsif (not defined $dbh) {
+        die $@;
     }
 
     if (! $session->{login}) {
@@ -171,6 +166,7 @@ sub call {
 
 
     $env->{__dbh_guard__} = guard {
+        return if ${^GLOBAL_PHASE} eq 'DESTRUCT';
         if ($dbh and $dbh->{Active}) {
             $dbh->rollback;
             $dbh->disconnect;

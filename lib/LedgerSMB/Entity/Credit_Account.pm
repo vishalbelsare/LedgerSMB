@@ -13,9 +13,9 @@ To get by ID:
 
 To get by customer/vendor number:
 
- my $eca = LedgerSMB::Entity::Credit_Account->get_by_meta_number(
-          $customernumber, $entity_class
- );
+ my $eca = LedgerSMB::Entity::Credit_Account
+     ->new(dbh => $dbh, entity_class => $entity_class)
+     ->get_by_meta_number($customernumber);
 
 To save
 
@@ -80,7 +80,7 @@ Early payment discount percent.
 
 =cut
 
-has 'discount' => (is => 'rw', coerce => 1, isa => 'LedgerSMB::Moose::Number');
+has 'discount' => (is => 'rw', isa => 'LedgerSMB::PGNumber');
 
 =item description
 
@@ -120,7 +120,7 @@ The total debt that is acceptable for the account
 
 =cut
 
-has 'creditlimit' => (is => 'rw', coerce => 1, isa => 'LedgerSMB::Moose::Number');
+has 'creditlimit' => (is => 'rw', isa => 'LedgerSMB::PGNumber');
 
 =item current_debt
 
@@ -130,8 +130,8 @@ operation.  Use get_current_debt() to set it.
 
 =cut
 
-has 'current_debt' => (is => 'rw', isa => 'LedgerSMB::Moose::Number',
-                       coerce => 1, lazy => 1, builder => 'get_current_debt');
+has 'current_debt' => (is => 'rw', isa => 'LedgerSMB::PGNumber',
+                       lazy => 1, builder => 'get_current_debt');
 
 =item terms
 
@@ -204,8 +204,8 @@ The last allowable date for invoices
 
 =cut
 
-has 'startdate' => (is => 'rw', coerce => 1, isa => 'LedgerSMB::Moose::Date');
-has 'enddate'   => (is => 'rw', coerce => 1, isa => 'LedgerSMB::Moose::Date');
+has 'startdate' => (is => 'rw', isa => 'LedgerSMB::PGDate');
+has 'enddate'   => (is => 'rw', isa => 'LedgerSMB::PGDate');
 
 =item threshold
 
@@ -213,7 +213,7 @@ Do not show invoices as available for payment/receipt until over this threshold
 
 =cut
 
-has 'threshold' => (is => 'rw', coerce => 1, isa => 'LedgerSMB::Moose::Number');
+has 'threshold' => (is => 'rw', isa => 'LedgerSMB::PGNumber');
 
 =item employee_id
 
@@ -270,6 +270,15 @@ This is the tax reporting form associated with the account.
 
 has 'taxform_id' => (is => 'rw', isa => 'Maybe[Int]', required => 0);
 
+=item is_used
+
+Boolean indicating whether the credit account is used (and therefor not
+deletable).
+
+=cut
+
+has 'is_used' => (is => 'ro', isa => 'Bool', required => 0);
+
 =back
 
 =head1 METHODS
@@ -295,7 +304,7 @@ sub get_by_id {
     return __PACKAGE__->new(%$ref);
 }
 
-=item get_by_meta_number($meta_number string, $entity_class int)
+=item get_by_meta_number($meta_number string)
 
 Retrieves and returns the entity credit account, of entity class $entity_class,
 identified by $meta_number
@@ -303,12 +312,15 @@ identified by $meta_number
 =cut
 
 sub get_by_meta_number {
-    my ($self, $meta_number, $entity_class) = @_;
-    my ($ref) = __PACKAGE__->call_procedure(funcname => 'eca__get_by_meta_number',
+    my ($self, $meta_number) = @_;
+    my $entity_class = $self->entity_class;
+    my ($ref) = $self->call_procedure(funcname => 'eca__get_by_meta_number',
                                           args => [$meta_number,
                                                    $entity_class]);
-    $ref->{tax_ids} = __PACKAGE__->_get_tax_ids($ref->{id});
-    return __PACKAGE__->new(%$ref, entity_class => $entity_class);
+    $ref->{tax_ids} = $self->_get_tax_ids($ref->{id});
+    return __PACKAGE__->new(dbh => $self->{_dbh},
+                            entity_class => $entity_class,
+                            %$ref);
 }
 
 # Private methid _get_tax_ids
@@ -317,7 +329,7 @@ sub get_by_meta_number {
 sub _get_tax_ids {
     my ($self, $id) = @_;
     my @tax_ids;
-    my @results = __PACKAGE__->call_procedure(funcname => 'eca__get_taxes',
+    my @results = $self->call_procedure(funcname => 'eca__get_taxes',
                                             args => [$id]);
     for my $ref (@results){
         push @tax_ids, $ref->{chart_id};
@@ -359,6 +371,18 @@ sub get_current_debt {
     my ($ref) = $self->call_dbmethod(funcname => 'eca__get_current_debt');
     $self->current_debt($ref->{eca__get_current_debt});
     return $self->current_debt;
+}
+
+=item del()
+
+Removes the entity credit account.
+
+=cut
+
+sub del {
+    my ($self) = @_;
+
+    $self->call_dbmethod(funcname => 'eca__delete');
 }
 
 =item save()
@@ -442,7 +466,7 @@ sub save_pricematrix {
 
 =head1 LICENSE AND COPYRIGHT
 
-Copyright (C) 2012 The LedgerSMB Core Team
+Copyright (C) 2012-2023 The LedgerSMB Core Team
 
 This file is licensed under the GNU General Public License version 2, or at your
 option any later version.  A copy of the license should have been included with

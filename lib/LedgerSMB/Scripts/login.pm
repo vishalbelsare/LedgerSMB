@@ -3,11 +3,11 @@ package LedgerSMB::Scripts::login;
 
 =head1 NAME
 
-LedgerSMB:Scripts::login - web entry points for session creation/termination
+LedgerSMB:Scripts::login - web entry points for session creation
 
 =head1 DESCRIPTION
 
-This script contains the request handlers for logging in and out of LedgerSMB.
+This script contains the request handlers for logging in of LedgerSMB.
 
 =head1 METHODS
 
@@ -18,12 +18,12 @@ This script contains the request handlers for logging in and out of LedgerSMB.
 use strict;
 use warnings;
 
+use Digest::MD5 qw( md5_hex );
 use HTTP::Status qw( HTTP_OK );
 use JSON::MaybeXS;
+use URI::Escape;
 
 use LedgerSMB::PSGI::Util;
-use LedgerSMB::Sysconfig;
-use LedgerSMB::Template::UI;
 
 our $VERSION = 1.0;
 
@@ -39,7 +39,7 @@ sub __default {
     $request->{_req}->env->{'lsmb.session.expire'} = 1;
     $request->{stylesheet} = 'ledgersmb.css';
     $request->{titlebar} = "LedgerSMB $request->{version}";
-    my $template = LedgerSMB::Template::UI->new_UI;
+    my $template = $request->{_wire}->get('ui');
     return $template->render($request, 'login', $request);
 }
 
@@ -78,48 +78,25 @@ sub authenticate {
         || ! $r->{password}) {
         return LedgerSMB::PSGI::Util::unauthorized();
     }
-    $r->{company} ||= LedgerSMB::Sysconfig::default_db();
+
+    if (my $settings = $request->{_wire}->get( 'login_settings' )) {
+        $r->{company} ||= $settings->{default_db};
+    }
     if (my $r = $request->{_create_session}->($r->{login},
-                                      $r->{password},
-                                      $r->{company})) {
+                                              $r->{password},
+                                              $r->{company})) {
         return $r;
     }
 
+    $request->{_req}->env->{'lsmb.session'}->{company_path} =
+        md5_hex( $r->{company} );
+    my $token = $request->{_req}->env->{'lsmb.session'}->{company_path};
+    my $user  = uri_escape( $r->{login} );
     return [ HTTP_OK,
              [ 'Content-Type' => 'application/json' ],
-             [ '{ "target":  "erp.pl?action=root" }' ]];
+             [ qq|{ "target":  "$token/erp.pl?user=$user" }| ]];
 }
 
-=item logout
-
-Logs the user out.  Handling of HTTP browser credentials is browser-specific.
-
-Firefox, Opera, and Internet Explorer are all supported.  Not sure about Chrome
-
-=cut
-
-sub logout {
-    my ($request) = @_;
-    $request->{callback}   = '';
-
-    $request->{_logout}->();
-    my $template = LedgerSMB::Template::UI->new_UI;
-    return $template->render($request, 'logout', $request);
-}
-
-
-{
-    local ($!, $@) = ( undef, undef);
-    my $do_ = 'scripts/custom/login.pl';
-    if ( -e $do_ ) {
-        unless ( do $do_ ) {
-            if ($! or $@) {
-                warn "\nFailed to execute $do_ ($!): $@\n";
-                die (  "Status: 500 Internal server error (login.pm)\n\n" );
-            }
-        }
-    }
-};
 
 =back
 

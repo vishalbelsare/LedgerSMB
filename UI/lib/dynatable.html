@@ -57,6 +57,8 @@
    #                              href_base value specified by ${col_id}
    #                              when that's an 'href' typed column
    #    - ${col_id}_NOHREF     : boolean suppressing 'href'; using 'text'
+   #    - ${col_id}_ROWSPAN    : integer number of rows to span
+   #    - ${col_id}_ROWSPANNED : boolean indicating cell is spanned by a prior row
 
    # the elements in the 'tfoot' hash support these attributes:
    #  - rows         : an array of hashes with the values for each column
@@ -71,13 +73,16 @@
         width="[% attributes.width %]">
 [%- IF !hide_header %]
   <thead>
-   <tr>[%
+   <tr><th style="display:none"></th>[%
       FOREACH COL IN columns;
-        IF COL.type != 'hidden'; %]
+        IF COL.type == 'hidden'; %]
+     <th style="display:none"></th>
+     [% ELSE %]
     <th class="[% COL.col_id _ ' ' _ COL.class _ ' ' _ COL.type %]">[%
 
-IF attributes.order_url and not COL.toggle
-%]<a href="[% order_url | url %]&amp;order_by=[% COL.col_id %]">[% COL.name %]</a>[%
+IF attributes.order_url and not COL.toggle ;
+# the order url is already to be URL encoded -- Report.pm takes care of that
+%]<a href="[% order_url %]&amp;order_by=[% COL.col_id %]">[% COL.name %]</a>[%
 ELSIF COL.toggle ;
   query = "input[name^=\\'" _ PFX _ COL.col_id _ "_\\']";
 %]<button type="button" data-dojo-type="lsmb/ToggleIncludeButton" data-dojo-props="query:'[% query %]'">[% COL.name %]</button>[%
@@ -94,13 +99,26 @@ END; %]</th>
    PFX = attributes.input_prefix;
    FOREACH ROW IN tbody.rows;
       ROWCOUNT = ROWCOUNT + 1 -%]
-   <tr class="[% ROW.html_class _ ' ' _ ROW.row_id %]">
+<tr class="[% ROW.html_class _ ' ' _ ROW.row_id %]">
+  <td style="display:none">
       [% PROCESS input element_data = {
                                  type="hidden"
                                  name=PFX _ "row_" _ ROWCOUNT
                     value=ROW.row_id };
-         "\n";
+      %]</td>
+[%
          FOREACH COL IN columns;
+            ROWSPANNED = COL.col_id _ "_ROWSPANNED";
+            IF ROW.$ROWSPANNED;
+               NEXT;
+            END;
+            ROWSPAN = COL.col_id _ "_ROWSPAN";
+            IF ROW.$ROWSPAN;
+               ROWSPAN=" rowspan=\"" _ ROW.$ROWSPAN _ "\"";
+            ELSE;
+               ROWSPAN="";
+            END;
+
             TYPE = COL.type;
             NOHREF = COL.col_id _ "_NOHREF";
             IF (ROW.NOINPUT AND TYPE != 'href' AND TYPE != 'hidden')
@@ -109,15 +127,14 @@ END; %]</th>
             END;
             IF TYPE == 'hidden';
                NAME = PFX _ COL.col_id _ '_' _ ROW.row_id;
-
+%]<td style="display:none">[%
                PROCESS input element_data = {
                            type  = "hidden"
                            name  = NAME
                            value = ROW.${COL.col_id}
-               };
-               "\n";
-            ELSE; -%]
-      <td class="[% COL.col_id %] [% COL.class %] [% COL.type %]">[%
+    }; %]</td>
+[% ELSE; -%]
+      <td class="[% COL.col_id %] [% COL.class %] [% COL.type %]"[% ROWSPAN %]>[%
                IF TYPE == 'text';
                  ROW.${COL.col_id};
                ELSIF TYPE == 'input_text';
@@ -137,14 +154,15 @@ END; %]</th>
                                           name=PFX _ COL.col_id _ '_' _ ROW.row_id
                                           value=ROW.${COL.col_id} };
                ELSIF TYPE == 'checkbox';
-                 PROCESS input element_data = {
-                          id=PFX _ COL.col_id _ '-' _ ROWCOUNT
-                          type="checkbox"
-                          name=PFX _ COL.col_id _ '_' _ ROWCOUNT
-                          class=COL.class
-                          value=ROW.row_id
-                          checked=(ROW.${COL.col_id} ? "checked" : '') };
-
+                 IF ROW.row_id.defined;
+                    PROCESS input element_data = {
+                            id=PFX _ COL.col_id _ '-' _ ROWCOUNT
+                            type="checkbox"
+                            name=PFX _ COL.col_id _ '_' _ ROWCOUNT
+                            class=COL.class
+                            value=ROW.row_id
+                            checked=(ROW.${COL.col_id} ? "checked" : '') };
+                 END;
                ELSIF TYPE == 'boolean_checkmark';
                  IF ROW.${COL.col_id};
                        '✓';
@@ -229,11 +247,11 @@ END; %]</th>
           <td colspan="[% SPACECOUNT %]">&nbsp;</td>
        [% END;
        IF TYPE == 'hidden';
-       NAME = PFX _ COL.col_id _ '_' _ '_tfoot_' _ ROWCOUNT; -%]
-       [% PROCESS input element_data = {
+          NAME = PFX _ COL.col_id _ '_' _ '_tfoot_' _ ROWCOUNT; -%]<td style="display:none">[%
+              PROCESS input element_data = {
                                   type="hidden"
               name=NAME
-              value=ROW.${COL.col_id} } %]
+              value=ROW.${COL.col_id} } %]</td>
      [%- ELSE %]
      <td class="[% COL.col_id %]">
        [%
@@ -281,9 +299,9 @@ END; %]</th>
    [%- END -%]
   </tfoot>
 [% END; -%]
+ </table>
   [% PROCESS input element_data = {
        type="hidden"
        name="rowcount_" _ attributes.id
        value=ROWCOUNT } %]
- </table>
 [% END #block %]

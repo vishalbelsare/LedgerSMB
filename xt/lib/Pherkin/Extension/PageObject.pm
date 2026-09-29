@@ -56,7 +56,6 @@ sub pre_scenario {
     $self->last_stash($stash);
     $stash->{ext_page} = $self;
 
-    local $LedgerSMB::App_State::User = {};
     $stash->{today} = LedgerSMB::PGDate->today->to_output;
 }
 
@@ -81,7 +80,7 @@ sub post_step {
     my $scenario = $step_context->scenario;
 
     if ((lc($step_context->verb) eq 'when')
-        and (any { $_ eq 'weasel' } @{$scenario->tags})) {
+        and (any { $_ eq '@weasel' } @{$scenario->tags})) {
         my $s = $step_context->stash->{scenario};
 
         # is there a maindiv element?
@@ -94,10 +93,7 @@ sub post_step {
             eval {
                 $w->wait_for(
                     sub {
-                        my $rv = (any { $_ eq 'done-parsing' }
-                                  split( /\s+/,
-                                         $maindiv->get_attribute('class')));
-                        return $rv;
+                        return $maindiv->get_attribute('data-lsmb-done');
                     });
             };
         }

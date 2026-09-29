@@ -15,9 +15,6 @@ specified output method.
 use strict;
 use warnings;
 
-use LedgerSMB::Setting;
-use LedgerSMB::Sysconfig;
-
 use Log::Any;
 
 
@@ -44,7 +41,7 @@ sub render_psgi {
     print join('', @{$psgi->[2]});
 }
 
-=head2 output_template($template, $form, %args)
+=head2 output_template($template, $form, [method => $method])
 
 supported keys in C<%args>:
 
@@ -55,10 +52,6 @@ supported keys in C<%args>:
 Determines where to send the output. Allowed values:
 
 print|screen|<printer name>
-
-=item printmode + OUT
-
-=item filename
 
 =back
 
@@ -76,20 +69,12 @@ sub output_template {
 
     my $method = $args{method} // '';
 
-    if (defined $args{OUT} and $args{printmode} eq '>'){ # To file
-        open my $fh, '>', $args{OUT}
-           or die "Can't write to file $args{OUT}";
-        binmode $fh, ':raw';
-        print $fh $template->{output}
-           or die "Can't write to file $args{OUT}";
-        close $fh
-            or warn "Can't close handle of $args{OUT}";
-    } elsif ('print' eq lc $method) {
-        _output_template_lpr($template);
+    if ('print' eq lc $method) {
+        _output_template_lpr($form->{_wire}, $template);
     } elsif (lc $method eq 'screen') {
         _output_template_http($template);
     } elsif (defined $method and $method ne '' ) {
-        _output_template_lpr($template);
+        _output_template_lpr($form->{_wire}, $template);
     } else {
         _output_template_http($template, $form, %args);
     }
@@ -146,17 +131,18 @@ sub _output_template_http {
 }
 
 sub _output_template_lpr {
-    my ($self) = shift;
-    my $args = $self->{output_options};
-    if ($self->{format} ne 'LaTeX') {
+    my ($wire, $template) = @_;
+    my $args = $template->{output_options};
+    if ($template->{format_plugin}->format ne 'PDF'
+        and $template->{format_plugin}->format ne 'PS') {
         die 'Invalid Format';
     }
-    my $lpr = LedgerSMB::Sysconfig::printer()->{$args->{method}};
+    my $lpr = $wire->get( 'printers' )->get( $args->{method} );
 
     open my $pipe, '|-', $lpr
         or die "Failed to open lpr pipe $lpr : $!";
 
-   print $pipe $self->{output}
+   print $pipe $template->{output}
         or die "Cannot print to $lpr";
 
     close $pipe or die "Cannot close pipe to $lpr";

@@ -5,21 +5,14 @@
 
 <body class="lsmb [% dojo_theme %]">
 <div id="journal-entry">
-[% CLASS = 'new';
-   IF form.id and form.approved;
-       CLASS = 'posted';
-   ELSIF id;
-       CLASS = 'saved';
-   END;
-%]<div id="statusdiv" class="[% CLASS %]">
-    <div id="history">[% text('Action: [_1], ID: [_2]', form.action, form.id);
-      %]</div>
 
-
-<form data-dojo-type="lsmb/Form" method="post" action="[% form.script %]">
+  <form data-dojo-type="lsmb/Form"
+        data-lsmb-focus="[% form.focus %]"
+        method="post"
+        action="[% form.script %]">
 <table width="100%">
 <tr>
-    <th class="listtop" >[% form.title %]</th>
+    <th class="listtop" colspan="2">[% form.title %]</th>
 </tr>
 
 <tr>
@@ -34,7 +27,7 @@
                         type = "text",
                         size = "20",
                         class = 'reference'
-                        id = "ref_1"
+                        id = "reference"
                 };
              IF form.sequences;
                  PROCESS select element_data = {
@@ -49,13 +42,14 @@
          </td>
           <th align="right">[% text('Date') %]</th>
           <td>
-              [% INCLUDE input element_data = {
+              [%
+              DEFAULT form.transdate = 'today';
+              INCLUDE input element_data = {
                         name = "transdate"
-         id = "transdate"
+                        id = "transdate"
                         value = form.transdate
                         size = "11"
-                        type = 'text'
-                        class = 'date'
+                        type = 'date'
               } %]
           </td>
         </tr>
@@ -115,21 +109,38 @@
         <tr>
           <th align="right">[% text('FX') %]</th>
           <td colspan="3">
-            [% PROCESS input element_data = {
+            <input type="checkbox"
                    name="fx_transaction"
-                   type='checkbox'
-                   class='fx_checkbox'
-                   "data-dojo-type"="lsmb/journal/fx_checkbox"
-                   value=1
-                   checked=form.fx_transaction } %]
+                   id="fx-transaction"
+                   value="1"
+                   [% form.fx_transaction ? 'checked="checked"' : '' %]
+                   data-dojo-type="lsmb/journal/fx_checkbox">
           </td>
         </tr>
       </table>
     </td>
+    <td style="vertical-align: middle;"><a href="gl.pl?__action=edit&amp;id=[% form.reversed_by %]">
+      [% IF form.reversed_by ;
+           text('This transaction has been reversed by transaction [_1] with ID [_2]', form.reversed_by_reference, form.reversed_by);
+         END %]
+      </a><br/>
+      <a href="gl.pl?__action=edit&amp;id=[% form.reversing %]">
+      [% IF form.reversing ;
+           IF form.approved ;
+              text('This transaction reverses transaction [_1] with ID [_2]', form.reversing_reference, form.reversing);
+           ELSE ;
+              text('This transaction will reverse transaction [_1] with ID [_2]', form.reversing_reference, form.reversing);
+           END ;
+      END %]
+      </a>
+      <br />
+      <br />
+      [% text('Status:') %] [% form.status %]
+    </td>
  </tr>
 
 <tr>
-    <td>
+    <td colspan="2">
       <table width="100%" id="transaction-table"
              [% IF form.fx_transaction ;
                     'class="fx-transaction"' ;
@@ -137,6 +148,7 @@
                     'class="no-fx-transaction"' ;
                     END -%]
              >
+        <thead>
           <tr class="listheading">
           <th class="listheading">[% text('Account') %]</th>
           <th class="listheading">[% text('FX') %]</th>
@@ -144,48 +156,33 @@
           <th class="listheading">[% text('Credit') %]</th>
           <th class="listheading">[% text('Source') %]</th>
           <th class="listheading">[% text('Memo') %]</th>
-          [% IF form.projectset == 1 %]
-          <th class="listheading">[% text('Project') %]</th>
-          [% END %]
           [% FOREACH cls IN form.bu_class %]
               [% IF form.b_units.${cls.id} %]
-          <th>[% maketext(cls.label)
+          <th class="listheading">[% maketext(cls.label)
             %]</th>
                [% END %]
           [% END %]
-        </tr>
+          </tr>
+        </thead>
           [%
         curr = [];
         FOREACH c IN form.currencies;
            curr.push({ text = c, value = c });
         END;
         FOREACH displayrow IN displayrows %]
-        <tr>
+        <tbody>
+          <tr>
                 [% INDEX=displayrow.index %]
                   <td>
-                        [% IF displayrow.accnoset == 0 %]
-                                [% PROCESS input element_data = {
-                                      name = "accno_$INDEX"
-                                                                         type = "text"
-                                      initial_value = ${"accno_$INDEX"}
-                                      value = ${"accno_$INDEX"}
-                                      text_attr = 'accno'
-                                      value_attr = 'id'
-                                                                         class = 'AccountBox'
-                                                                         'data-dojo-type' = 'lsmb/accounts/AccountSelector'
-                            'data-dojo-props' = 'required: false'
-                              } %]
-
-                          [% ELSE %]
-
-                                      [% PROCESS label element_data = {
-                                        text = displayrow.accno
-                                        align = 'right'
-                                        id = "acc_$INDEX"
-                                      } %]
-
-
-                        [% END %]
+                        [% IF displayrow.accnoset == 0;
+                           readonly = (form.approved || form.reversing) ? 'readonly="READONLY"' : '';
+                        %]
+                        <lsmb-account-select name="accno_[% INDEX %]"
+                                             id="accno-[% INDEX %]"
+                                             [% readonly %]></lsmb-account-select>
+                          [% ELSE;
+                                displayrow.accno;
+                             END %]
 
                  </td>
 
@@ -199,8 +196,8 @@
                                   value = displayrow.debit
                                   name = "debit_$INDEX"
                                   type = "text"
+                                  readonly = (form.approved || form.reversing)
                                   size = 12
-                                  accesskey = displayrow.index
                                   id = "deb_$INDEX"
                                               }  %]
 
@@ -211,6 +208,7 @@
                                   value = displayrow.credit
                                   name = "credit_$INDEX"
                                   type = "text"
+                                  readonly = (form.approved || form.reversing)
                                   size = 12
                                   id = "cre_$INDEX"
                                       }  %]
@@ -222,6 +220,7 @@
                                   value = displayrow.source
                                   name = "source_$INDEX"
                                   type = "text"
+                                  readonly = (form.approved || form.reversing)
                                   size = 10
                                   id = "sou_$INDEX"
 
@@ -233,36 +232,12 @@
                           [% PROCESS textarea element_data = {
                                   value = displayrow.memo
                                   name = "memo_$INDEX"
+                                  readonly = (form.approved || form.reversing)
                                   size = 30
                                   id = "mem_$INDEX"
                                      }  %]
 
                    </td>
-                  [% IF form.projectset == 1 %]
-                   <td>
-
-                        [% IF displayrow.projectset == 1 %]
-                                        [% PROCESS label element_data = {
-                                              text = displayrow.projectnumber
-                                              align = 'right'
-                                              id = "pro_$INDEX"
-                                     } %]
-
-
-                        [% ELSE %]
-                                [% INCLUDE select element_data = {
-                                        text_attr = "projectnumber"
-                                        value_attr = "projectstyle"
-                                        default_values = []
-                                        options = form.all_project
-                                        name = "projectnumber_$INDEX"
-                                        id = "pro_$INDEX"
-                                     } %]
-
-                        [% END %]
-
-                   </td>
-                       [% END %]
                    [% FOREACH cls IN form.bu_class %]
                       [% IF form.b_units.${cls.id} %]
                    <td>
@@ -274,6 +249,8 @@
                        INCLUDE select element_data = {
                               text_attr = "control_code"
                              value_attr = "id"
+                               readonly = (form.approved || form.reversing)
+
                          default_values = [displayrow.${bucid}]
                           default_blank = 1
                                    name = "$burow"
@@ -290,6 +267,7 @@
                   options = curr
                   name = "curr_$INDEX"
                   default_values = [displayrow.curr]
+                  readonly = (form.approved || form.reversing)
                   } %]</td>
 
        <td>
@@ -297,8 +275,8 @@
                         value = displayrow.debit_fx
                         name = "debit_fx_$INDEX"
                         type = "text"
+                                  readonly = (form.approved || form.reversing)
                                   size = 12
-                                  accesskey = displayrow.index
                                   id = "deb_fx_$INDEX"
                                               }  %]
        </td>
@@ -308,11 +286,13 @@
                                   value = displayrow.credit_fx
                                   name = "credit_fx_$INDEX"
                                   type = "text"
+                                  readonly = (form.approved || form.reversing)
                                   size = 12
                                   id = "cre_fx_$INDEX"
                                       }  %]
        </td>
      </tr>
+     </tbody>
      [% END %]
         <tr class="listtotal">
           <th>&nbsp;</th>
@@ -326,9 +306,6 @@
           </th>
           <th>&nbsp;</th>
           <th>&nbsp;</th>
-          [% IF form.projectset == 1 %]
-          <th class="listheading">&nbsp;</th>
-          [% END %]
           [% FOREACH cls IN form.bu_class %]
               [% IF form.b_units.${cls.id} %]
           <th>&nbsp;</th>
@@ -340,7 +317,7 @@
     </td>
 </tr>
  <tr>
-    <td><hr size="3" /></td>
+    <td colspan="2"><hr size="3" /></td>
   </tr>
 </table>
 [% FOREACH hidden IN hiddens.keys;
@@ -351,13 +328,19 @@
                 }; END %]
 
 [% FOREACH button IN buttons; PROCESS button element_data=button; END %]
-[% IF form.recurringset ==1 %]
-          [% PROCESS label element_data = {
-                text => text('Scheduled')
-                align => 'right'
-           } %]
-
-[% END %]
+[% IF form.id;
+# Media set with 'screen' value as hidden since UI doesn't have media selector
+# and lsmb/PrintButton need media value
+  PROCESS input element_data = {
+    type = "hidden"
+    name = "media"
+    value = "screen"
+  };
+END;
+%]
+[% IF form.recurringset == 1;
+     text('Scheduled');
+   END %]
 [% IF form.id;
 
   PROCESS attachments attachments = {
@@ -365,12 +348,11 @@
       file_class = 1
       files = form.files
       file_links = form.file_links
-      callback = 'gl.pl?action=edit&id=' _ form.id
+      callback = 'gl.pl?__action=edit&id=' _ form.id
   };
 
 END # IF
 %]
 </form>
-</div>
 </div>
 </body>

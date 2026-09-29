@@ -76,14 +76,12 @@ in_gifi bool) IS
 $$ This is a simple routine to generate trial balances for the full
 company, for a project, or for a department.$$;
 
-DROP FUNCTION IF EXISTS chart_list_all();
 CREATE OR REPLACE FUNCTION chart_list_all()
 RETURNS SETOF account AS
 $$
 SELECT * FROM account ORDER BY accno;
 $$ LANGUAGE SQL;
 
-drop function if exists chart_get_ar_ap(int);
 CREATE OR REPLACE FUNCTION chart_get_ar_ap(in_account_class int)
 RETURNS SETOF account AS
 $$
@@ -228,6 +226,50 @@ COMMENT ON FUNCTION account__get_from_accno(in_accno text) IS
 $$ Returns the account where the accno field matches (excatly) the
 in_accno provided.$$;
 
+CREATE OR REPLACE FUNCTION account__is_used(in_id int)
+RETURNS BOOL AS
+$$
+BEGIN
+  BEGIN
+    delete from account where id = in_id;
+    raise sqlstate 'P0004';
+  EXCEPTION
+    WHEN foreign_key_violation THEN
+      return true;
+    WHEN assert_failure THEN
+      return false;
+  END;
+END;
+$$ language plpgsql;
+
+COMMENT ON FUNCTION account__is_used(in_id int) IS
+  $$Checks whether the general ledger account is used or not.
+
+In case it isn't used, it should be possible to delete it.
+$$; --'
+
+CREATE OR REPLACE FUNCTION account_heading__is_used(in_id int)
+RETURNS BOOL AS
+$$
+BEGIN
+  BEGIN
+    delete from account_heading where id = in_id;
+    raise sqlstate 'P0004';
+  EXCEPTION
+    WHEN foreign_key_violation THEN
+      return true;
+    WHEN assert_failure THEN
+      return false;
+  END;
+END;
+$$ language plpgsql;
+
+COMMENT ON FUNCTION account_heading__is_used(in_id int) IS
+  $$Checks whether the general ledger account heading is used or not.
+
+In case it isn't used, it should be possible to delete it.
+$$; --'
+
 CREATE OR REPLACE FUNCTION account__is_recon(in_accno text) RETURNS BOOL AS
 $$ SELECT count(*) > 0
      FROM cr_coa_to_account c2a
@@ -261,29 +303,30 @@ CREATE TYPE account_config AS (
   category CHAR(1),
   gifi_accno text,
   heading int,
+  heading_negative_balance int,
   contra bool,
   tax bool,
   obsolete bool,
   link text
 );
 
-DROP FUNCTION IF EXISTS account_get(int);
 CREATE OR REPLACE FUNCTION account_get (in_id int) RETURNS account_config AS
 $$
-select c.*, concat_colon(l.description) as link
+  select c.id, c.accno, c.description, c.is_temp, c.category, c.gifi_accno,
+  c.heading, c.heading_negative_balance, c.contra, c.tax, c.obsolete,
+  string_agg(l.description, ':') as link
   from account c
   left join account_link l
     ON (c.id = l.account_id)
   where  id = $1
 group by c.id, c.accno, c.description, c.category,
-         c.heading, c.gifi_accno, c.contra, c.tax;
+         c.heading, c.heading_negative_balance, c.gifi_accno, c.contra, c.tax;
 $$ LANGUAGE sql;
 
 COMMENT ON FUNCTION account_get(in_id int) IS
 $$Returns an entry from the account table which matches the id requested, and which
 is an account, not a heading.$$;
 
-DROP FUNCTION IF EXISTS account__list_translations(int);
 CREATE OR REPLACE FUNCTION account__list_translations(in_id int)
 RETURNS SETOF account_translation AS
 $$
@@ -342,7 +385,6 @@ COMMENT ON FUNCTION account_heading_get(in_id int) IS
 $$Returns an entry from the account heading tablewhich matches the id requested, and which
 is a heading, not an account.$$;
 
-DROP FUNCTION IF EXISTS account_heading__list_translations(int);
 CREATE OR REPLACE FUNCTION account_heading__list_translations(in_id int)
 RETURNS SETOF account_heading_translation AS
 $$
@@ -406,8 +448,8 @@ If not, returns false.$$;
 
 CREATE OR REPLACE FUNCTION account__save
 (in_id int, in_accno text, in_description text, in_category char(1),
-in_gifi_accno text, in_heading int, in_contra bool, in_tax bool,
-in_link text[], in_obsolete bool, in_is_temp bool)
+in_gifi_accno text, in_heading int, in_heading_negative_balance int, in_contra bool, in_tax bool,
+in_link text[], in_open_items bool, in_obsolete bool, in_is_temp bool)
 RETURNS int AS $$
 DECLARE
         t_link record;
@@ -433,14 +475,16 @@ BEGIN
 
         UPDATE account
         SET accno = in_accno,
-                description = in_description,
-                category = in_category,
-                gifi_accno = in_gifi_accno,
-                heading = in_heading,
-                contra = in_contra,
-                obsolete = coalesce(in_obsolete,'f'),
-                tax = t_tax,
-                is_temp = coalesce(in_is_temp,'f')
+            description = in_description,
+            category = in_category,
+            gifi_accno = in_gifi_accno,
+            heading = in_heading,
+            heading_negative_balance = in_heading_negative_balance,
+            contra = in_contra,
+            obsolete = coalesce(in_obsolete,'f'),
+            open_item_managed = coalesce(('AR' = ANY(in_link) or 'AP' = ANY(in_link) or in_open_items), 'f'),
+            tax = t_tax,
+            is_temp = coalesce(in_is_temp,'f')
         WHERE id = in_id;
 
         IF FOUND THEN
@@ -449,9 +493,11 @@ BEGIN
                 -- can't obsolete on insert, but this can be changed if users
                 -- request it --CT
                 INSERT INTO account (accno, description, category, gifi_accno,
-                        heading, contra, tax, is_temp)
+                        heading, heading_negative_balance, contra, tax, open_item_managed, is_temp)
                 VALUES (in_accno, in_description, in_category, in_gifi_accno,
-                        in_heading, in_contra, in_tax, coalesce(in_is_temp, 'f'));
+                        in_heading, in_heading_negative_balance, in_contra,
+                        in_tax, coalesce(('AR' = ANY(in_link) or 'AP' = ANY(in_link) or in_open_items), 'f'),
+                        coalesce(in_is_temp, 'f'));
 
                 t_id := currval('account_id_seq');
         END IF;
@@ -472,8 +518,9 @@ $$ language plpgsql;
 
 COMMENT ON FUNCTION account__save
 (in_id int, in_accno text, in_description text, in_category char(1),
-in_gifi_accno text, in_heading int, in_contra bool, in_tax bool,
-in_link text[], in_obsolete bool, in_is_temp bool) IS
+in_gifi_accno text, in_heading int, in_heading_negative_balance int,
+in_contra bool, in_tax bool, in_link text[], in_open_items bool, in_obsolete bool,
+in_is_temp bool) IS
 $$ This deletes existing account_link entries, where the
 account_link.description is not designated as a custom one in the
 account_link_description table.
@@ -500,6 +547,7 @@ BEGIN
     AND debits = 0
     AND credits = 0;
 
+    DELETE FROM cr_coa_to_account WHERE chart_id = in_id;
     DELETE FROM tax WHERE chart_id = in_id;
     DELETE FROM account_link WHERE account_id = in_id;
     DELETE FROM account WHERE id = in_id;
@@ -588,8 +636,6 @@ COMMENT ON FUNCTION cr_coa_to_account_save(in_accno text, in_description text)
 IS $$ Provides default rules for setting reconciliation labels.  Currently
 saves a label of accno ||'--' || description.$$;
 
-DROP FUNCTION IF EXISTS account__get_by_accno(text);
-
 CREATE OR REPLACE FUNCTION account__get_by_link_desc(in_description text)
 RETURNS SETOF account AS $$
 SELECT * FROM account
@@ -600,7 +646,6 @@ COMMENT ON FUNCTION account__get_by_link_desc(in_description text) IS
 $$ Gets a list of accounts with a specific link description set.  For example,
 for a dropdown list.$$;
 
-DROP FUNCTION IF EXISTS get_link_descriptions();
 CREATE OR REPLACE FUNCTION get_link_descriptions(in_summary BOOLEAN, in_custom BOOLEAN)
 RETURNS SETOF account_link_description AS
 $$
@@ -621,9 +666,6 @@ COMMENT ON FUNCTION account_heading__list() IS
 $$ Returns a list of all account headings, currently ordered by account number.
 $$;
 
-DROP FUNCTION IF EXISTS account__save_tax
-(in_chart_id int, in_validto date, in_rate numeric, in_taxnumber text,
-in_pass int, in_taxmodule_id int, in_old_validto date);
 
 CREATE OR REPLACE FUNCTION account__save_tax
 (in_chart_id int, in_validto date, in_rate numeric, in_minvalue numeric,
@@ -668,22 +710,24 @@ CREATE TYPE coa_entry AS (
     is_heading bool,
     accno text,
     description text,
+    category char(1),
+    contra boolean,
+    recon boolean,
+    tax boolean,
+    obsolete boolean,
     gifi text,
-    debit_balance numeric,
-    credit_balance numeric,
-    rowcount bigint,
+    has_rows boolean,
     link text
 );
 
 CREATE OR REPLACE FUNCTION report__coa() RETURNS SETOF coa_entry AS
 $$
-WITH ac (chart_id, amount_bc) AS (
-     SELECT chart_id, sum(amount_bc)
+WITH ac (chart_id) AS (
+     SELECT chart_id
        FROM acc_trans
-       JOIN (select id, approved from transactions) gl
-             ON gl.id = acc_trans.trans_id
-      WHERE acc_trans.approved and gl.approved
-      GROUP BY chart_id
+              JOIN transactions txn
+                  ON txn.id = acc_trans.trans_id
+      WHERE acc_trans.approved and txn.approved
 ),
 l(account_id, link) AS (
      SELECT account_id, array_to_string(array_agg(description), ':')
@@ -697,6 +741,9 @@ hh(parent_id) AS (
 ha(heading) AS (
      SELECT heading
        FROM account
+              UNION
+     SELECT heading_negative_balance FROM account
+      WHERE heading_negative_balance IS NOT NULL
 ),
 eca(account_id) AS (
     SELECT DISTINCT discount_account_id
@@ -708,31 +755,39 @@ eca(account_id) AS (
     SELECT DISTINCT cash_account_id
       FROM entity_credit_account
 ),
+p(account_id) AS (
+  SELECT DISTINCT inventory_accno_id
+    FROM parts
+           UNION
+  SELECT DISTINCT income_accno_id
+    FROM parts
+           UNION
+  SELECT DISTINCT expense_accno_id
+    FROM parts
+           UNION
+  SELECT DISTINCT returns_accno_id
+    FROM parts
+),
 ta(account_id) AS (
     SELECT chart_id
       FROM eca_tax
   GROUP BY 1
 )
-SELECT a.id, a.is_heading, a.accno, a.description, a.gifi_accno,
-       CASE WHEN sum(ac.amount_bc) < 0 THEN sum(amount_bc) * -1
-            ELSE null::numeric END,
-       CASE WHEN sum(ac.amount_bc) > 0 THEN sum(amount_bc)
-            ELSE null::numeric END,
-       count(ac.*)+count(hh.*)+count(ha.*)+count(eca.*)+count(ta.*), l.link
-  FROM (SELECT id, heading, false as is_heading, accno, description, gifi_accno
-          FROM account
-         UNION
-        SELECT id, parent_id, true, accno, description, null::text
-          FROM account_heading) a
+  SELECT * FROM (
+  SELECT a.id, false, a.accno, a.description, a.category,
+         a.contra,
+         (EXISTS (select 1 from cr_coa_to_account cca where chart_id = a.id)),
+         a.tax, a.obsolete, a.gifi_accno, account__is_used(a.id),
+       link
+  FROM account a
+       LEFT JOIN l ON a.id = l.account_id
+  UNION
+  SELECT id, true, accno, description, null::char(1),
+         null::boolean, null::boolean, null::boolean, null::boolean, null::text,
+         account_heading__is_used(h.id), null::text
+   FROM account_heading h
 
- LEFT JOIN ac ON ac.chart_id = a.id AND not a.is_heading
- LEFT JOIN l ON l.account_id = a.id AND NOT a.is_heading
- LEFT JOIN hh ON hh.parent_id = a.id AND a.is_heading
- LEFT JOIN ha ON ha.heading = a.id AND a.is_heading
- LEFT JOIN eca ON eca.account_id = a.id AND NOT a.is_heading
- LEFT JOIN ta ON ta.account_id = a.id AND NOT a.is_heading
-  GROUP BY a.id, a.is_heading, a.accno, a.description, a.gifi_accno, l.link
-  ORDER BY a.accno;
+  ) x ORDER BY accno;
 
 $$ LANGUAGE SQL;
 

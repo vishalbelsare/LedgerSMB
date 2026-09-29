@@ -83,8 +83,7 @@ The tax rate as a fractional number.
 
 =cut
 
-has rate        => (isa => 'LedgerSMB::Moose::Number',
-                    is => 'ro', coerce => 1);
+has rate        => (isa => 'LedgerSMB::PGNumber', is => 'ro');
 
 =item account
 
@@ -94,11 +93,19 @@ has account     => (isa => 'Str', is => 'rw');
 
 =item value
 
-???
+The calculated tax amount
 
 =cut
 
-has value       => (isa => 'LedgerSMB::Moose::Number', is => 'rw', coerce => 1);
+has value       => (isa => 'LedgerSMB::PGNumber', is => 'rw');
+
+=item base
+
+The amount to which the rate was applied to calculate the tax ('value').
+
+=cut
+
+has base        => (isa => 'LedgerSMB::PGNumber', is => 'rw');
 
 =item minvalue
 
@@ -106,7 +113,7 @@ Minimum taxable amount to kick in taxation
 
 =cut
 
-has minvalue    => (isa => 'LedgerSMB::Moose::Number', is => 'ro', coerce => 1);
+has minvalue    => (isa => 'LedgerSMB::PGNumber', is => 'ro');
 
 =item maxvalue
 
@@ -114,7 +121,7 @@ Maximum taxable amount to apply tax to
 
 =cut
 
-has maxvalue    => (isa => 'LedgerSMB::Moose::Number', is => 'ro', coerce => 1);
+has maxvalue    => (isa => 'LedgerSMB::PGNumber', is => 'ro');
 
 =item pass
 
@@ -147,9 +154,15 @@ sub calculate_tax {
     ){
          return 0;
     }
-    my $tax = $subtotal * $rate / ( LedgerSMB::PGNumber->bone() + $passrate );
-    $tax = $subtotal * $rate if not $extract;
-    return $tax;
+    my ($tax, $base);
+    if ($extract) {
+        $base = $subtotal * 1 / ( LedgerSMB::PGNumber->bone() + $passrate );
+    }
+    else {
+        $base = $subtotal;
+    }
+    $tax = $base * $rate;
+    return ($tax, $base);
 }
 
 =item $self->apply_tax
@@ -158,9 +171,10 @@ sub calculate_tax {
 
 sub apply_tax {
     my ( $self, $form, $subtotal ) = @_;
-    my $tax = $self->calculate_tax( $form, $subtotal, 0 );
+    my ($tax, $base) = $self->calculate_tax( $form, $subtotal, 0 );
     $tax = LedgerSMB::PGNumber->bzero unless $tax;
     $self->value($tax);
+    $self->base($base);
     return $tax;
 }
 
@@ -170,8 +184,9 @@ sub apply_tax {
 
 sub extract_tax {
     my ( $self, $form, $subtotal, $passrate ) = @_;
-    my $tax = $self->calculate_tax( $form, $subtotal, 1, $passrate );
+    my ($tax, $base) = $self->calculate_tax( $form, $subtotal, 1, $passrate );
     $self->value($tax);
+    $self->base($base);
     return $tax;
 }
 

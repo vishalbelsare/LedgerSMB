@@ -6,16 +6,12 @@ use DBI;
 
 use LedgerSMB::Database;
 use LedgerSMB;
-use LedgerSMB::Sysconfig;
-use LedgerSMB::DBObject::Admin;
 
 use Log::Log4perl qw(:easy);
 Log::Log4perl->easy_init($OFF);
 
 skip_all( 'LSMB_TEST_DB not set' )
     if not $ENV{LSMB_TEST_DB};
-
-LedgerSMB::Sysconfig->initialize( $ENV{LSMB_CONFIG_FILE} // 'ledgersmb.conf' );
 
 my $db;
 my $admin_dbh = DBI->connect('dbi:Pg:dbname=postgres',
@@ -127,6 +123,7 @@ $db = LedgerSMB::Database->new(
         user       => $ENV{PGUSER},
         password   => $ENV{PGPASSWORD},
     },
+    data_dir   => './xt/data/40-database',
     source_dir => './xt/data/40-database/module-failure-1',
     schema => 'xyz',
     );
@@ -142,6 +139,7 @@ $db = LedgerSMB::Database->new(
         user       => $ENV{PGUSER},
         password   => $ENV{PGPASSWORD},
     },
+    data_dir   => './xt/data/40-database',
     source_dir => './xt/data/40-database/module-failure-2',
     schema => 'xyz',
     );

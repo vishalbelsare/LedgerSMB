@@ -1,18 +1,105 @@
 <?lsmb#   This is a comment block; it's ignored by the template engine.
 
-   Version:  1.0
-   Date:     2021-01-04
+   Version:  1.3
+   Date:     2024-08-21
    File:     display_report.tex
    Set:      demo
 
 Template version numbers are explicitly not aligned across templates or
 releases. No explicit versioning was applied before 2021-01-04.
 
+Version   Changes
+1.3       Merged 'dynatable.html' into this template
+1.2       Simplified report header generation factored out of dynatable
+1.1       Merged xelatex targetting templates with those targetting pdflatex
+
+
 -?>
-<?lsmb- PROCESS 'dynatable.tex';
-IF !papersize;
-   papersize = 'a4paper';
-END;
+<?lsmb-
+
+BLOCK dynatable;
+
+    TOTAL_WIDTH=14; # cm. using A4 as a basis because it is slightly narrower than
+                    # US Letter. This way the dynatable works for both paper sizes.
+                    # This assumes a 1cm margin on either side. --CT
+    DECLARED_WIDTH=0;
+
+    SKIP_TYPES = ['hidden', 'radio', 'checkbox'];
+
+
+    FOREACH COL IN columns;
+        DECLARED_WIDTH = DECLARED_WIDTH + COL.pwidth; # pwidth is arbitrary scale
+    END;
+
+    IF DECLARED_WIDTH > 0;
+        WIDTH_PER_P = TOTAL_WIDTH / DECLARED_WIDTH;
+    ELSE;
+        WIDTH_PER_P = 1;
+    END;
+ ?>
+\begin{longtable}{<?lsmb-
+    FOREACH COL IN columns;
+       IF COL.psep_before;
+          '|';
+       END;
+       IF 1 == SKIP_TYPES.grep(COL.type).size() or COL.html_only;
+          '';
+       ELSIF COL.pwidth;
+           "p{" _ (COL.pwidth * WIDTH_PER_P) _ "cm}";
+       ELSIF COL.palign;
+            COL.palign;
+       ELSE;
+            'l';
+       END;
+       IF COL.psep_after;
+          '|';
+       END;
+    END;
+-?>}
+<?lsmb
+    FOREACH COL IN columns;
+        IF 0 == SKIP_TYPES.grep(COL.type).size() AND ! COL.html_only;
+            UNLESS loop.first();
+               ' & ';
+            END;
+            escape(COL.name);
+        END;
+    END;
+-?>\tabularnewline
+\hline\hline
+\endfirsthead
+<?lsmb
+    FOREACH COL IN columns;
+        IF 0 == SKIP_TYPES.grep(COL.type).size() AND ! COL.html_only;
+            UNLESS loop.first() ;
+               ' & ';
+            END;
+            escape(COL.name);
+        END;
+    END;
+-?>\tabularnewline
+\hline\hline
+\endhead
+<?lsmb
+    FOREACH ROW IN tbody.rows;
+        FOREACH COL IN columns;
+            IF 0 == SKIP_TYPES.grep(COL.type).size() AND ! COL.html_only;
+                UNLESS loop.first();
+                   ' & ';
+                END;
+                ?>\begin{tabular}[t]{@{}l@{}}<?lsmb
+                    ROW.${COL.col_id};
+                ?>\end{tabular}<?lsmb
+            END;
+        END;
+        ?>\tabularnewline
+    <?lsmb
+    END; # FOREACH ?>
+\end{longtable}
+<?lsmb END;  # block dynatable
+
+
+# MAIN template
 
 SKIP_TYPES = ['hidden', 'radio', 'checkbox'];
 COLNUMBER = 0;
@@ -22,38 +109,27 @@ FOREACH COL IN columns;
             COLNUMBER = COLNUMBER + 1;
     END;
 END;
-FILTER latex { format="$FORMAT(pdflatex)" };
+FILTER latex { format="$FORMAT($PROCESSOR)" };
+
 -?>
-\documentclass[<?lsmb papersize ?>]{article}
+\documentclass[<?lsmb SETTINGS.papersize ?>paper]{article}
 \usepackage{longtable}
 \usepackage[margin=1cm]{geometry}
 \begin{document}
-<?lsmb
 
-FIRSTHEAD = '\\multicolumn{2}{r}{' _ text('Report Name') _ ':} & ' _
-            '\\multicolumn{' _ (COLNUMBER - 2) _ '}{l}{ ' _ name _ '}\\\\
-             \\multicolumn{2}{r}{' _ text('Company') _ ':} & ' _
-            '\\multicolumn{' _ (COLNUMBER - 2) _ '}{l}{ ' _ request.company
-            _ '} \\\\
-            ';
+\begin{center}
+\begin{tabular}{rl}
+  \textbf{<?lsmb text('Report Name') ?>}: & <?lsmb name ?> \\
+  \textbf{<?lsmb text('Company') ?>}: & <?lsmb SETTINGS.company_name ?> \\
+  <?lsmb- newlines = new_heads(hlines);
+  FOREACH LINE IN newlines -?>
+  \textbf{<?lsmb LINE.text ?>}: & <?lsmb LINE.value ?> \\
+  <?lsmb- END -?>
+\end{tabular}
+\end{center}
 
-# use new_heads to get around variable name escaping
-newlines = new_heads(hlines);
-FOREACH LINE IN newlines;
-    IF request.${LINE.name}; #$
-        headval = request.${LINE.name}; #$
-    ELSE;
-         headval = report.${LINE.name};
-    END;
-    FIRSTHEAD = FIRSTHEAD _ '\\multicolumn{2}{r}{ ' _ LINE.text _ ':} & ';
-    FIRSTHEAD = FIRSTHEAD _ '\\multicolumn{' _ (COLNUMBER - 2) _ '}{l}{ ' _ headval;
-    FIRSTHEAD = FIRSTHEAD _ '}\\\\
-             ';
-END;
-
-PROCESS dynatable 
-      tbody = { rows = rows }
-      firsthead = FIRSTHEAD;
+<?lsmb PROCESS dynatable
+      tbody = { rows = rows };
 ?>
 \end{document}
 <?lsmb END -?>

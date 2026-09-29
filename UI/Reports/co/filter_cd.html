@@ -1,7 +1,7 @@
 [% PROCESS 'elements.html' %]
 <body class="lsmb [% dojo_theme %]">
 
-<form data-dojo-type="lsmb/Form" method="get" action="[% request.script %]">
+<form data-dojo-type="lsmb/Form" method="get" action="[% SCRIPT %]">
 [% PROCESS input element_data = {
     type = "hidden"
     name = "sort"
@@ -37,13 +37,13 @@
 
           <th align="right">[% text('From') %]</th>
           <td>[% PROCESS input element_data = {
-               class="date"
+               type="date"
                name="date_from"
                size="11"
                title=datestyle } %]</td>
           <th align="right">[% text('To') %]</th>
           <td>[% PROCESS input element_data = {
-                 class="date"
+                 type="date"
                  name="date_to"
                  size="11"
                  title=datestyle } %]</td>
@@ -114,7 +114,7 @@
        text = text('Continue')
        class="submit"
        type="submit"
-       name="action"
+       name="__action"
        value="run_caja_diaria"
 } %]
 </form>

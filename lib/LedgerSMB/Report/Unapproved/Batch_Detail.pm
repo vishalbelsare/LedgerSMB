@@ -3,7 +3,7 @@ package LedgerSMB::Report::Unapproved::Batch_Detail;
 
 =head1 NAME
 
-LedgerSMB::Report::Unapproved::Batch_Detail - List Vouchers by Batch
+LedgerSMB::Report::Unapproved::Batch_Detail - List Transactions by Batch
 in LedgerSMB
 
 =head1 SYNPOSIS
@@ -11,13 +11,12 @@ in LedgerSMB
   my $report = LedgerSMB::Report::Unapproved::Batch_Detail->new(
       %$request
   );
-  $report->run;
-  $report->render($request, $format);
+  $report->render();
 
 =head1 DESCRIPTION
 
 This provides an ability to search for (and approve or delete) pending
-transactions grouped in batches.  This report only handles the vouchers in the
+transactions grouped in batches.  This report only handles the transactions in the
 bach themselves. For searching for batches, use
 LedgerSMB::Report::Unapproved::Batch_Overview instead.
 
@@ -32,12 +31,14 @@ LedgerSMB::Report::Unapproved::Batch_Overview instead.
 =cut
 
 use LedgerSMB::I18N;
-use LedgerSMB::Setting;
-use LedgerSMB::Sysconfig;
 
 use Moose;
 use namespace::autoclean;
 extends 'LedgerSMB::Report';
+
+
+has languages => (is => 'ro',
+                  required => 1);
 
 =head1 PROPERTIES
 
@@ -76,7 +77,7 @@ Description of transaction
 
 =item amount
 
-Total on voucher.  For AR/AP amount, this is the total of the AR/AP account
+Total on the transaction.  For AR/AP amount, this is the total of the AR/AP account
 before payments.  For payments, receipts, and GL, it is the sum of the credits.
 
 =item default_language
@@ -109,12 +110,12 @@ sub columns {
        type => 'text',
      pwidth => 2, },
 
-    {col_id => 'default_date',
+    {col_id => 'transaction_date',
        name => $self->Text('Date'),
        type => 'text',
      pwidth => '4', },
 
-    {col_id => 'Reference',
+    {col_id => 'reference',
        name => $self->Text('Reference'),
        type => 'href',
   href_base => '',
@@ -143,7 +144,7 @@ Returns the localized template name
 
 sub name {
     my ($self) = @_;
-    return $self->Text('Voucher List');
+    return $self->Text('Batch Item List');
 }
 
 =item header_lines
@@ -154,7 +155,7 @@ Returns the inputs to display on header.
 
 sub header_lines {
     my ($self) = @_;
-    return [{name => 'batch_id',
+    return [{value => $self->batch_id,
              text => $self->Text('Batch ID')}, ]
 }
 
@@ -168,7 +169,7 @@ Note that in all cases, undef matches everything.
 
 =item batch_id (Int)
 
-ID of batch to list vouchers of.
+ID of batch to list transactions of.
 
 =cut
 
@@ -189,39 +190,41 @@ sub set_buttons {
 
     return [
         {
-            name  => 'action',
+            name  => '__action',
             type  => 'submit',
             text  => $self->Text('Post Batch'),
             value => 'single_batch_approve',
             class => 'submit',
         },
         {
-            name  => 'action',
+            name  => '__action',
             type  => 'submit',
             text  => $self->Text('Delete Batch'),
             value => 'single_batch_delete',
             class => 'submit',
         },
         {
-            name  => 'action',
+            name  => '__action',
             type  => 'submit',
-            text  => $self->Text('Delete Vouchers'),
-            value => 'batch_vouchers_delete',
+            text  => $self->Text('Delete Transactions'),
+            value => 'batch_transactions_delete',
             class => 'submit',
         },
         {
-            name  => 'action',
+            name  => '__action',
             type  => 'submit',
             text  => $self->Text('Unlock Batch'),
             value => 'single_batch_unlock',
             class => 'submit',
         },
         {
-            name  => 'action',
+            name  => '__action',
             type  => 'submit',
             text  => $self->Text('Print Batch'),
             value => 'print_batch',
             class => 'submit',
+            'data-dojo-type' => 'lsmb/PrintButton',
+            'data-dojo-props' => 'minimalGET: false',
         },
         ];
 }
@@ -236,37 +239,41 @@ Runs the report, and assigns rows to $self->rows.
 
 sub run_report{
     my ($self) = @_;
-    my $locales =
-        LedgerSMB::I18N::get_country_list($self->{_user}->{language});
-    my $printer = [ {text => 'Screen', value => 'zip'},
-                    map { {
-                        text  => $_,
-                        value => LedgerSMB::Sysconfig::printer()->{$_}
-                          } }
-                  keys LedgerSMB::Sysconfig::printer()->%*];
+
     $self->options([{
        name => 'language',
-       options => $locales,
+       options => $self->languages,
        default_value => [$self->default_language],
     }, {
        name => 'media',
-       options => $printer,
+       options => scalar $self->_wire->get( 'printers' )->as_options,
     },
     ]);
 
+    # Currently AR/AP screen is the only way to check receipt and payment
+    ###TODO: Need to consider for receipt/payment reversal
     my $class_to_script = {
         '1' => 'ap',
         '2' => 'ar',
-        '3' => 'gl',
+        '3' => 'ap',
+        '6' => 'ar',
         '8' => 'is',
         '9' => 'ir',
     };
-    my @rows = $self->call_dbmethod(funcname => 'voucher__list');
+    my @rows = $self->call_dbmethod(funcname => 'batch__list');
     for my $ref (@rows){
         $ref->{row_id} = $ref->{id};
 
         my $script = $class_to_script->{lc($ref->{batch_class_id})};
-        $ref->{reference_href_suffix} = "$script.pl?action=edit&id=$ref->{id}"
+        # Receipt/Payment can include both AR/AP Transaction and Invoice
+        # if the row is an AR/AP invoice(not AR/AP Transaction)
+        # script should be 'ir' or 'is'
+        # This is different with batch class 8 and 9
+        $script = 'ir' if ($ref->{invoice} and $ref->{batch_class_id} == 3);
+        $script = 'is' if ($ref->{invoice} and $ref->{batch_class_id} == 6);
+        $script //= 'gl';
+
+        $ref->{reference_href_suffix} = "$script.pl?__action=edit&id=$ref->{transaction_id}"
             if $script;
     }
     return $self->rows(\@rows);

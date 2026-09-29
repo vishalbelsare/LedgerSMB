@@ -1,15 +1,18 @@
-version: '2.1'
-
 services:
 
   chrome:
-    image: selenium/node-chrome:3.141.59-20210607
-    depends_on:
-      - hub
+    image: selenium/node-chrome
     volumes:
       - /dev/shm:/dev/shm
+    depends_on:
+      - hub
+    # the standard setup proposes:
+    #   shm_size: 2gb
+    # but we use the /dev/shm mapping above
     environment:
-      - HUB_HOST=hub
       - NODE_MAX_SESSION=5
       - NODE_MAX_INSTANCES=5
       - GRID_DEBUG=true
+      - SE_EVENT_BUS_HOST=hub
+      - SE_EVENT_BUS_PUBLISH=4442
+      - SE_EVENT_BUS_SUBSCRIBE=4443

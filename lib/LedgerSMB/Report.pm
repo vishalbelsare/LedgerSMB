@@ -1,4 +1,6 @@
 
+use v5.38;
+
 package LedgerSMB::Report;
 
 =head1 NAME
@@ -39,7 +41,7 @@ A minimal report might inherit and use this module as follows:
         my ($self) = @_;
         $self->rows([
             {row_id => 1, name => 'apple', food_type => 'fruit'},
-            {row_id => 1, name => 'carrot', food_type => 'vegetable'},
+            {row_id => 2, name => 'carrot', food_type => 'vegetable'},
         ]);
         return;
     }
@@ -49,7 +51,7 @@ A report could then be generated with the following:
 
     use LedgerSMB::Report::MinimalReportExample;
     my $report = LedgerSMB::Report::MinimalReportExample->new();
-    $report->render($request);
+    $report->render();
 
 
 =head1 DESCRIPTION
@@ -70,7 +72,57 @@ for the report).
 =item columns
 
 Must return an arrayref comprising hashes defining specifying each column
-of the report table.
+of the report table. Keys for each hash:
+
+=over
+
+=item col_id
+
+ID of column, alphanumeric, used in names of elements, classes, etc.  Required
+for smooth operation.
+
+Note: When the C<col_id> starts with C<bc_> and the column selection includes
+C<business_units>, the column will be included in the report.
+
+=item name
+
+Localized name of column for labelling purposes
+
+=item type
+
+Display type for column data.  Must be one of:
+
+    * text
+    * input_text
+    * hidden
+    * href
+    * radio
+    * select
+    * checkbox
+    * boolean_checkmark
+
+=item href_base
+
+Base for href.  Only meaningful if type is href.
+
+=item money
+
+Boolean value indicating whether the column contains monetary values.
+
+=item pwidth
+
+Relative width of the column on the generated table.
+
+=item html_only
+
+Boolean value indicating whether the column should only be included in
+html reports.
+
+=item class
+
+CSS class (additional) for the column.
+
+=back
 
 =item run_report
 
@@ -118,9 +170,8 @@ C<UI/reports/display_report> template will be used.
 =cut
 
 
-use List::Util qw{ any };
+use List::Util qw{ any pairgrep };
 use LedgerSMB::PGNumber;
-use LedgerSMB::Setting;
 use Scalar::Util qw{ blessed };
 
 use Moose;
@@ -128,50 +179,32 @@ use namespace::autoclean;
 with 'LedgerSMB::PGObject', 'LedgerSMB::I18N';
 
 
+around BUILDARGS => sub {
+    my ( $orig, $class, %args ) = @_;
+
+    $args{selected_columns} = {
+        map { my $k = s/^col_//r; $args{$_} ? ($k => 1) : () }
+        grep { /^col_/}
+        keys %args
+    };
+    return $class->$orig(%args);
+};
 
 =head1 PROPERTIES
 
-=head2 cols
+=head2 selected_columns
 
-This is an array of hashrefs.  Properties for each hashref:
+Contains a hashref where the keys are the columns selected for inclusion
+in the report and the values are booleans, where only those columns with
+true valued values are to be included in the report.
 
-=over
-
-=item col_id
-
-ID of column, alphanumeric, used in names of elements, classes, etc.  Required
-for smooth operation.
-
-=item name
-
-Localized name of column for labelling purposes
-
-=item type
-
-Display type for column data.  May be one of:
-
-    * text
-    * input_text
-    * hidden
-    * href
-    * input_text
-    * radio
-    * checkbox
-    * boolean_checkmark
-
-=item href_base
-
-Base for href.  Only meaningful if type is href
-
-=item class
-
-CSS class (additional) for the column.
-
-=back
+Column selections are passed as regular named arguments to the constructor,
+where the column name prefixed with C<col_> is the name of the key in the
+constructor argument list.
 
 =cut
 
-has 'cols' => (is => 'rw', isa => 'ArrayRef[HashRef[Any]]');
+has 'selected_columns' => (is => 'ro', isa => 'HashRef[Bool]');
 
 =head2 rows
 
@@ -181,15 +214,6 @@ fields of the columns above.
 =cut
 
 has 'rows' => (is => 'rw', isa => 'ArrayRef[HashRef[Any]]');
-
-=head2 format
-
-This is the format, and must be one used by LedgerSMB::Template. If
-undefined, defaults to 'html'.
-
-=cut
-
-has 'format' => (is => 'rw', isa => 'Maybe[Str]');
 
 =head2 order_by
 
@@ -217,11 +241,31 @@ has order_dir  => (is => 'rw', isa => 'Maybe[Str]');
 
 =head2 order_url
 
-Url for order redirection.  Internal only.
+URL for order redirection.  Internal only.
 
 =cut
 
 has order_url  => (is => 'rw', isa => 'Maybe[Str]');
+
+=head2 relative_url
+
+L<URI> object initialized with the script name and query string.
+
+=cut
+
+has relative_url => (
+    is => 'ro',
+    isa => 'URI',
+    # trick to get the value initialized from the $request object:
+    init_arg => '_uri');
+
+=head2 show_totals
+
+bool, determines whether to show totals.
+
+=cut
+
+has show_totals => (is => 'rw', isa => 'Bool', init_arg => 'subtotal', default => 1);
 
 =head2 show_subtotals
 
@@ -261,12 +305,12 @@ Example:
         my $self = shift;
         return [
             {
-                name => 'action',
+                name => '__action',
                 text => $self->_locale->text('Update'),
                 value => 'update_widget',
             },
             {
-                name => 'action',
+                name => '__action',
                 text => $self->_locale->text('Copy'),
                 value => 'copy_widget',
             },
@@ -291,6 +335,15 @@ List of select boxes for options for buttons.
 has options => (is => 'rw', isa => 'ArrayRef[Any]',
                 default => sub {[]} );
 
+=head2 formatter_options
+
+Specifies number and date formatting options passed to PGDate and PGNumber's
+C<to_output> routine.
+
+=cut
+
+has formatter_options => (is => 'ro', default => sub { +{} });
+
 =head2 _locale
 
 Locale to be used for the translation/localization of the report.
@@ -298,6 +351,14 @@ Locale to be used for the translation/localization of the report.
 =cut
 
 has _locale => (is => 'ro');
+
+=head2 _wire
+
+Dependency injection container holding global configuration.
+
+=cut
+
+has _wire => (is => 'ro');
 
 
 =head1 METHODS
@@ -309,7 +370,7 @@ reports.
 
 =cut
 
-sub set_buttons {
+sub set_buttons($self) {
     return [];
 }
 
@@ -324,10 +385,22 @@ a meaningless sum displayed on the totals row.
 
 =cut
 
-sub _exclude_from_totals {
+sub _exclude_from_totals($self) {
     return {};
 }
 
+=head2 _exclude_row_from_totals( $row )
+
+Returns true when the row needs to be excluded from
+the calculated totals; C<$row> is a hashref to the column data.
+
+The default implementation returns C<false>.
+
+=cut
+
+sub _exclude_row_from_totals($self, $row) {
+    return '';
+}
 
 =head2 render(renderer => \&renderer($template_name, $report, $vars, $clean_vars) )
 
@@ -335,50 +408,66 @@ This takes no arguments and simply renders the report as is.
 
 C<&renderer> is a function of 4 arguments. The difference between C<$vars> and
 C<$clean_vars> is that the latter are already HTML-safely encoded whereas
-the former are not (and therefor will be encoded before being inserted into
+the former are not (and therefore will be encoded before being inserted into
 the template).
 
 =cut
 
-sub render {
-    my $self = shift;
-    my $request = shift;
-
-    $self->run_report if not defined $self->rows;
-    return $self->_render($request, renderer => 'render', @_);
+sub render($self, @args) {
+    $self->run_report() if not defined $self->rows;
+    return $self->_render(@args);
 }
 
 
-=head2 output_name($request)
+=head2 output_name
 
 Returns the suggested file name to be used to store the report.
 
 =cut
 
-sub output_name {
-    my $self = shift;
-    my $request = shift;
-
-    return undef
-        unless $request->{format};
-
-    $self->format('html')
-        unless defined $self->format;
-
+sub output_name($self) {
     my $name = $self->name // '';
     $name =~ s/ /_/g;
 
     $name = $name . '_' . $self->from_date->to_output
             if $self->can('from_date')
-               and defined $self->from_date
-               and defined $self->from_date->to_output;
+               and $self->from_date
+               and $self->from_date->to_output;
     $name = $name . '-' . $self->to_date->to_output
             if $self->can('to_date')
-               and defined $self->to_date
-               and defined $self->to_date->to_output;
+               and $self->to_date
+               and $self->to_date->to_output;
 
     return $name;
 }
+
+=head2 format_money_columns
+
+Formats the data in C<$self->rows> of columns marked with "money" flag
+set true into correctly formatted strings. Invoked as part of C<render>.
+
+=cut
+
+sub format_money_columns($self, $columns) {
+    my @columns = ($columns // $self->columns)->@*;
+
+    for my $col (@columns){
+        if ($col->{money}) {
+            $col->{class} = 'money';
+            for my $row(@{$self->rows}){
+                if ( blessed $row->{$col->{col_id}}
+                     and $row->{$col->{col_id}}->can('to_output') ){
+                    $row->{$col->{col_id}} =
+                        $row->{$col->{col_id}}->to_output(
+                            money => 1,
+                            $self->formatter_options->%*);
+                }
+            }
+        }
+    }
+}
+
+
 
 # PRIVATE METHODS
 
@@ -386,10 +475,9 @@ sub output_name {
 #
 # Render the report.
 
-sub _render {
-    my ($self, $request) = @_;
+
+sub _render($self, %args) {
     my $template;
-    my %args = ( @_ );
 
     # This is a hook for other modules to use to override the default
     # template --CT
@@ -410,18 +498,21 @@ sub _render {
         $self->order_dir('asc');
     }
 
-    my $url = $request->get_relative_url();
+    my $url = $self->relative_url;
     if ($url) {
-        $url =~ s/(^|&)(old_)?order_by=[^&]*//g;
-        $url =~ s/(^|&)order_dir=[^&]*//g;
+        my @query_form = pairgrep {
+            $a ne 'old_order_by' and $a ne 'order_by' and $a ne 'order_dir'
+        } $url->query_form;
 
         if ($self->order_by) {
-            $self->order_url(
-                "$url&old_order_by=".$self->order_by.'&order_dir='.$self->order_dir
-                );
+            $url->query_form(@query_form,
+                             old_order_by => $self->order_by,
+                             order_dir    => $self->order_dir);
+            $self->order_url($url->as_string);
         }
         else {
-            $self->order_url($url);
+            $url->query_form( @query_form );
+            $self->order_url($url->as_string);
         }
     }
 
@@ -445,64 +536,76 @@ sub _render {
         @$rows = reverse @$rows;
     }
     $self->rows($rows);
-    my $total_row = {html_class => 'listtotal', NOINPUT => 1};
-    my $col_val = undef;
-    my @newrows;
-    my $exclude = $self->_exclude_from_totals;
-    my $subtotal;
-    for my $r (@{$self->rows}){
-        if ($self->show_subtotals
-            and $self->order_by
-            and (not defined $col_val
-                 or ($col_val ne $r->{$self->order_by})) ) {
-            push @newrows, $subtotal
-                if $subtotal;
-            $subtotal = {
-                html_class => 'listsubtotal',
-                NOINPUT => 1,
-                ($self->order_by() . '_NOHREF' => 1),
-                $self->order_by() => $r->{$self->order_by}
-            };
-        }
 
-        for my $k (keys %$r){
-            next if $exclude->{$k};
+    if ($self->show_totals) {
+        my $total_row = {html_class => 'listtotal', NOINPUT => 1};
+        my $col_val = undef;
+        my @newrows;
+        my $exclude = $self->_exclude_from_totals;
+        my $subtotal;
+        for my $r (@{$self->rows}){
+            if ($self->show_subtotals
+                and $self->order_by
+                and (not defined $col_val
+                     or ($col_val ne $r->{$self->order_by})) ) {
+                push @newrows, $subtotal
+                    if $subtotal;
+                $subtotal = {
+                    html_class => 'listsubtotal',
+                    NOINPUT => 1,
+                    ($self->order_by() . '_NOHREF' => 1),
+                    $self->order_by() => $r->{$self->order_by}
+                };
+            }
 
-            if (blessed $r->{$k} and $r->{$k}->isa('LedgerSMB::PGNumber') ){
-                $total_row->{$k} //= LedgerSMB::PGNumber->bzero;
-                $total_row->{$k}->badd($r->{$k});
-                if ($subtotal) {
-                    $subtotal->{$k} //= LedgerSMB::PGNumber->bzero;
-                    $subtotal->{$k}->badd($r->{$k});
+            unless ($self->_exclude_row_from_totals( $r )) {
+                for my $k (keys %$r){
+                    next if $exclude->{$k};
+
+                    if ($r->{$k} isa 'LedgerSMB::PGNumber' ){
+                        $total_row->{$k} //= LedgerSMB::PGNumber->bzero;
+                        $total_row->{$k}->badd($r->{$k});
+                        if ($subtotal) {
+                            $subtotal->{$k} //= LedgerSMB::PGNumber->bzero;
+                            $subtotal->{$k}->badd($r->{$k});
+                        }
+                    }
                 }
             }
+            push @newrows, $r;
+            $col_val = $self->order_by ? $r->{$self->order_by} : undef;
         }
-        push @newrows, $r;
-        $col_val = $self->order_by ? $r->{$self->order_by} : undef;
+        push @newrows, $subtotal if $subtotal;
+        push @newrows, $total_row unless $self->manual_totals;
+        $self->rows(\@newrows);
     }
-    push @newrows, $subtotal if $subtotal;
-    push @newrows, $total_row unless $self->manual_totals;
-    $self->rows(\@newrows);
     # Rendering
 
-    $self->format('html') unless defined $self->format;
-    my $columns = $self->show_cols($request);
+    my %want_col = $self->selected_columns->%*;
+    my @columns = (
+        grep {
+            not %want_col # use all columns when none selected specifically
+            or $want_col{$_->{col_id}}
+            or ($_->{col_id} =~ m/^bc_/ and $want_col{business_units})
+        } $self->columns->@*);
 
-    for my $col (@$columns){
-        if ($col->{money}) {
-            $col->{class} = 'money';
-            for my $row(@{$self->rows}){
-                local $@ = undef;
-                if ( blessed $row->{$col->{col_id}}
-                     and $row->{$col->{col_id}}->can('to_output') ){
-                    $row->{$col->{col_id}} =
-                        $row->{$col->{col_id}}->to_output(money => 1);
-                }
-            }
-        }
-    }
 
-    # needed to get aroud escaping of header line names
+    $self->format_money_columns( \@columns );
+    # values expected by dynatable:
+    my @col_ids = map { $_->{col_id} } @columns;
+    push @col_ids, (
+        map {
+            ($_ . '_href_suffix',
+             $_ . '_NOHREF',
+             $_ . '_ROWSPAN',
+             $_ . '_ROWSPANNED')
+        } @col_ids);
+    push @col_ids, 'row_id', 'NOINPUT', 'html_class';
+
+    my @rows = map { +{ $_->%{@col_ids} } } $self->rows->@*;
+    $self->rows([]);
+
+    # needed to get around escaping of header line names
     # i.e. ignore_yearends -> ignore\_yearends
     # in latex
     my $replace_hnames = sub {
@@ -512,48 +615,22 @@ sub _render {
         return [map { +{ %$_, %{shift @newlines} } } @$lines ];
     };
 
-    my $setting = LedgerSMB::Setting->new(%$request);
     return $args{renderer}->(
         $template, $self,
         {
+            # 'rows' has been set to an empty array to prevent encoding the same data twice
             report          => $self,
-            company_name    => $setting->get('company_name'),
-            company_address => $setting->get('company_address'),
-            request         => $request,
             new_heads       => $replace_hnames,
             name            => $self->name,
             hlines          => $self->header_lines,
-            columns         => $columns,
             order_url       => $self->order_url,
             buttons         => $self->buttons,
             options         => $self->options,
-            rows            => $self->rows,
-
-            DBNAME          => $request->{company},
+            rows            => \@rows,
+        },
+        {
+            columns         => \@columns
         });
-}
-
-=head2 show_cols
-
-Returns a list of columns based on selected ones from the report
-
-=cut
-
-sub show_cols {
-    my ($self, $request) = @_;
-    my @retval;
-    for my $ref (@{$self->columns($request)}){
-        if ($request->{"col_$ref->{col_id}"}){
-            push @retval, $ref;
-        }
-        if ($ref->{col_id} =~ /bc_\d+/){
-            push @retval, $ref if $request->{'col_business_units'};
-        }
-    }
-    if (scalar @retval == 0){
-       @retval = @{$self->columns};
-    }
-    return \@retval;
 }
 
 =head2 header_lines
@@ -563,7 +640,7 @@ individual reports.
 
 =cut
 
-sub header_lines {
+sub header_lines($self) {
     return [];
 }
 
@@ -576,8 +653,7 @@ bc_$class_id holding the $bu_id fields.
 
 =cut
 
-sub process_bclasses {
-    my ($self, $ref) = @_;
+sub process_bclasses($self, $ref) {
     for my $bu (@{$ref->{business_units}}){
      if($bu->[1]){#avoid message:Use of uninitialized value in hash element
         push @{$ref->{$bu->[0]}}, $bu->[1]
@@ -590,7 +666,7 @@ sub process_bclasses {
 
 =head1 LICENSE AND COPYRIGHT
 
-Copyright (C) 2012-2018 The LedgerSMB Core Team
+Copyright (C) 2012-2024 The LedgerSMB Core Team
 
 This file is licensed under the GNU General Public License version 2, or at your
 option any later version.  A copy of the license should have been included with
@@ -599,5 +675,3 @@ your software.
 =cut
 
 __PACKAGE__->meta->make_immutable;
-
-1;

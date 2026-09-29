@@ -1,15 +1,14 @@
+
 BEGIN;
     -- Load the TAP functions.
     CREATE EXTENSION pgtap;
     SET client_min_messages TO warning;
 
     -- Plan the tests.
-
-    SELECT plan(58);
+    SELECT plan(65);
 
     -- Add data
-
-    \i xt/data/42-pg/Base.sql
+    \i xt/data/42-pg/Company.sql
 
     -- Validate required tables
 
@@ -19,12 +18,11 @@ BEGIN;
     -- Validate required functions
 
     SELECT has_function('account__all_headings','{}'::text[]);
-    SELECT has_function('company__get_all_accounts',ARRAY['integer','integer']);
     SELECT has_function('company_get_billing_info',ARRAY['integer']);
     SELECT has_function('company__get_by_cc',ARRAY['text']);
     SELECT has_function('company__get',ARRAY['integer']);
     SELECT has_function('company__next_id','{}'::text[]);
-    SELECT has_function('company__save',ARRAY['text','integer','text','text','integer','text','integer','text','text']);
+    SELECT has_function('company__save',ARRAY['text','text','text','integer','text','integer','text','text']);
     SELECT has_function('contact_class__list','{}'::text[]);
     SELECT has_function('contact__search',ARRAY['integer','text','text[]','text','text','text','text','text','text','date','date','integer','text','text','text','boolean']);
     SELECT has_function('eca__delete_contact',ARRAY['integer','integer','text']);
@@ -55,7 +53,7 @@ BEGIN;
     SELECT has_function('entity__list_locations',ARRAY['integer']);
     SELECT has_function('entity__list_notes',ARRAY['integer']);
     SELECT has_function('_entity_location_save',ARRAY['integer','integer','integer','text','text','text','text','text','text','integer']);
-    SELECT has_function('entity__location_save',ARRAY['integer','integer','integer','text','text','text','text','text','integer','date']);
+    SELECT has_function('entity__location_save',ARRAY['integer','integer','integer','text','text','text','text','text','text','integer','date']);
     SELECT has_function('entity__save_bank_account',ARRAY['integer','integer','text','text','text','integer']);
     SELECT has_function('entity__save_contact',ARRAY['integer','integer','text','text','text','integer']);
     SELECT has_function('entity__save_notes',ARRAY['integer','text','text']);
@@ -67,7 +65,7 @@ BEGIN;
 
     INSERT INTO sic (code, description) VALUES ('1234', '1234 Desc');
     PREPARE test AS SELECT
-        company__save ('TESTING...', 1,'TESTING', 'TESTING', NULL, '1234',
+        company__save ('TESTING...', 'TESTING', 'TESTING', NULL, '1234',
                         232, 'st-123', 'ubi-123-456-789')
                 IS NOT NULL;
     SELECT results_eq('test',ARRAY[true],'Saving Company');
@@ -133,7 +131,7 @@ BEGIN;
     PREPARE test AS SELECT
        CASE WHEN subject = 'Test note subject' THEN 't'::bool ELSE 'f'::bool END
        FROM entity_note
-       WHERE id = currval('note_id_seq');
+       WHERE id = currval('entity_note_id_seq');
     SELECT results_eq('test',ARRAY[true],'entity__save_note subject record');
     DEALLOCATE test;
 
@@ -145,9 +143,194 @@ BEGIN;
     PREPARE test AS SELECT
            CASE WHEN subject = 'ECA test note subject' THEN 't'::bool ELSE 'f'::bool END
            FROM eca_note
-           WHERE id = currval('note_id_seq');
+           WHERE id = currval('eca_note_id_seq');
     SELECT results_eq('test',ARRAY[true],'eca__save_notes subject record');
     DEALLOCATE test;
+
+    -- Contact/Entity Search Tests
+    --- Search for person by name
+    PREPARE test AS SELECT * FROM contact__search(
+        NULL, NULL, NULL, NULL,
+        NULL, NULL, NULL, NULL,
+        NULL, NULL, NULL, NULL,
+        'User', NULL, NULL, NULL
+    );
+    PREPARE expected_result AS VALUES(
+        -100,
+        '_TESTING.....',
+        NULL::integer,
+        NULL::text,
+        NULL::text,
+        NULL::integer,
+        'Test User',
+        NULL::text,
+        NULL::text,
+        NULL::text
+    );
+    SELECT results_eq('test', 'expected_result', 'contact__search find person by name');
+    DEALLOCATE test;
+    DEALLOCATE expected_result;
+
+    --- Search for company by name
+    PREPARE test AS SELECT * FROM contact__search(
+        NULL, NULL, NULL, NULL,
+        NULL, NULL, NULL, NULL,
+        NULL, NULL, NULL, NULL,
+        'Test Company', NULL, NULL, NULL
+    );
+    PREPARE expected_result AS VALUES(
+        -101,
+        '_TEST2',
+        NULL::integer,
+        NULL::text,
+        NULL::text,
+        NULL::integer,
+        'Test Company',
+        NULL::text,
+        NULL::text,
+        NULL::text
+    );
+    SELECT results_eq('test', 'expected_result', 'contact__search find company by name');
+    DEALLOCATE test;
+    DEALLOCATE expected_result;
+
+    --- Search for company by city
+    PREPARE test AS SELECT * FROM contact__search(
+        NULL, NULL, NULL, NULL,
+        NULL, 'Cityville', NULL, NULL,
+        NULL, NULL, NULL, NULL,
+        NULL, NULL, NULL, NULL
+    );
+    PREPARE expected_result AS VALUES(
+        -101,
+        '_TEST2',
+        NULL::integer,
+        NULL::text,
+        NULL::text,
+        NULL::integer,
+        'Test Company',
+        NULL::text,
+        NULL::text,
+        NULL::text
+    );
+    SELECT results_eq('test', 'expected_result', 'contact__search find company by city');
+    DEALLOCATE test;
+    DEALLOCATE expected_result;
+
+    --- Search for company by state
+    PREPARE test AS SELECT * FROM contact__search(
+        NULL, NULL, NULL, NULL,
+        NULL, NULL, 'Statington', NULL,
+        NULL, NULL, NULL, NULL,
+        NULL, NULL, NULL, NULL
+    );
+    PREPARE expected_result AS VALUES(
+        -101,
+        '_TEST2',
+        NULL::integer,
+        NULL::text,
+        NULL::text,
+        NULL::integer,
+        'Test Company',
+        NULL::text,
+        NULL::text,
+        NULL::text
+    );
+    SELECT results_eq('test', 'expected_result', 'contact__search find company by state');
+    DEALLOCATE test;
+    DEALLOCATE expected_result;
+
+    --- Search for company by mail code (zip code/postcode)
+    PREPARE test AS SELECT * FROM contact__search(
+        NULL, NULL, NULL, NULL,
+        NULL, NULL, NULL, 'AB1234',
+        NULL, NULL, NULL, NULL,
+        NULL, NULL, NULL, NULL
+    );
+    PREPARE expected_result AS VALUES(
+        -101,
+        '_TEST2',
+        NULL::integer,
+        NULL::text,
+        NULL::text,
+        NULL::integer,
+        'Test Company',
+        NULL::text,
+        NULL::text,
+        NULL::text
+    );
+    SELECT results_eq('test', 'expected_result', 'contact__search find company by mail code');
+    DEALLOCATE test;
+    DEALLOCATE expected_result;
+
+    --- Search for company by control code
+    PREPARE test AS SELECT * FROM contact__search(
+        NULL, NULL, NULL, NULL,
+        NULL, NULL, NULL, NULL,
+        NULL, NULL, NULL, NULL,
+        NULL, '_TEST2', NULL, NULL
+    );
+    PREPARE expected_result AS VALUES(
+        -101,
+        '_TEST2',
+        NULL::integer,
+        NULL::text,
+        NULL::text,
+        NULL::integer,
+        'Test Company',
+        NULL::text,
+        NULL::text,
+        NULL::text
+    );
+    SELECT results_eq('test', 'expected_result', 'contact__search find company by mail code');
+    DEALLOCATE test;
+    DEALLOCATE expected_result;
+
+    --- Search for company by address
+    PREPARE test AS SELECT * FROM contact__search(
+        NULL, NULL, NULL, NULL,
+        '101 Main', NULL, NULL, NULL,
+        NULL, NULL, NULL, NULL,
+        NULL, NULL, NULL, NULL
+    );
+    PREPARE expected_result AS VALUES(
+        -101,
+        '_TEST2',
+        NULL::integer,
+        NULL::text,
+        NULL::text,
+        NULL::integer,
+        'Test Company',
+        NULL::text,
+        NULL::text,
+        NULL::text
+    );
+    SELECT results_eq('test', 'expected_result', 'contact__search find company by address');
+    DEALLOCATE test;
+    DEALLOCATE expected_result;
+
+    --- Search for company by country
+    PREPARE test AS SELECT * FROM contact__search(
+        NULL, NULL, NULL, NULL,
+        NULL, NULL, NULL, NULL,
+        'CA', NULL, NULL, NULL,
+        NULL, NULL, NULL, NULL
+    );
+    PREPARE expected_result AS VALUES(
+        -101,
+        '_TEST2',
+        NULL::integer,
+        NULL::text,
+        NULL::text,
+        NULL::integer,
+        'Test Company',
+        NULL::text,
+        NULL::text,
+        NULL::text
+    );
+    SELECT results_eq('test', 'expected_result', 'contact__search find company by country');
+    DEALLOCATE test;
+    DEALLOCATE expected_result;
 
     -- Finish the tests and clean up.
     SELECT * FROM finish();

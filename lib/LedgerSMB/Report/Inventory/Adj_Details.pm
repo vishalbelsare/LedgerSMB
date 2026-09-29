@@ -9,8 +9,8 @@ Details report for LedgerSMB
 =head1 SYNPOSIS
 
  my $rpt = LedgerSMB::Report::Inventory::Adj_Details->new(%$request);
- $rpt->run_report;
- $rpt->render($request);
+ $rpt->run_report($request);
+ $report->render();
 
 =cut
 
@@ -78,7 +78,7 @@ sub name {
 
 sub header_lines {
     my ($self) = @_;
-    return [{name => 'source', text => $self->Text('Source') }];
+    return [{value => $self->source, text => $self->Text('Source') }];
 }
 
 =item columns
@@ -91,7 +91,7 @@ sub columns {
     return [
       {col_id => 'partnumber',
          type => 'href',
-    href_base => 'ic.pl?action=edit&id=',
+    href_base => 'ic.pl?__action=edit&id=',
          name => $self->Text('Part Number') },
       {col_id => 'description',
          type => 'text',
@@ -119,13 +119,13 @@ This sets buttons relevant to approving the adjustments.
 sub set_buttons {
     my ($self) = @_;
     return [{
-       name => 'action',
+       name => '__action',
        type => 'submit',
       value => 'approve',
        text => $self->Text('Approve'),
       class => 'submit',
     },{
-       name => 'action',
+       name => '__action',
        type => 'submit',
       value => 'delete',
        text => $self->Text('Delete'),

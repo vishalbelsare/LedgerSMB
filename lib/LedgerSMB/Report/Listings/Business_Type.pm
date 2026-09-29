@@ -9,7 +9,7 @@ LedgerSMB
 =head1 SYNPOPSIS
 
   my $report = LedgerSMB::Report::Listings::Business_Type->new(%$request);
-  $report->render($request);
+  $report->render();
 
 =head1 DESCRIPTION
 
@@ -48,7 +48,7 @@ sub columns {
         type => 'href',
      p_width => '10',
         name => $self->Text('Description'),
-   href_base => 'am.pl?action=edit_business&id=',
+   href_base => 'am.pl?__action=edit_business&id=',
     },
     {
       col_id => 'discount',

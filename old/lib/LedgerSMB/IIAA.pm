@@ -40,15 +40,41 @@ use warnings;
 use diagnostics;
 use strict;
 
+use LedgerSMB::PGDate;
+
+sub process_form_barcode {
+    my ($self, $myconfig, $form, $row, $barcode) = @_;
+    my $dbh = $form->{dbh};
+    my $query = q|
+SELECT partnumber
+  FROM parts
+  JOIN makemodel ON parts.id = makemodel.parts_id
+ WHERE barcode = ?
+|;
+
+    my $sth = $dbh->prepare($query)
+        or $form->dberror($dbh->errstr);
+    $sth->execute( $barcode )
+        or $form->dberror($sth->errstr);
+    my ($partnumber) = $sth->fetchrow_array;
+    if ($sth->err) {
+        $form->dberror($sth->errstr);
+    }
+    if (not $partnumber) {
+        die "No part with barcode $barcode";
+    }
+
+    $form->{"partnumber_$row"} = $partnumber;
+}
 
 sub process_form_payments {
 
     my ($self, $myconfig, $form) = @_;
     my $dbh = $form->{dbh};
-    my $query = qq|
+    my $query = q|
 SELECT payment_post(?, ?, ?, ?, ?,
                     ?, ?, ARRAY[(select id from account where accno = ?)], ?,
-                    ?, ?, ?, ?, ?,
+                    ?, ?, ?, ?, ?, ?,
                     ?, ?, ?, ?, ?)
 |;
 
@@ -70,7 +96,7 @@ SELECT payment_post(?, ?, ?, ?, ?,
                 # no 'gl description'
                 my ($cashaccno) = split( /--/, $form->{"$form->{ARAP}_paid_$i"} );
                 my $amount =
-                    LedgerSMB::PGNumber->from_input($form->{"paid_$i"})->to_db;
+                    $form->parse_amount( $myconfig, $form->{"paid_$i"})->to_db;
                 # no 'cash approved'
                 my $source = $form->{"source_$i"};
                 my $memo = $form->{"memo_$i"};
@@ -90,7 +116,7 @@ SELECT payment_post(?, ?, ?, ?, ?,
                 $sth->execute($datepaid, $eca_class, $eca_id, $curr,
                               $exchangerate, undef, undef, $cashaccno,
                               [$amount],
-                              [$source], [$memo], [$trans_id], undef, undef,
+                              [$source], [$memo], [$trans_id], [$form->{open_item_id}], undef, undef,
                               undef, undef, undef, undef,
 
                               # Post payment lines as 'approved':
@@ -209,6 +235,137 @@ sub createcontact
 
 }
 
+
+sub trans_taxaccounts {
+    my ($self, $form) = @_;
+    if (not $form->{id}) {
+        return ();
+    }
+
+    my $dbh   = $form->{dbh};
+    my $query = q|
+       select distinct accno
+         from account
+         join acc_trans on account.id = acc_trans.chart_id
+        where account.tax
+               and acc_trans.trans_id = ?|;
+    my $sth   = $dbh->prepare($query)
+        or die $form->dberror($query);
+
+    $sth->execute( $form->{id} )
+        or die $form->dberror($query);
+
+    my @accounts;
+    while (my $ref = $sth->fetchrow_hashref('NAME_lc')) {
+        push @accounts, $ref->{accno};
+    }
+
+    return @accounts;
+}
+
+
+sub prepare_invoice {
+    my ($self, $form, $myconfig, %args)            = @_;
+    $form->{type}       = "invoice";
+
+    my $i = 0;
+    $form->{currency} =~ s/ //g;
+    $form->{oldcurrency} = $form->{currency};
+
+    if ( $form->{id} ) {
+        unless ($args{unquoted}) {
+            for (qw(invnumber ordnumber ponumber quonumber shippingpoint
+                    shipvia notes intnotes)) {
+                $form->{$_} = $form->quote( $form->{$_} );
+            }
+        }
+
+        foreach my $ref ( @{ $form->{invoice_details} } ) {
+            $i++;
+            for ( keys %$ref ) { $form->{"${_}_$i"} = $ref->{$_} }
+
+            $form->{"projectnumber_$i"} =
+              qq|$ref->{projectnumber}--$ref->{project_id}|
+              if $ref->{project_id};
+            $form->{"partsgroup_$i"} =
+              qq|$ref->{partsgroup}--$ref->{partsgroup_id}|
+              if $ref->{partsgroup_id};
+
+            $form->{"discount_$i"} =
+              $form->format_amount( $myconfig, $form->{"discount_$i"} * 100 );
+
+            my $moneyplaces = $form->get_setting('decimal_places');
+            my ($dec) = ($form->{"sellprice_$i"} =~/\.(\d*)/);
+            $dec = length $dec;
+            my $decimalplaces = ( $dec > $moneyplaces ) ? $dec : $moneyplaces;
+            $form->{"precision_$i"} = $decimalplaces;
+
+            $form->{"sellprice_$i"} =
+              $form->format_amount( $myconfig, $form->{"sellprice_$i"},
+                $decimalplaces );
+            $form->{"qty_$i"} =
+              $form->format_amount( $myconfig, $form->{"qty_$i"} );
+            $form->{"oldqty_$i"} = $form->{"qty_$i"};
+
+        $form->{"taxformcheck_$i"}=1 if($args{module}->get_taxcheck($form,$form->{"invoice_id_$i"},$form->{dbh}));
+
+
+            unless ($args{unquoted}) {
+                for (qw(partnumber sku description unit)) {
+                    $form->{"${_}_$i"} = $form->quote( $form->{"${_}_$i"} );
+                }
+            }
+            $form->{rowcount} = $i;
+        }
+    }
+}
+
+sub print_wf_history_table {
+    my ($self, $form, $type) = @_;
+    my $locale = $form->{_locale};
+
+    print sprintf(q|
+        <table width=100%>
+         <caption>History</caption>
+           <tr><th>%s</th><th>%s</th><th>%s</th></tr>
+         <tbody>
+|, $locale->text('Action'), $locale->text('User Name'), $locale->text('Time'));
+    # insert history items
+    my $wf = $form->{_conn}->workflows->fetch( $type, $form->{workflow_id} );
+    if ($wf) {
+        my @history = $wf->get_history;
+        for my $h (sort { $a->id <=> $b->{id} } @history) {
+            my ($desc, $addn) = split( /[|]/, $h->description, 2);
+            my $link = '';
+            if ($addn) {
+                my %items = split(/[|:]/, $addn);
+                my %links = (
+                    'AR/AP|customer' => 'is.pl?__action=edit&amp;workflow_id=',
+                    'AR/AP|vendor'   => 'ir.pl?__action=edit&amp;workflow_id=',
+                    'Order/Quote'    => 'oe.pl?__action=edit&amp;workflow_id=',
+                    'Email'          => 'email.pl?__action=render&amp;id=',
+                    );
+                my ($id, $workflow) = split(/,/, $items{spawned_workflow}, 2);
+                $link = ($links{$workflow}
+                         // $links{"$workflow|$form->{vc}"}) . $id;
+                $link .= "&amp;callback=$form->{script}%3Faction%3D$form->{__action}%26id%3D$form->{id}";
+            }
+            my $user = $h->user;
+            my $timestamp = $h->date;
+            my $dt = LedgerSMB::PGDate->from_db($timestamp . "")->to_output();
+            if ($link) {
+                print qq|<tr><td><a href="$link">$desc</a></td><td>$user</td><td>$dt</td></tr>|;
+            }
+            else {
+                print qq|<tr><td>$desc</td><td>$user</td><td>$dt</td></tr>|;
+            }
+        }
+    }
+    print qq|
+      </tbody>
+      </table>
+|;
+}
 
 
 1;

@@ -19,7 +19,7 @@ see the included COPYRIGHT and LICENSE files for more information.
 =cut
 
 package LedgerSMB::DBObject::Payment;
-use base qw(LedgerSMB::PGOld);
+use parent qw(LedgerSMB::PGOld);
 use strict;
 use warnings;
 use LedgerSMB::PGNumber;
@@ -128,7 +128,7 @@ sub get_metadata {
     }
 
     if ($self->{batch_id}) {
-        my ($ref) = $self->call_dbmethod(funcname => 'voucher_get_batch');
+        my ($ref) = $self->call_dbmethod(funcname => 'batch__get');
         $self->{batch_date} = $ref->{default_date};
     }
 
@@ -320,7 +320,7 @@ $payment->{date_to}, and $payment->{ar_ap_accno}.
 The $payment->{ar_ap_accno} property is used to filter out by AR or AP account.
 
 The following can also be optionally passed: $payment->{batch_id}.  If this is
-patched, vouchers in the current batch will be picked up as well.
+patched, transactions in the current batch will be picked up as well.
 
 The returned list of hashrefs is stored in the $payment->{contact} property.
 Each hashref has the following keys:  id (entity id), name, and entity_class.
@@ -489,12 +489,13 @@ sub get_payment_detail_data {
         $inv->{invoices} =
             [  sort { $a->{transdate} cmp $b->{transdate} }
                map { { id => $_->[0],
-                       invnumber => $_->[1],
-                       transdate => $_->[2],
-                       amount => $_->[3], ## no critic (ProhibitMagicNumbers)
-                       paid => $_->[4],   ## no critic (ProhibitMagicNumbers)
-                       net => $_->[5],    ## no critic (ProhibitMagicNumbers)
-                       due => $_->[6],    ## no critic (ProhibitMagicNumbers)
+                       open_item_id => $_->[1],
+                       invnumber => $_->[2],
+                       transdate => $_->[3],
+                       amount => $_->[4], ## no critic (ProhibitMagicNumbers)
+                       paid => $_->[5],   ## no critic (ProhibitMagicNumbers)
+                       net => $_->[6],    ## no critic (ProhibitMagicNumbers)
+                       due => $_->[7],    ## no critic (ProhibitMagicNumbers)
                    } } @{$inv->{invoices} // []} ];
 
         for my $invoice (@{$inv->{invoices}}){
@@ -587,8 +588,8 @@ sub post_bulk {
 
             next if $invoice->{payment} == 0.0;
             my $db_amount = $invoice->{payment}->to_db();
-            my $invoice_subarray = "{$invoice->{invoice},$db_amount}";
-            if ($invoice_subarray !~ /^\{\d+\,\-?\d*\.?\d+\}$/){
+            my $invoice_subarray = "{$invoice->{invoice},$invoice->{open_item_id},$db_amount}";
+            if ($invoice_subarray !~ /^\{\d+\,\d+\,\-?\d*\.?\d+\}$/){
                 die "Invalid subarray: $invoice_subarray";
             }
 

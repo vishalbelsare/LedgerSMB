@@ -7,7 +7,6 @@ use warnings;
 use LedgerSMB::Batch;
 use LedgerSMB::IR;
 use LedgerSMB::Form;
-use LedgerSMB::DBObject::Account;
 use LedgerSMB::DBObject::Reconciliation;
 use LedgerSMB::Entity::Company;
 use LedgerSMB::Entity::Credit_Account;
@@ -107,7 +106,7 @@ When qr/I post the following GL transaction on (.{10})/, sub {
 };
 
 Given qr/a logged in user with '(.*)' rights/, sub {
-    my $role = $1;
+    my $rolename = $1;
 
     my $emp = S->{ext_lsmb}->create_employee;
     my $user = S->{ext_lsmb}->create_user(
@@ -118,12 +117,9 @@ Given qr/a logged in user with '(.*)' rights/, sub {
     S->{"the user"} = $user->username;
     S->{"the password"} = 'password123';
 
-    my @roles =
-        grep { $_ eq $role }
-        map { $_->{rolname} }
-        @{$user->list_roles};
-    is(scalar @roles, 1, "The requested role ($role) exists");
-    $user->save_roles(\@roles);
+    my $role = $user->app->roles->get_by_name( $rolename );
+    ok(defined $role, "The requested role ($rolename) exists");
+    $role->assign( $user );
 
     PageObject::App::Login->open(S->{ext_wsl});
     S->{ext_wsl}->page->body->login(
@@ -141,14 +137,15 @@ Given qr/a logged in user with these rights:/, sub {
     S->{"the user"} = $user->username;
     S->{"the password"} = 'password123';
 
-    my %roles = map { $_->{role} => 1 } @{C->data};
-    my @roles =
-        grep { $roles{$_} }
-        map { $_->{rolname} }
-        @{$user->list_roles};
-    is(scalar @roles, scalar @{C->data},
-       'The requested roles have not all been found to be available');
-    $user->save_roles(\@roles);
+    my $app = $user->app;
+    for my $rolename (map { $_->{role} } @{C->data}) {
+        my $role = $app->roles->get_by_name( $rolename );
+
+        ok((defined $role), "The requested role ($rolename) was found");
+        next unless $role;
+
+        $role->assign( $user );
+    }
 
     PageObject::App::Login->open(S->{ext_wsl});
     S->{ext_wsl}->page->body->login(
@@ -158,11 +155,11 @@ Given qr/a logged in user with these rights:/, sub {
 };
 
 
-Given qr/a (vendor|customer) "(.*)"$/, sub {
+Given qr/a (vendor|customer) "(.*)"(?: from (.+))?$/, sub {
     my $vc = $1;
     my $vc_name = $2;
-
-    my $vc_data = S->{ext_lsmb}->create_vc($vc, $vc_name);
+    my $country = $3;
+    my $vc_data = S->{ext_lsmb}->create_vc($vc, $vc_name, $country);
     S->{$_} = $vc_data->{$_} for %$vc_data;
 };
 
@@ -170,7 +167,7 @@ Given qr/a (vendor|customer) "(.*)"$/, sub {
 Given qr/a (\w+) batch with these properties:$/, sub {
     my $batch_class = $1;
     my %map = (
-        'Batch Date' => 'batch_date',
+        'Default Posting Date' => 'batch_date',
         'Batch Number' => 'batch_number',
         'Description' => 'description',
         );
@@ -185,61 +182,82 @@ Given qr/a (\w+) batch with these properties:$/, sub {
 };
 
 
-Given qr/an unpaid AP transaction with these values:$/, sub {
+Given qr/(an )?unpaid AP transactions? with these values:$/, sub {
     # Expects data in the following form:
     # | Vendor   | Date       | Invoice Number | Amount |
     # | Vendor C | 2017-03-01 | INV103         | 250.00 |
-    my $data = shift @{C->data};
     my $dbh = S->{ext_lsmb}->admin_dbh;
 
-    my $q = $dbh->prepare("
-        INSERT INTO ap (invnumber, transdate, amount_bc, netamount_bc,
-                        duedate, curr, approved, entity_credit_account,
+    my $txn_query = $dbh->prepare(<<~'SQL');
+      INSERT INTO transactions (transdate, trans_type_code, approved)
+      VALUES (?, 'ap', true)
+      SQL
+
+    my $oi_query = $dbh->prepare(<<~'SQL');
+      INSERT INTO open_item (item_number, item_type, account_id)
+      VALUES ('AP-' || currval('transactions_id_seq'), 'ap', ?)
+      SQL
+
+    my $ap_query = $dbh->prepare("
+        INSERT INTO ap (trans_id, open_item_id, invnumber, amount_bc, netamount_bc,
+                        duedate, curr, entity_credit_account,
                         amount_tc, netamount_tc)
-        SELECT ?, ?, ?, ?, ?, 'USD', TRUE,
+        SELECT currval('transactions_id_seq'), currval('open_item_id_seq'), ?, ?, ?, ?, 'USD',
                entity_credit_account.id, ?, ?
         FROM entity
         JOIN entity_credit_account ON (
             entity_credit_account.entity_id = entity.id
         )
         WHERE entity.name = ?
-        AND entity.entity_class = 1
+        AND entity_credit_account.entity_class = 1
         LIMIT 1
-        RETURNING ap.id
+        RETURNING ap.trans_id, ap.open_item_id
     ");
-    $q->execute(
-        $data->{'Invoice Number'},
-        $data->{'Date'},
-        $data->{'Amount'},
-        $data->{'Amount'},
-        $data->{'Date'},
-        $data->{'Amount'},
-        $data->{'Amount'},
-        $data->{'Vendor'},
-    );
-    my $ap_id = $q->fetchrow_hashref->{id};
 
-    $q = $dbh->prepare("
+    my $acc_trans_query = $dbh->prepare("
         INSERT INTO acc_trans (trans_id, chart_id, amount_bc,
-                               curr, amount_tc, transdate)
-        VALUES (?, ?, ?, 'USD', ?, ?)
+                               curr, amount_tc, transdate, open_item_id)
+        VALUES (?, ?, ?, 'USD', ?, ?, ?)
     ");
 
-    $q->execute(
-        $ap_id,
-        28, # 5700--Office Supplies
-        $data->{'Amount'} * -1,
-        $data->{'Amount'} * -1,
-        $data->{'Date'},
-    );
+    foreach my $data (@{C->data}) {
+        $txn_query->execute(
+            $data->{'Date'},
+        );
 
-    $q->execute(
-        $ap_id,
-        10, # 2100--Accounts Payable account
-        $data->{'Amount'},
-        $data->{'Amount'},
-        $data->{'Date'},
-    );
+        $oi_query->execute(
+            10 # 2100--Accounts payable account
+        );
+
+        $ap_query->execute(
+            $data->{'Invoice Number'},
+            $data->{'Amount'},
+            $data->{'Amount'},
+            $data->{'Date'},
+            $data->{'Amount'},
+            $data->{'Amount'},
+            $data->{'Vendor'},
+        );
+        my ($ap_id, $open_item_id) = $ap_query->fetchrow_array;
+
+        $acc_trans_query->execute(
+            $ap_id,
+            28, # 5700--Office Supplies
+            $data->{'Amount'} * -1,
+            $data->{'Amount'} * -1,
+            $data->{'Date'},
+            undef,
+        );
+
+        $acc_trans_query->execute(
+            $ap_id,
+            10, # 2100--Accounts Payable account
+            $data->{'Amount'},
+            $data->{'Amount'},
+            $data->{'Date'},
+            $open_item_id,
+        );
+    }
 };
 
 
@@ -299,9 +317,6 @@ Given qr/inventory has been built up for '(.*)' from these transactions:$/, sub 
     my $part = $1;
 
     local $LedgerSMB::App_State::DBH = S->{ext_lsmb}->admin_dbh;
-    local $LedgerSMB::App_State::User = {
-        numberformat => '1000.00'
-    };
 
     my $part_props = S->{ext_lsmb}->admin_dbh->selectrow_hashref(
         qq|SELECT * FROM parts WHERE partnumber = ?|, undef, $part);
@@ -314,6 +329,7 @@ Given qr/inventory has been built up for '(.*)' from these transactions:$/, sub 
 
         my $form = Form->new();
         $form->{dbh} = S->{ext_lsmb}->admin_dbh;
+        $form->{_wire} = S->{ext_lsmb}->wire;
         $form->{rowcount} = 2;
         $form->{transdate} = $trans->{transdate};
         $form->{qty_1} = $trans->{amount};
@@ -328,7 +344,7 @@ Given qr/inventory has been built up for '(.*)' from these transactions:$/, sub 
         $form->{currency} = 'USD';
         $form->{defaultcurrency} = 'USD';
 
-        IR->post_invoice({}, $form);
+        IR->post_invoice({ numberformat => '1000.00' }, $form);
     }
     S->{ext_lsmb}->admin_dbh->commit
         if ! S->{ext_lsmb}->admin_dbh->{AutoCommit};
@@ -357,9 +373,14 @@ Given qr/^(\d+) units inventory of ((?:a|the) part|part "(.*)") purchased at (\d
     my $dbh = S->{ext_lsmb}->admin_dbh;
     $dbh->do(
         q{
-        INSERT INTO gl (reference, description, transdate, person_id, approved)
-               VALUES ('INV-INIT', 'Initial setup', '2020-01-01',
-                       person__get_my_id(), true);
+        INSERT INTO transactions (transdate, trans_type_code, approved, reference)
+        VALUES ('2020-01-01', 'gl', true, 'INV-INIT')
+        })
+        or die $dbh->errstr;
+    $dbh->do(
+        q{
+        INSERT INTO gl (id)
+               VALUES (currval('transactions_id_seq'));
         })
         or die $dbh->errstr;
 
@@ -367,7 +388,7 @@ Given qr/^(\d+) units inventory of ((?:a|the) part|part "(.*)") purchased at (\d
         q{
         INSERT INTO invoice (trans_id, parts_id, qty, sellprice, precision,
                              fxsellprice, discount, unit, allocated)
-            VALUES (currval('id'), (select id from parts where partnumber = ?),
+            VALUES (currval('transactions_id_seq'), (select id from parts where partnumber = ?),
                     ?, ?, 2, ?, 0, 'ea', 0);
         },
         {},
@@ -379,10 +400,10 @@ Given qr/^(\d+) units inventory of ((?:a|the) part|part "(.*)") purchased at (\d
         INSERT INTO acc_trans (trans_id, chart_id,
                                transdate, invoice_id, approved,
                                amount_bc, amount_tc, curr)
-            VALUES (currval('id'), (select id from account where accno='3350'),
+            VALUES (currval('transactions_id_seq'), (select id from account where accno='3350'),
                     '2020-01-01', currval('invoice_id_seq'), true,
                     ?, ?, ?),
-                   (currval('id'), (select id from account where accno='1510'),
+                   (currval('transactions_id_seq'), (select id from account where accno='1510'),
                     '2020-01-01', currval('invoice_id_seq'), true,
                     ?, ?, ?);
         },
@@ -409,7 +430,9 @@ Given qr/(a batch|batches) with these properties:$/, sub {
                 dbh => S->{ext_lsmb}->admin_dbh,
                 batch_id => $batch_id,
             };
-            LedgerSMB::Batch->new(%$data)->post;
+            my $batch = LedgerSMB::Batch->new(%$data);
+            $batch->get;
+            $batch->post;
         }
     }
 };
@@ -428,23 +451,26 @@ Given qr/^(a reconciliation report|reconciliation reports) with these properties
             args => [$report_spec->{'Account Number'}],
         ) or die 'Failed to find account number ' . $report_spec->{'Account Number'};
 
-        my $recon_data = {
-            dbh => S->{ext_lsmb}->admin_dbh,
-            chart_id => $account->{id},
-            total => $report_spec->{'Statement Balance'},
-            end_date => $report_spec->{'Statement Date'},
-        };
-
-        my $recon = LedgerSMB::DBObject::Reconciliation->new(%$recon_data);
-
-        my $recon_id = $recon->new_report();
+        local $LedgerSMB::App_State::DBH = S->{ext_lsmb}->admin_dbh;
+        my $app = LedgerSMB::Company->new(
+            dbh => $LedgerSMB::App_State::DBH,
+            username => S->{ext_lsmb}->admin_user_name,
+            wire     => S->{ext_lsmb}->wire
+            );
+        my $wf = $app->workflows->create(
+            'reconciliation',
+            Workflow::Context->new(
+                account_id => $account->{id},
+                ending_balance => $report_spec->{'Statement Balance'},
+                end_date => $report_spec->{'Statement Date'},
+            ));
 
         if ($report_spec->{'Submitted'} eq 'yes') {
-            $recon->submit;
+            $wf->execute_action( 'submit' );
         }
 
         if ($report_spec->{'Approved'} eq 'yes') {
-            $recon->approve;
+            $wf->execute_action( 'approve' );
         }
     }
 };
@@ -800,8 +826,8 @@ Given qr/that standard payment terms apply for "(.+)"/, sub {
         $dbh->do(q{
               SELECT account__save(NULL, 'DISC', 'Payment discounts',
                  'E', NULL, (select id from account_heading where accno='5600'),
-                 false, false, ARRAY['AR_discount','AP_discount']::text[],
-                 false, false);
+                 null, false, false, ARRAY['AR_discount','AP_discount']::text[],
+                 false, false, false);
             })
             or die $dbh->errstr;
     }

@@ -1,4 +1,7 @@
 
+use v5.38;
+use experimental 'try';
+
 package LedgerSMB::Admin::Command::destroy;
 
 =head1 NAME
@@ -7,22 +10,21 @@ LedgerSMB::Admin::Command::destroy - ledgersmb-admin 'destroy' command
 
 =cut
 
-use strict;
-use warnings;
-
 use LedgerSMB::Admin::Command;
 use LedgerSMB::Database;
 
 use Moose;
+use experimental 'try'; # Work around Moose re-enabling experimenal warnings
 extends 'LedgerSMB::Admin::Command';
 use namespace::autoclean;
 
-use Feature::Compat::Try;
-
 my $logger;
 
-sub run {
-    my ($self, $dbname) = @_;
+sub run($self, $dbname) {
+
+    return $self->help('destroy')
+        if !$dbname || $dbname eq 'help';
+
     $logger = $self->logger;
     my $existing_db = $self->connect_data_from_arg($dbname);
     my $connect_data = {
@@ -31,6 +33,8 @@ sub run {
     };
     my $db = LedgerSMB::Database->new(
         connect_data => $connect_data,
+        source_dir   => $self->config->sql_directory,
+        schema       => $self->config->get('schema'),
         );
     my $role_prefix = _get_role_prefix($db);
 
@@ -64,6 +68,8 @@ sub run {
             };
             my $db = LedgerSMB::Database->new(
                     connect_data => $connect_database,
+                    source_dir   => $self->config->sql_directory,
+                    schema       => $self->config->get('schema'),
                 );
             my $database_role_prefix = _get_role_prefix($db);
             if ( defined $database_role_prefix && $role_prefix eq $database_role_prefix ) {
@@ -114,8 +120,7 @@ sub run {
     return 0;
 }
 
-sub _get_role_prefix {
-    my $db = shift;
+sub _get_role_prefix($db) {
 
     my $dbh = $db->connect;
     my $role_prefix;
@@ -136,8 +141,6 @@ sub _get_role_prefix {
 }
 
 __PACKAGE__->meta->make_immutable;
-
-1;
 
 __END__
 

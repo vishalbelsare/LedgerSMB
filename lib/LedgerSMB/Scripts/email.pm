@@ -21,10 +21,9 @@ use warnings;
 
 use HTTP::Status qw(HTTP_SEE_OTHER);
 use Log::Any;
-use Workflow::Factory qw(FACTORY);
+use URI::Escape qw(uri_unescape);
 
 
-use LedgerSMB::Template::UI;
 
 
 =head2 render
@@ -41,11 +40,20 @@ with through the C<file.pm> script module.
 sub render {
     my ($request) = @_;
 
-    my $wf = FACTORY()->fetch_workflow('Email', $request->{id});
+    my $wf = $request->{_wire}->get('workflows')
+        ->fetch_workflow('Email', $request->{id});
 
     if ($request->{wf_action}) {
-        $wf->context->param( $_ => $request->{$_} )
-            for qw( from to cc bcc subject body );
+        $wf->context->param(
+            _transport => $request->{_wire}->get( 'mail' )->{transport} );
+        for my $field (qw( from to cc bcc subject body )) {
+            if (defined $request->{$field}) {
+                $wf->context->param( $field => $request->{$field} );
+            }
+            else {
+                $wf->context->delete_param( $field );
+            }
+        }
 
         my $upload = $request->{_uploads}->{attachment_content};
         if ($upload) {
@@ -75,20 +83,21 @@ sub render {
         if ($wf->state eq 'SUCCESS'
             or $request->{wf_action} eq 'Cancel') {
             return [ HTTP_SEE_OTHER,
-                     [ Location => $request->{callback} ],
+                     [ Location => uri_unescape($request->{callback}) ],
                      [ '' ]];
         }
     }
 
 
-    my $template = LedgerSMB::Template::UI->new_UI;
+    my $template = $request->{_wire}->get('ui');
     return $template->render($request, 'email', {
-        callback    => $request->{callback},
         id          => $wf->id,
-        ( map { $_ => $wf->context->param($_) }
+        ( map { (s/^_//r) => scalar $wf->context->param($_) }
           qw( from to cc bcc notify subject body sent_date
-              attachments expansions ) ),
-        actions     => [ map { $_->name }
+              _attachments expansions callback ) ),
+        callback    => uri_unescape($request->{callback}),
+        actions     => [ map { { text  => $_->text,
+                                 value => $_->name } }
                          sort { $a->{order} <=> $b->{order} }
                          map { $wf->get_action($_) } $wf->get_current_actions ]
     });

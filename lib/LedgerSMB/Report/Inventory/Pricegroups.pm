@@ -12,7 +12,7 @@ Implements a listing of price groups.
 =head1 SYNOPSIS
 
   my $report = LedgerSMB::Report::Inventory::Pricegroups->new(%$request);
-  $report->render($request);
+  $report->render();
 
 =cut
 
@@ -51,8 +51,8 @@ sub columns {
     my ($self) = @_;
     return [{col_id => 'pricegroup',
                type => 'href',
-          href_base => 'pe.pl?action=edit&type=pricegroup&id=',
-               name => $self->Text('Price Group') }];
+          href_base => 'pe.pl?__action=edit&type=pricegroup&id=',
+               name => $self->Text('Price group') }];
 }
 
 =head2 header_lines
@@ -67,8 +67,8 @@ sub columns {
 
 sub header_lines {
     my ($self) = @_;
-    return [{name => 'partsgroup',
-             text => $self->Text('Price Group') }];
+    return [{value => $self->pricegroup,
+             text  => $self->Text('Price group') }];
 }
 
 =head2 name

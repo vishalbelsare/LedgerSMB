@@ -30,10 +30,9 @@ use List::Util qw{ none any };
 use Module::Runtime qw/ use_module /;
 use Plack::Request;
 use Plack::Util;
-use Plack::Util::Accessor qw( script script_name module );
+use Plack::Util::Accessor qw( script script_name module max_post_size );
 
 use LedgerSMB::PSGI::Util;
-use LedgerSMB::Sysconfig;
 
 =head1 METHODS
 
@@ -68,10 +67,10 @@ sub call {
     my $self = shift;
     my ($env) = @_;
 
-    if (LedgerSMB::Sysconfig::max_post_size() != -1
+    if ($self->max_post_size() != -1
         && $env->{CONTENT_LENGTH}
         && ($env->{CONTENT_LENGTH} != 0)
-        && ($env->{CONTENT_LENGTH} > LedgerSMB::Sysconfig::max_post_size())) {
+        && ($env->{CONTENT_LENGTH} > $self->max_post_size)) {
         return [ HTTP_REQUEST_ENTITY_TOO_LARGE,
                  [ 'Content-Type' => 'text/plain' ],
                  [ 'Request entity too large' ]
@@ -79,7 +78,8 @@ sub call {
     }
 
     my $req = Plack::Request->new($env);
-    my $action_name = $req->parameters->get('action') // '__default';
+    my $action_name = $req->parameters->get('__action')
+        // $req->parameters->get('action') // '__default';
     my $module = $self->module;
     my $action = $module->can($action_name);
     return  LedgerSMB::PSGI::Util::internal_server_error(

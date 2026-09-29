@@ -13,11 +13,14 @@ define([
     var isoDate = /^\d\d\d\d-\d\d-\d\d$/;
     return declare("lsmb/DateTextBox", [DateTextBox], {
         _formattedValue: null,
-        defaultIsToday: false,
+        _oldValue: "",
         constructor: function (params, srcNodeRef) {
-            this._formattedValue = srcNodeRef.value;
+            if (srcNodeRef) {
+                this._formattedValue = srcNodeRef.value;
+            } else {
+                this._formattedValue = "";
+            }
 
-            /* eslint no-param-reassign:0 */
             /* Provide default 'old code' doesn't include in its templates */
             if (!params.constraints) {
                 params.constraints = {};
@@ -35,9 +38,10 @@ define([
 
             /* retrieve format to add it as the placeholder
              * (unless there's a placeholder already) */
+            params.constraints.formatLength ||= "short";
             if (!params.placeholder) {
                 var l = i18n.normalizeLocale(params.locale);
-                var formatLength = params.formatLength || "short";
+                var formatLength = params.constraints.formatLength;
                 var bundle = locale._getGregorianBundle(l);
 
                 if (params.constraints.selector === "year") {
@@ -52,9 +56,10 @@ define([
                         params.constraints.datePattern ||
                         bundle["dateFormat-" + formatLength];
                 }
+                params.constraints.datePattern = params.placeholder;
                 params.placeholder = params.placeholder
                     .replace(/M/g, "m")
-                    .replace(/y/g, "yy");
+                    .replace(/yy?y?y?/g, "yyyy");
             }
         },
         postMixInProperties: function () {
@@ -69,18 +74,6 @@ define([
                      which the widget expects */
                 this.value = this.parse(this._formattedValue, this.constraints);
             }
-            /*
-             * isNan validates input without conversion, whereas Number.isNan
-             * converts its input to number then validates. So we disable the
-             * linter rule
-             */
-            /* eslint no-restricted-globals: 0 */
-            if (
-                (this.value === undefined || isNaN(this.value)) &&
-                this.defaultIsToday
-            ) {
-                this.value = new Date();
-            }
         },
         startup: function () {
             this.inherited(arguments);
@@ -90,10 +83,21 @@ define([
             /* eslint no-cond-assign: 0 */
             on(
                 this.domNode,
+                "keydown",
+                lang.hitch(this, function (e) {
+                    this._oldValue = domAttr.get(e.target, "value");
+                })
+            );
+            on(
+                this.domNode,
                 "keyup",
                 lang.hitch(this, function (e) {
                     let value = domAttr.get(e.target, "value");
 
+                    if (this._oldValue.length > value.length) {
+                        // allow removing characters; separators and others alike
+                        return;
+                    }
                     /* Extract the separator and location into an array and if
                      * needed add the separator. */
                     const re = /[^a-z]/gi;

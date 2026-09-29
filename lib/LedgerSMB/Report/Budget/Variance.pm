@@ -8,15 +8,14 @@ LedgerSMB::Report::Budget::Variance - Variance Report per Budget
 =head1 SYNPOSIS
 
   my $report = LedgerSMB::Report::Budget::Variance->new(%$request);
-  $report->run;
-  $report->render($request, $format);
+  $report->render();
 
 =head1 DESCRIPTION
 
-This is a basic variance report for budgets.  A variance report shows budgetted
+This is a basic variance report for budgets.  A variance report shows budgeted
 debits and credits along with those actually accrued during the stated period.
 It thus provides a way of measuring both current and historical expenditures
-against what was budgetted.
+against what was budgeted.
 
 =cut
 
@@ -42,7 +41,7 @@ Description of he budget line item
 
 =item accno
 
-Account number budgetted
+Account number budgeted
 
 =item account_label
 
@@ -50,7 +49,7 @@ Account name
 
 =item budget_amount
 
-Amount (normalized left or right) budgetted
+Amount (normalized left or right) budgeted
 
 =item used_amount
 
@@ -58,7 +57,7 @@ Amount (normalized left or right) used
 
 =item variance
 
-Difference between budgetted and used.
+Difference between budgeted and used.
 
 =back
 
@@ -82,7 +81,7 @@ sub columns {
       {col_id => 'budget_amount',
          type => 'text',
          money => 1,
-         name => $self->Text('Amount Budgetted')},
+         name => $self->Text('Amount Budgeted')},
 
       {col_id => 'used_amount',
          type => 'text',
@@ -115,13 +114,13 @@ Returns the inputs to display on header.
 
 sub header_lines {
     my ($self) = @_;
-    return [{name => 'reference',
+    return [{value => $self->reference,
              text => $self->Text('Budget Number')},
-            {name => 'description',
+            {value => $self->description,
              text => $self->Text('Description')},
-            {name => 'start_date',
+            {value => $self->start_date,
              text => $self->Text('Start Date')},
-            {name => 'end_date',
+            {value => $self->end_date,
              text => $self->Text('End Date')},];
 }
 
@@ -165,13 +164,13 @@ has description => (is => 'ro', isa => 'Str');
 
 =cut
 
-has start_date => (is => 'ro', coerce => 1, isa => 'LedgerSMB::Moose::Date');
+has start_date => (is => 'ro', isa => 'LedgerSMB::PGDate');
 
 =item end_date
 
 =cut
 
-has end_date => (is => 'ro', coerce => 1, isa => 'LedgerSMB::Moose::Date');
+has end_date => (is => 'ro', isa => 'LedgerSMB::PGDate');
 
 =back
 

@@ -9,11 +9,10 @@ forms for LedgerSMB
 =head1 SYNPOSIS
 
  $report = LedgerSMB::Report::Taxform::Summary->new(%$request);
- $report->render($request);
+ $report->render();
 
 =cut
 
-use LedgerSMB::DBObject::TaxForm;
 use Moose;
 use namespace::autoclean;
 extends 'LedgerSMB::Report';
@@ -44,6 +43,8 @@ has tax_form_id => (is => 'ro', isa => 'Int', required => '1');
 
 has taxform => (is => 'rw', isa => 'Str', required => 0);
 
+has is_accrual => (is => 'rw', isa => 'Bool', required => 0, default => 0);
+
 =head1 REPORT CONSTANTS
 
 =head2 columns
@@ -55,6 +56,12 @@ has taxform => (is => 'rw', isa => 'Str', required => 0);
 =item account_type
 
 =item meta_number
+
+=item control_code
+
+=item tax_id
+
+=item sales_tax_id
 
 =item acc_sum
 
@@ -85,6 +92,14 @@ sub columns {
        type    => 'text',
        name    => $self->Text('Control Code') },
 
+      { col_id => 'tax_id',
+        type   => 'text',
+        name   => $self->Text('Tax ID'), },
+
+     { col_id  => 'sales_tax_id',
+       type    => 'text',
+       name    => $self->Text('Sales Tax ID') },
+
      { col_id  => 'acc_sum',
        type    => 'text',
        name    => $self->Text('Transactions') },
@@ -95,7 +110,7 @@ sub columns {
 
      { col_id  => 'total',
        type    => 'href',
-       href_base => 'taxform.pl?action=generate_report&',
+       href_base => 'taxform.pl?__action=generate_report&',
        name    => $self->Text('Total') },
      ];
 }
@@ -107,9 +122,9 @@ sub columns {
 sub header_lines {
     my ($self) = @_;
     return [
-       { name => 'from_date', text => $self->Text('From Date') },
-       { name => 'to_date',   text => $self->Text('To Date') },
-       { name => 'taxform',   text => $self->Text('Tax Form') },
+       { value => $self->from_date, text => $self->Text('From Date') },
+       { value => $self->to_date,   text => $self->Text('To Date') },
+       { value => $self->taxform,   text => $self->Text('Tax Form') },
     ];
 }
 
@@ -128,8 +143,10 @@ sub name {
 
 sub buttons {
     my ($self) = @_;
-    return [{name => 'action',
+    return [{name => '__action',
              type => 'submit',
+             'data-dojo-type' => 'lsmb/PrintButton',
+             'data-dojo-props' => 'minimalGET: false',
              text => $self->Text('Print'),
             value => 'print'}];
 }
@@ -142,12 +159,8 @@ sub buttons {
 
 sub run_report {
     my ($self) = @_;
-    my $tf = LedgerSMB::DBObject::TaxForm
-        ->new(dbh => $self->_dbh )
-        ->get($self->tax_form_id);
-    $self->taxform($tf->{form_name});
     my $fname = 'tax_form_summary_report';
-    $fname .= '_accrual' if $tf->{is_accrual};
+    $fname .= '_accrual' if $self->is_accrual;
     my @rows = $self->call_dbmethod(funcname => $fname);
 
     my $href_suffix_base = 'from_date=' . $self->from_date

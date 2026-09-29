@@ -1,4 +1,6 @@
 
+use v5.38;
+
 package LedgerSMB::I18N;
 
 =head1 NAME
@@ -11,19 +13,17 @@ LedgerSMB::I18N - Translation role for LedgerSMB Moose classes
 
 =head1 DESCRIPTION
 
-This adds a single method, text() to a role.  This maps to the current
-LedgerSMB::App_State::Locale's text method.  This is safe for cached code since
-we look only to the current locale.
+This adds two methods, Text() and Maketext() to a role, creating a locale
+object from the 'language' property.
 
 =cut
 
-#use v5.24.0;
-
 use Locale::CLDR;
+use Locales unicode => 1;
 use Moose::Role;
 use namespace::autoclean;
-use LedgerSMB::App_State;
 use LedgerSMB::Locale;
+
 
 has 'language' => (is => 'ro', isa => 'Maybe[Str]');
 
@@ -31,8 +31,7 @@ has 'locale' => (is => 'ro',
                  lazy => 1,
                  builder => '_build_locale');
 
-sub _build_locale {
-    my ($self) = @_;
+sub _build_locale($self) {
 
     my $locale;
     if ($self->language) {
@@ -57,10 +56,8 @@ Note: The first argument must be a string constant for
 
 =cut
 
-sub Text {
-    my $self = shift;
-
-    return $self->locale->maketext(@_);
+sub Text($self, @args) {
+    return $self->locale->maketext(@args);
 }
 
 
@@ -76,47 +73,10 @@ Note: In order for the first string (if it is an inline constant string)
 
 =cut
 
-sub Maketext {
-    my $self = shift;
-
-    return $self->locale->maketext(@_);
+sub Maketext($self, @args) {
+    return $self->locale->maketext(@args);
 }
 
-
-=item LedgerSMB::I18N::text(@args)
-
-Translates the string using the arguments passed.
-
-Wrapper around the MakeText::maketext function; uses the locale object
-stored in LedgerSMB::App_State->Locale.
-
-Note: The first argument must be a string constant for
- PO file extraction; in case of dynamic string arguments, use
- the C<maketext> method
-
-=cut
-
-sub text {
-    return LedgerSMB::App_State->Locale->maketext(@_);
-}
-
-
-=item $self->maketext(@args)
-
-Translates the string using the arguments passed.
-
-Wrapper around the MakeText::maketext function; uses the locale object
-stored in LedgerSMB::App_State->Locale.
-
-Note: In order for the first string (if it is an inline constant string)
- to be detected for translation and included in PO files, the C<Maketext>
- method should be used.
-
-=cut
-
-sub maketext {
-    return LedgerSMB::App_State->Locale->maketext(@_);
-}
 
 =item get_country_list($language)
 
@@ -124,8 +84,7 @@ Get a country localized list to allow user selection
 
 =cut
 
-sub get_country_list {
-    my $language = shift;
+sub get_country_list($language) {
     my %regions = Locale::CLDR->new($language)->all_regions->%*;
     return [
         sort { $a->{text} cmp $b->{text} }
@@ -135,37 +94,14 @@ sub get_country_list {
     ];
 }
 
-=item location_list_country_localized($request,$language)
-
-Get the country list, localized according to the desired language
-
-Use the provided language of default to user
-
-=cut
-
-sub location_list_country_localized {
-    my $request = shift;
-    my $language = shift // $request->{_user}->{language};
-    my @country_list = $request->call_procedure(
-                     funcname => 'location_list_country'
-    );
-    my %regions = %{Locale::CLDR->new($language)->all_regions};
-    foreach (@country_list) {
-      $_->{name} = $regions{$_->{short_name}}
-        if defined $regions{$_->{short_name}};
-    }
-    return @country_list;
-}
 =back
 
 =head1 LICENSE AND COPYRIGHT
 
-Copyright (C) 2012 The LedgerSMB Core Team
+Copyright (C) 2012-2023 The LedgerSMB Core Team
 
 This file is licensed under the GNU General Public License version 2, or at your
 option any later version.  A copy of the license should have been included with
 your software.
 
 =cut
-
-1;

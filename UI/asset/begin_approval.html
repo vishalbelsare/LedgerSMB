@@ -17,7 +17,7 @@
 <div class="inputrow" id="daterow"><div class="inputgroup" id="startdategrp">
 [% PROCESS input element_data = {
      name = "start_date"
-     class = "date"
+     type = "date"
      value = asset_report.start_date
      label = text("From")
 } %]
@@ -25,7 +25,7 @@
 <div class="inputgroup" id="todategroup">
 [% PROCESS input element_data = {
      name = "end_date"
-     class = "date"
+     type = "date"
      value = asset_report.end_date
      label = text("To")
 } %]
@@ -55,13 +55,23 @@
      label = text('Loss Account') #'
 } %]
 </div>
+<div class="inputgroup" id="cashgroup">
+[% PROCESS select element_data = {
+     name = "cash_acct"
+     class = "account"
+     options = asset_report.cash_accounts
+     value_attr = "id"
+     default_blank = 1
+     label = text('Cash Account') #'
+} %]
+</div>
 [% END %]
 </div>
 <div class="inputrow" id="buttonrow">
 <div class="inputgroup" id="buttongroupnext">
 <label>&nbsp;</label>
 [% PROCESS button element_data = {
-     name = "action"
+     name = "__action"
      text = text("Continue")
      value = "report_results"
      type = "submit"

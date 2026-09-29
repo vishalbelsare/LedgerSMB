@@ -5,18 +5,14 @@
         action="inventory.pl"
         method="post">
     <div class="listtop">[% text('Adjustment Details'); %]</div>
-    <div class="tabular col-1">
-      <div id="date_input_div">
+    <div class="two-column-grid" style="width: fit-content">
         [% INCLUDE input element_data = {
-                name  = "transdate"
-                class = "date"
+                name  = "report_date"
                 size  = "12"
-                value = transdate
-                type  = "text"
+                value = reportdate
+                type  = "date"
                 label = text('Date')
         } %]
-      </div>
-      <div id="source_input_div">
         [% INCLUDE input element_data = {
                 name  = "source"
                 class = "control_code"
@@ -25,11 +21,10 @@
                 type  = "text"
                 label = text('Source')
         } %]
-      </div>
     </div>
     <div id="button_div">
         [% INCLUDE button element_data = {
-                name  = "action"
+                name  = "__action"
                 type  = "submit"
                 text  = text('Continue')
                 class = "submit"

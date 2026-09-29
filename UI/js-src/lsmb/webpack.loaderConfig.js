@@ -17,8 +17,7 @@
  */
 const path = require("path");
 
-// eslint-disable-next-line no-unused-vars
-function getConfig(env) {
+function getConfig(/* env */) {
     // env is set by the 'buildEnvironment' and/or 'environment' plugin options
     // (see webpack.config.js),
     // or by the code at the end of this file if using without webpack
@@ -27,11 +26,11 @@ function getConfig(env) {
             // An array of objects which provide the package name and location
             {
                 name: "dojo",
-                location: path.resolve(__dirname,"../../../node_modules/dojo")
+                location: path.resolve(__dirname, "../../node_modules/dojo")
             },
             {
                 name: "dijit",
-                location: path.resolve(__dirname,"../../../node_modules/dijit")
+                location: path.resolve(__dirname, "../../node_modules/dijit")
             },
             {
                 name: "lsmb", // the name of the package
@@ -41,7 +40,7 @@ function getConfig(env) {
 
         async: true, // Defines if Dojo core should be loaded asynchronously
         blankGif: "./js/dojo/resources/blank.gif",
-        deps: ["lsmb/main"], // An array of resource paths which should load immediately once Dojo has loaded:
+        deps: [], // An array of resource paths which should load immediately once Dojo has loaded:
 
         has: {
             "dojo-config-api": 1, // Ensures that the build is configurable
@@ -85,5 +84,7 @@ if (typeof module !== "undefined") {
     module.exports = getConfig;
 } else {
     // No webpack.  This script was loaded by page via script tag, so load Dojo from CDN
-    getConfig({ dojoRoot: "//ajax.googleapis.com/ajax/libs/dojo/1.16.0" });
+    getConfig(
+        /* { dojoRoot: "//ajax.googleapis.com/ajax/libs/dojo/1.16.0" } */
+    );
 }

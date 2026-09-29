@@ -83,7 +83,7 @@
     <table id="curr_exrate_date_table">
      <tr id="date_row">[% # here goes an input where the date can be written, we can also use a java calendar :). We can use an ajax script to call the Exchange rate of the input date which can be called with the onChange Method          %]
       <th align="right" nowrap id="date_label_column">[% text('Date')%]:</th>
-      <td colspan="2" id="date_column"> [% INCLUDE input element_data=datepaid %] </td>
+      <td colspan="2" id="date_column"> [% datepaid.type = 'date'; INCLUDE input element_data=datepaid %] </td>
      </tr>
      <tr id="curr_row">
      [% #  here goes the selected currency in step 1 %]
@@ -296,8 +296,9 @@
                                 value_attr = 'value'
                                 text_attr = 'name'
                                 options = vc_list
-                                default_values = [ request.new_entity_id ] } %]
+                                default_values = [ request.new_entity_id ]
                                 default_blank = 1
+           } %]
    </td>
    <td align="center">N/A</td>
    <td align="center">N/A</td>
@@ -339,21 +340,21 @@
  <table id="footer" width="100%">
   <tr id="footer_row">
    <td valign="top" id="button_column">
-   [% update.accesskey   = "U";
+   [%
         update.title       = "UPDATE ALT+U";
-        update.name        = "action";
+        update.name        = "__action";
         update.value        = "use_overpayment2";
         update.text        = text("UPDATE");
         INCLUDE button element_data=update -%]
-   [% post.accesskey   = "P";
+   [%
         post.title        = "POST ALT+P";
-        post.name         = "action";
+        post.name         = "__action";
         post.value        = "post_overpayment";
         post.text         = text("POST");
         INCLUDE button element_data=post -%]
-   [% post_and_print.accesskey = "R";
+   [%
         post_and_print.title     = "POST AND PRINT ALT+R";
-        post_and_print.name = "action";
+        post_and_print.name = "__action";
         post_and_print.value = "";
         post_and_print.text = text("POST AND PRINT");;
         INCLUDE button element_data=post_and_print %]

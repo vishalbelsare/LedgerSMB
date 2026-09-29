@@ -25,54 +25,67 @@ BEGIN
                               - (select qty from mfg_lot_item
                                   WHERE parts_id = parts.id AND
                                         mfg_lot_id = $1)
-     WHERE id in (select parts_id from mfg_lot_item
-                   WHERE mfg_lot_id = $1);
+     WHERE id IN (select parts_id from mfg_lot_item
+                   where mfg_lot_id = $1);
 
     UPDATE parts SET onhand = onhand + t_mfg_lot.qty
-     where id = t_mfg_lot.parts_id;
+     WHERE id = t_mfg_lot.parts_id;
 
-    INSERT INTO gl (reference, description, transdate, approved,
-                   trans_type_code)
-    values ('mfg-' || $1::TEXT, 'Manufacturing lot',
+    INSERT INTO transactions (
+      reference, description,
+      transdate, approved, trans_type_code
+    )
+    VALUES ('mfg-' || $1::TEXT, 'Manufacturing lot',
             now(), true, 'as');
 
+    UPDATE mfg_lot
+       SET trans_id = currval('transactions_id_seq')
+     WHERE id = in_id;
+
     INSERT INTO invoice (trans_id, parts_id, qty, allocated)
-    SELECT currval('id')::int, parts_id, qty, 0
+    SELECT currval('transactions_id_seq')::int, parts_id, qty, 0
       FROM mfg_lot_item WHERE mfg_lot_id = $1;
 
     PERFORM cogs__add_for_ar_line(id) FROM invoice
-      WHERE trans_id = currval('id')::int;
+      WHERE trans_id = currval('transactions_id_seq')::int;
 
 
     PERFORM * FROM invoice
-      WHERE qty + allocated <> 0 AND trans_id = currval('id')::int;
+      WHERE qty + allocated <> 0 AND trans_id = currval('transactions_id_seq')::int;
 
     IF FOUND THEN
        RAISE EXCEPTION 'Not enough parts in stock';
     END IF;
 
     INSERT INTO invoice (trans_id, parts_id, qty, allocated, sellprice)
-    SELECT currval('id')::int, t_mfg_lot.parts_id, t_mfg_lot.qty * -1, 0,
-           sum(amount_bc) / t_mfg_lot.qty
+    SELECT currval('transactions_id_seq')::int, t_mfg_lot.parts_id, t_mfg_lot.qty * -1, 0,
+           -1*sum(amount_bc) / t_mfg_lot.qty
       FROM acc_trans
-     WHERE amount_bc < 0 and trans_id = currval('id')::int;
+     WHERE amount_bc < 0 and trans_id = currval('transactions_id_seq')::int;
 
     PERFORM cogs__add_for_ap_line(currval('invoice_id_seq')::int);
 
-    -- move from reverse COGS.
+    -- move from COGS back into inventory
     INSERT INTO acc_trans(trans_id, chart_id, transdate,
-                          amount_bc, curr, amount_tc)
-    SELECT trans_id, chart_id, transdate, amount_bc * -1, curr, amount_tc * -1
+                          amount_bc, curr, amount_tc,
+                          invoice_id, memo)
+    SELECT trans_id, chart_id, transdate,
+           amount_bc * -1, curr, amount_tc * -1,
+           currval('invoice_id_seq')::int, 'Collect assembly parts costs from COGS'
       FROM acc_trans
-     WHERE amount_bc < 0 and trans_id = currval('id')::int;
+     WHERE amount_bc < 0 and trans_id = currval('transactions_id_seq')::int;
 
     -- difference goes into inventory
-    INSERT INTO acc_trans(trans_id, transdate, amount_bc, curr, amount_tc,
-                          chart_id)
-    SELECT trans_id, now(), sum(amount_bc) * -1, curr, sum(amount_tc) * -1,
-           (select inventory_accno_id from parts where id = t_mfg_lot.parts_id)
+    INSERT INTO acc_trans(trans_id, transdate, chart_id,
+                          amount_bc, curr, amount_tc,
+                          invoice_id, memo)
+    SELECT trans_id, now(), (select inventory_accno_id
+                               from parts
+                              where id = t_mfg_lot.parts_id),
+           sum(amount_bc) * -1, curr, sum(amount_tc) * -1,
+           currval('invoice_id_seq')::int, 'Post assembly parts cost in inventory'
       FROM acc_trans
-     WHERE trans_id = currval('id')::int
+     WHERE trans_id = currval('transactions_id_seq')::int
   GROUP BY trans_id, curr;
 
 
@@ -82,7 +95,7 @@ $$;
 
 CREATE OR REPLACE FUNCTION assembly__stock(in_parts_id int, in_qty numeric)
 RETURNS numeric LANGUAGE SQL AS $$
-    INSERT INTO mfg_lot(parts_id, qty) VALUES ($1, $2);
+    INSERT INTO mfg_lot(parts_id, lot_number, qty) VALUES ($1, setting_increment('lotnumber'), $2);
     INSERT INTO mfg_lot_item(mfg_lot_id, parts_id, qty)
     SELECT currval('mfg_lot_id_seq')::int, parts_id, qty * $2
       FROM assembly WHERE id = $1;
@@ -111,31 +124,10 @@ weight numeric,
 notes text,
 image text,
 drawing text,
-microfische text,
+microfiche text,
 make text,
 model text
 );
-
-DROP FUNCTION IF EXISTS goods__search
-(in_partnumber text, in_description text,
- in_partsgroup_id int, in_serial_number text, in_make text,
- in_model text, in_drawing text, in_microfiche text,
- in_status text, in_date_from date, in_date_to date,
- in_sales_invoices bool, in_purchase_invoices bool,
- in_sales_orders bool, in_purchase_orders bool, in_quotations bool,
- in_rfqs bool);
-
-DROP FUNCTION IF EXISTS goods__search
-(in_partnumber text, in_description text,
- in_partsgroup_id int, in_serial_number text, in_make text,
- in_model text, in_drawing text, in_microfiche text,
- in_status text, in_date_from date, in_date_to date);
-
-DROP FUNCTION IF EXISTS goods__search
-(in_parttype text, in_partnumber text, in_description text,
- in_partsgroup_id int, in_serial_number text, in_make text,
- in_model text, in_drawing text, in_microfiche text,
- in_status text, in_date_from date, in_date_to date);
 
 
 CREATE OR REPLACE FUNCTION goods__search
@@ -171,6 +163,7 @@ LANGUAGE SQL STABLE AS $$
                       (select parts_id from invoice
                         where serialnumber = in_serialnumber))
               AND (in_parttype IS NULL
+                   OR in_parttype = 'all'
                    OR (in_parttype = 'assemblies' and p.assembly)
                    OR (in_parttype = 'services'
                        and p.inventory_accno_id IS NULL)
@@ -241,15 +234,13 @@ $$
            AS adjusted
       FROM invoice i
       JOIN parts p ON (i.parts_id = p.id)
-      JOIN (select id, approved, transdate, 'ar' as transtype FROM ar
-             UNION
-            SELECT id, approved, transdate, 'ap' as transtype FROM ap
-             UNION
-            SELECT id, approved, transdate, trans_type_code as transtype
-              FROM gl) a
-            ON (a.id = i.trans_id AND a.approved)
-     WHERE ($1 IS NULL OR a.transdate >= $1)
-           AND ($2 IS NULL OR a.transdate <= $2)
+      JOIN (
+        select id, approved, transdate, trans_type_code as transtype
+          from transactions
+      ) txn ON txn.id = i.trans_id
+     WHERE txn.approved
+           AND ($1 IS NULL OR txn.transdate >= $1)
+           AND ($2 IS NULL OR txn.transdate <= $2)
            AND ($3 IS NULL OR p.partnumber ilike $3 || '%')
            AND ($4 IS NULL OR p.description @@ plainto_tsquery($4))
   GROUP BY p.id, p.description, p.partnumber
@@ -312,11 +303,11 @@ SELECT oe.transdate,
    GROUP BY p.id, p.partnumber;
 $$;
 
-CREATE OR REPLACE FUNCTION inventory_adjust__create(in_transdate date)
+CREATE OR REPLACE FUNCTION inventory_adjust__create(in_report_date date)
 RETURNS inventory_report
 AS
 $$
-        INSERT INTO inventory_report(transdate) values (in_transdate)
+        INSERT INTO inventory_report(report_date) values (in_report_date)
         RETURNING *;
 $$ language sql;
 
@@ -325,15 +316,15 @@ CREATE OR REPLACE FUNCTION inventory_adjust__search
 RETURNS SETOF inventory_report AS
 $$
 
-   SELECT r.id, r.transdate, r.source, r.trans_id
+   SELECT r.id, r.report_date, r.source, r.trans_id
      FROM inventory_report r
-     JOIN inventory_report_line l ON l.adjust_id = r.id
+  LEFT JOIN inventory_report_line l ON l.adjust_id = r.id
      JOIN parts p ON l.parts_id = p.id
-    WHERE ($1 is null or $1 <= r.transdate) AND
-          ($2 is null OR $2 >= r.transdate) AND
+    WHERE ($1 is null or $1 <= r.report_date) AND
+          ($2 is null OR $2 >= r.report_date) AND
           ($3 IS NULL OR plainto_tsquery($3) @@ tsvector(p.partnumber)) AND
           ($4 IS NULL OR source LIKE $4 || '%')
- GROUP BY r.id, r.transdate, r.source, r.trans_id;
+ GROUP BY r.id, r.report_date, r.source, r.trans_id;
 $$ LANGUAGE SQL;
 
 CREATE OR REPLACE FUNCTION inventory_adjust__save_line
@@ -349,18 +340,15 @@ RETURNING *;
 $$;
 
 CREATE OR REPLACE FUNCTION inventory_adjust__save_info
-(in_transdate date, in_source text)
+(in_report_date date, in_source text)
 RETURNS inventory_report
 LANGUAGE SQL AS
 $$
-INSERT INTO inventory_report(transdate, source)
+INSERT INTO inventory_report(report_date, source)
 VALUES ($1, $2)
 RETURNING *;
 $$;
 
-
--- 'inventory_ajdust__approve()' had its return type changed in 1.5.4
-DROP FUNCTION IF EXISTS inventory_adjust__approve(int);
 
 
 CREATE OR REPLACE FUNCTION inventory_adjust__approve(in_id int)
@@ -377,9 +365,11 @@ IF inv.trans_id IS NOT NULL THEN
    RETURN inv;
 END IF;
 
-INSERT INTO gl (description, transdate, reference, approved, trans_type_code)
-        VALUES ('Transaction due to approval of inventory adjustment',
-                inv.transdate, 'invadj-' || in_id, true, 'ia')
+  INSERT INTO transactions (
+    description,
+    transdate, reference, approved, trans_type_code)
+  VALUES ('Transaction due to approval of inventory adjustment',
+          inv.report_date, 'invadj-' || in_id, true, 'ia')
     RETURNING id INTO t_trans_id;
 
 UPDATE inventory_report
@@ -452,13 +442,12 @@ CREATE OR REPLACE FUNCTION inventory_adjust__list
 RETURNS SETOF inventory_report language sql as $$
 
 SELECT * FROM inventory_report
- WHERE ($1 is null or transdate >= $1)
-       AND ($2 IS NULL OR transdate <= $2)
+ WHERE ($1 is null or report_date >= $1)
+       AND ($2 IS NULL OR report_date <= $2)
        AND ($3 IS NULL OR $3 = (trans_id IS NOT NULL));
 
 $$;
 
-DROP FUNCTION IF EXISTS inventory_adjust__get(in_id int);
 CREATE OR REPLACE FUNCTION inventory_adjust__get(in_id int)
 RETURNS inventory_report -- only 0-1....
 LANGUAGE SQL AS
@@ -498,12 +487,6 @@ discount numeric,
 serialnumber text
 );
 
-DROP FUNCTION IF EXISTS goods__history(
-  in_date_from date, in_date_to date,
-  in_partnumber text, in_description text, in_serial_number text,
-  in_inc_po bool, in_inc_so bool, in_inc_quo bool, in_inc_rfq bool,
-  in_inc_is bool, in_inc_ir bool
-);
 
 CREATE OR REPLACE FUNCTION goods__history(
   in_date_from date, in_date_to date,
@@ -511,51 +494,68 @@ CREATE OR REPLACE FUNCTION goods__history(
   in_inc_po bool, in_inc_so bool, in_inc_quo bool, in_inc_rfq bool,
   in_inc_is bool, in_inc_ir bool
 ) RETURNS SETOF parts_history_result LANGUAGE SQL AS
-$$
-  SELECT p.id, p.partnumber, o.transdate, p.description, p.bin,
-         o.id as ord_id, o.ordnumber, o.oe_class, eca.meta_number::text, e.name,
-         i.sellprice, i.qty, i.discount, i.serialnumber
+  $$
+  WITH arap  AS (
+     SELECT id, 'ar' as o_table, invnumber as ordnumber, 'is' as oe_class,
+            txn.transdate, entity_credit_account
+       FROM ar
+            JOIN transactions txn
+                 ON ar.trans_id = txn.id
+     UNION
+     SELECT id, 'ap' as o_table, invnumber as ordnumber, 'ir' as oe_class,
+            txn.transdate, entity_credit_account
+       FROM ap
+            JOIN transactions txn
+                 ON ap.trans_id = txn.id
+  ),
+  invoicelines AS (
+     SELECT i.parts_id, i.sellprice, i.qty, i.discount, i.serialnumber,
+            arap.id as ord_id, arap.o_table, arap.ordnumber, arap.oe_class,
+            arap.transdate, arap.entity_credit_account
+       FROM invoice i
+            JOIN arap
+                 ON i.trans_id = arap.id
+  ),
+  orderlines AS (
+     SELECT oi.parts_id, oi.sellprice, oi.qty, oi.discount, oi.serialnumber,
+            oe.id as ord_id, 'oe' as o_table, ordnumber as ordnumber, c.oe_class,
+            oe.transdate, oe.entity_credit_account
+       FROM orderitems oi
+            JOIN oe
+                 ON oi.trans_id = oe.id
+            JOIN oe_class c
+                 ON oe.oe_class_id = c.id
+  )
+  SELECT p.id, p.partnumber, l.transdate, p.description, p.bin,
+         l.ord_id, l.ordnumber, l.oe_class, eca.meta_number::text, e.name,
+         l.sellprice, l.qty, l.discount, l.serialnumber
     FROM parts p
-    JOIN (select id, trans_id, parts_id, sellprice, qty, discount, serialnumber,
-                 'o' as i_type
-            FROM orderitems
-           UNION
-          SELECT id, trans_id, parts_id, sellprice, qty, discount, serialnumber,
-                 'i' as i_type
-            FROM invoice) i ON p.id = i.parts_id
-    JOIN (select o.id, 'oe' as o_table, ordnumber as ordnumber, c.oe_class,
-                 o.oe_class_id, o.transdate, o.entity_credit_account, 'o' as expected_line
-            FROM oe o
-            JOIN oe_class c ON o.oe_class_id = c.id
-           UNION
-          SELECT id, 'ar' as o_table, invnumber as ordnumber, 'is' as oe_class,
-                 null, transdate, entity_credit_account, 'i' as expected_line
-            FROM ar
-           UNION
-          SELECT id, 'ap' as o_table, invnumber as ordnumber, 'ir' as oe_class,
-                 null, transdate, entity_credit_account, 'i' as expected_line
-            FROM ap) o ON o.id = i.trans_id
-                          AND o.expected_line = i.i_type
-    JOIN entity_credit_account eca ON o.entity_credit_account = eca.id
+         JOIN (SELECT *
+                 FROM orderlines
+               UNION ALL
+               SELECT *
+                FROM invoicelines) l
+              ON p.id = l.parts_id
+    JOIN entity_credit_account eca ON l.entity_credit_account = eca.id
     JOIN entity e ON e.id = eca.entity_id
    WHERE (in_partnumber is null or p.partnumber like in_partnumber || '%')
          AND (in_description IS NULL
               OR p.description @@ plainto_tsquery(in_description))
-         AND (in_date_from is null or in_date_from <= o.transdate)
-         and (in_date_to is null or in_date_to >= o.transdate)
-         AND (in_serialnumber is null or i.serialnumber = in_serialnumber)
+         AND (in_date_from is null or in_date_from <= l.transdate)
+         and (in_date_to is null or in_date_to >= l.transdate)
+         AND (in_serialnumber is null or l.serialnumber = in_serialnumber)
          AND ((in_inc_po IS NULL AND in_inc_so IS NULL
                 AND in_inc_quo IS NULL AND in_inc_rfq IS NULL
                 AND in_inc_ir IS NULL AND in_inc_is IS NULL)
               OR (
-                 (in_inc_po is true and o.oe_class = 'Purchase Order')
-                 OR (in_inc_so is true and o.oe_class = 'Sales Order')
-                 OR (in_inc_quo is true and o.oe_class = 'Quotation')
-                 OR (in_inc_rfq is true and o.oe_class = 'RFQ')
-                 OR (in_inc_ir is true and o.oe_class = 'ir')
-                 OR (in_inc_is is true and o.oe_class = 'is')
+                 (in_inc_po is true and l.oe_class = 'Purchase Order')
+                 OR (in_inc_so is true and l.oe_class = 'Sales Order')
+                 OR (in_inc_quo is true and l.oe_class = 'Quotation')
+                 OR (in_inc_rfq is true and l.oe_class = 'RFQ')
+                 OR (in_inc_ir is true and l.oe_class = 'ir')
+                 OR (in_inc_is is true and l.oe_class = 'is')
              ))
-ORDER BY o.transdate desc, o.id desc;
+ORDER BY l.transdate desc, l.ord_id desc;
 $$;
 
 update defaults set value = 'yes' where setting_key = 'module_load_ok';

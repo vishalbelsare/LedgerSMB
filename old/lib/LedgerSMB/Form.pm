@@ -1,3 +1,6 @@
+
+use v5.38;
+
 =head1 NAME
 
 LedgerSMB::Form - Provides general legacy support functions and the central object.
@@ -56,26 +59,23 @@ Deprecated
 
 package Form;
 
-use strict;
 use charnames qw(:full);
 use open ':utf8';
 use utf8;
 
 
 use LedgerSMB;
-use LedgerSMB::App_State;
-use LedgerSMB::Company_Config;
 use LedgerSMB::Magic qw( SCRIPT_OLDSCRIPTS );
 use LedgerSMB::PGNumber;
-use LedgerSMB::Sysconfig;
 use LedgerSMB::Setting::Sequence;
 use LedgerSMB::Setting;
-
+use LedgerSMB::StopProcessing;
 
 use Carp;
 use List::Util qw(first);
 use Log::Any;
 use LWP::Simple;
+use PGObject;
 use Symbol;
 use Time::Local;
 
@@ -116,7 +116,7 @@ sub new {
             $self->{$p} =~ s/\N{NULL}//g;
         }
         $self->{nextsub} //= '';
-        $self->{action} //= $self->{nextsub};
+        $self->{__action} //= $self->{nextsub};
     }
     $self->{version} = $self->{dbversion} = $LedgerSMB::VERSION;
 
@@ -159,8 +159,10 @@ sub check_form {
     my ($self) = @_;
 
     return 0 unless $self->{form_id};
-    my $sth = $self->{dbh}->prepare('select form_check(?, ?)');
-    $sth->execute($self->{session_id}, $self->{form_id});
+    my $sth = $self->{dbh}->prepare('select form_check(?, ?)')
+        or die $self->{dbh}->errstr;
+    $sth->execute($self->{session_id}, $self->{form_id})
+        or die $self->{dbh}->errstr;
     my @results = $sth->fetchrow_array();
     return $results[0];
 }
@@ -171,8 +173,10 @@ sub close_form {
         delete $self->{form_id};
     }
 
-    my $sth = $self->{dbh}->prepare('select form_close(?, ?)');
-    $sth->execute($self->{session_id}, $self->{form_id});
+    my $sth = $self->{dbh}->prepare('select form_close(?, ?)')
+        or die $self->{dbh}->errstr;
+    $sth->execute($self->{session_id}, $self->{form_id})
+        or die $self->{dbh}->errstr;
     my @results = $sth->fetchrow_array();
     delete $self->{close_form};
     return $results[0];
@@ -342,6 +346,20 @@ sub error {
     Carp::croak $msg;
 }
 
+=item $form->call_procedure()
+
+=cut
+
+sub call_procedure {
+    my $self = shift;
+    my %args = @_;
+    $args{funcschema} ||= $self->{_wire}->get( 'db' )->schema;
+    $args{funcname} ||= $args{procname};
+    $args{dbh} = $self->{dbh};
+    $args{args} ||= [];
+    return PGObject->call_procedure(%args);
+}
+
 =item $form->finalize_request();
 
 Stops further processing, allowing post-request cleanup on intermediate
@@ -352,7 +370,7 @@ This function replaces explicit 'exit()' calls.
 =cut
 
 sub finalize_request {
-    die;
+    LedgerSMB::StopProcessing->throw;
 }
 
 
@@ -461,37 +479,17 @@ sub header {
     $self->{header} = 1;
 }
 
-=item $form->open_status_div
+=item $form->open_status_div( $div_id )
 
-Returns a div tag with an id of statusdiv.
-
-If $form->{id} is set and $form->{approved} the class is set to "posted" and if
-id is set but not approved, this is set to "saved."  If neither applies, we set
-to "new."
+Returns a div tag with an id of C<$div_id>.
 
 =cut
 
 sub open_status_div {
     my ($self, $div_id) = @_;
-    my $class;
-    if ($self->{approved} and $self->{id}){
-        $class = "posted";
-    }
-    elsif ($self->{id}){
-        $class = "saved";
-    }
-    else {
-        $class = "new";
-    }
 
-    my $status = $self->{_locale}->text(
-        'Action: [_1], ID: [_2]',
-        $self->{action},
-        $self->{id}
-        );
     my $id = $div_id ? "id=\"$div_id\"" : '';
-    return "<div $id class=\"$class\">
-            <div id=\"history\">$status</div>";
+    return "<div $id>";
 }
 
 =item $form->close_status_div
@@ -516,7 +514,6 @@ sub redirect {
     my ( $self, $msg ) = @_;
 
     if ( $self->{callback} || !$msg ) {
-        $logger->trace("Full redirect \$self->{callback}=$self->{callback} \$msg=$msg");
         $self->_redirect();
         $self->finalize_request();
     }
@@ -529,9 +526,8 @@ sub redirect {
 
 sub _redirect {
     # referenced directly from am.pl, because of the need of our return value
-    use List::Util qw(first);
     my ($self) = @_;
-    my ( $script, $argv ) = split( /\?/, $self->{callback}, 2 );
+    my ( $script, $argv ) = split( /\?/, $self->{callback} // '', 2 );
 
     if ( !$script ) {    # http redirect to login.pl if called w/no args
         print "Location: login.pl\n";
@@ -546,13 +542,16 @@ sub _redirect {
     }
 
     my $form = Form->new($argv);
-    $form->{$_} = $self->{$_} for qw(
-      dbh login favicon stylesheet titlebar password vc header _auth _locale
-    );
-    $form->{action} ||= $self->{action}; # default to old action if not set
+    $form->{$_} = $self->{$_} for (
+        qw( dbh login favicon stylesheet titlebar password vc header ),
+        grep { /^_/ and $_ ne '__action' } keys %$self
+        );
+    $form->{__action} ||= $self->{__action}; # default to old action if not set
     $form->{script} = $script;
 
-    my %myconfig = %{ LedgerSMB::User->fetch_config( $form ) };
+    my %myconfig = %{
+        $form->{_conn}->current_user->preferences->fetch
+    };
     if ( !$form->{dbh} and ( $script ne 'admin.pl' ) ) {
         $form->db_init( \%myconfig );
     }
@@ -560,7 +559,7 @@ sub _redirect {
     $lsmb_legacy::form = $form;
     require "old/bin/$script";
 
-    my $ref = qualify_to_ref $form->{action}, 'lsmb_legacy';
+    my $ref = qualify_to_ref $form->{__action}, 'lsmb_legacy';
     &{ *{$ref} };
 
 }
@@ -703,19 +702,26 @@ sub format_amount {
     $amount = "" unless defined $amount;
     $places = "0" unless defined $places;
     $dash = "" unless defined $dash;
-    $amount = $self->parse_amount($myconfig, $amount);
     if ($self->{money_precision}){
        $places= $self->{money_precision};
     }
-    $myconfig->{numberformat} = '1000.00' unless $myconfig->{numberformat};
     $amount = $self->parse_amount( $myconfig, $amount )
         unless ref($amount) eq 'LedgerSMB::PGNumber';
+    $myconfig->{numberformat} = '1000.00' unless $myconfig->{numberformat};
     return $amount->to_output({
                places => $places,
                 money => $self->{money_precision},
            neg_format => $dash,
                format => $myconfig->{numberformat},
     });
+}
+
+sub formatter_options {
+    my ( $self ) = @_;
+
+    return {
+        $self->{_user}->%{ qw( dateformat numberformat ) }
+    };
 }
 
 =item $form->parse_amount($myconfig, $amount);
@@ -730,18 +736,38 @@ Calls $form->error if the value is NaN.
 =cut
 
 sub parse_amount {
-
     my ( $self, $myconfig, $amount ) = @_;
-    local $@;
-    return $amount if eval {$amount->isa('LedgerSMB::PGNumber') };
 
+    return $amount if $amount isa 'LedgerSMB::PGNumber';
     if ( ( ! defined $amount ) or ( $amount eq '' ) ) {
         $amount = '0';
     }
 
     return LedgerSMB::PGNumber->from_input(
         $amount,
-                                           {format => $myconfig->{numberformat}}
+        { format => $myconfig->{numberformat} }
+    );
+}
+
+=item $form->parse_date($myconfig, $date);
+
+Return a LedgerSMB::PGDate containing the value of $date where $date is
+formatted as $myconfig->{dateformat}.  If $date is '' or undefined, undef
+is returned.
+
+=cut
+
+sub parse_date {
+    my ( $self, $myconfig, $date ) = @_;
+
+    return $date if $date isa 'LedgerSMB::PGDate';
+    if ( ( ! defined $date ) or ( $date eq '' ) ) {
+        $date = '';
+    }
+
+    return LedgerSMB::PGDate->from_input(
+        $date,
+        { format => $myconfig->{dateformat} }
     );
 }
 
@@ -995,8 +1021,7 @@ about buttons, $name is the key for the element in $button to output.  Each
 value in $button is a reference to a hash of two elements, 'key' and 'value'.
 
 $name is the value of the button that gets sent to the server when clicked,
-$button->{$name}{key} is the accesskey, and $button->{$name}{value} is the label
-for the button.
+$button->{$name}{value} is the label for the button.
 
 =cut
 
@@ -1007,8 +1032,17 @@ sub print_button {
 
     my $type = $button->{$name}{type} // 'dijit/form/Button';
     $btn++;
+
+    my $doing_toast =
+        $button->{$name}{doing} ? qq|data-lsmb-doing="$button->{$name}{doing}"|
+        : '';
+    my $done_toast =
+        $button->{$name}{done} ? qq|data-lsmb-done="$button->{$name}{done}"|
+        : '';
+
+    my $title = $button->{$name}{tooltip} || $button->{$name}{value};
     print
-qq|<button data-dojo-type="$type" class="submit" type="submit" name="action" value="$name" id="action-$name-$btn" accesskey="$button->{$name}{key}" title="$button->{$name}{value} [Alt-$button->{$name}{key}]">$button->{$name}{value}</button>\n|;
+qq|<button data-dojo-type="$type" class="submit" type="submit" name="__action" value="$name" id="action-$name-$btn" title="$title" $doing_toast $done_toast>$button->{$name}{value}</button>\n|;
 }
 
 
@@ -1054,37 +1088,14 @@ sub generate_selects {
         }
     }
 
-     # projects
-    if ( $form->{all_project} && @{ $form->{all_project} } ) {
-        $form->{selectprojectnumber} = "<option></option>\n";
-          $form->{selectprojectnumber} = "";
-
-        for ( @{ $form->{all_project} } ) {
-            my $value = "$_->{projectnumber}--$_->{id}";
-            $form->{selectprojectnumber} .=
-                     # change the format here, then change it below!
-                     qq|<option value="$value">$_->{projectnumber}</option>\n|;
-        }
-
-          if ($form->{rowcount}) {
-                for my $i ( 1 .. $form->{rowcount} ) {
-                     $form->{"selectprojectnumber_$i"} =
-                          $form->{"selectprojectnumber"};
-                     $form->{"selectprojectnumber_$i"} =~
-                          s/(value="\Q$form->{"projectnumber_$i"}\E")/$1 selected="selected"/;
-                }
-          }
-    }
-
-    # departments
-    if ( $form->{all_department} && @{ $form->{all_department} } ) {
-        $form->{selectdepartment} = "<option></option>\n";
-        for ( @{ $form->{all_department} } ) {
-                my $value = "$_->{description}--$_->{id}";
-                my $selected = ($form->{department} eq $value) ?
-                     ' selected="selected"' : "";
-            $form->{selectdepartment} .=
-                     qq|<option value="$value"$selected>$_->{description}</option>\n|;
+    # business units
+    if ( $form->{bu_class} && @{ $form->{bu_class} } ) {
+        for my $bu_class ( @{ $form->{bu_class} } ) {
+            my $select = '<option></option>';
+            for my $b_unit ( @{ $form->{b_units}->{$bu_class->{id}} } ) {
+                $select .= qq|<option value="$b_unit->{id}">$b_unit->{description}</option>|;
+            }
+            $form->{"selectbc_$bu_class->{id}"} = $select;
         }
     }
 
@@ -1169,14 +1180,13 @@ sub generate_selects {
      }
 
      # formats
-    $form->{selectformat} = qq|<option value="html">html<option value="csv">csv\n|;
-    if ( LedgerSMB::Sysconfig::latex() ) {
-        $form->{selectformat} .= qq|
-            <option value="postscript">|
-                . $form->{_locale}->text('Postscript')
-                . qq|<option value="pdf">|
-                . $form->{_locale}->text('PDF');
-    }
+    $form->{selectformat} =
+        join('',
+             map {
+                 my $val = lc $_;
+                 qq|<option value="$val">$_|
+             } $form->{_wire}->get( 'output_formatter' )->get_formats
+        );
 
     # warehouse
     if ( $form->{all_warehouse} &&  @{ $form->{all_warehouse} } ) {
@@ -1220,8 +1230,6 @@ sub db_init {
 
     $self->{dbh} = $dbh;
     _set_datestyle($dbh);
-
-    LedgerSMB::Company_Config::initialize($self);
 }
 
 sub _set_datestyle {
@@ -1299,7 +1307,7 @@ sub update_balance {
 =item $form->add_shipto($id, $is_oe);
 
 Inserts a new location_id reference into the table new_shipto, using the
-Form->{locationid} property.
+Form->{shiptolocationid} property.
 
 $is_oe determines whether the locaation is linked with a transaction or an oe.
 
@@ -1311,36 +1319,31 @@ If $is_oe is true, the value of trans_id is NULL and of oe_id is $id.
 sub add_shipto {
 
     my ($self, $id, $is_oe) = @_;
-        if (! $self->{locationid}) {
+    if (! $self->{shiptolocationid}) {
         return;
     }
 
-    my $query = qq|
-            INSERT INTO new_shipto
-            (trans_id, oe_id,location_id)
-            VALUES ( ?, ?, ?)
-            |;
-
-        my $sth = $self->{dbh}->prepare($query) || $self->dberror($query);
-        my $trans_id;
-        my $oe_id;
-
     if ($is_oe) {
-           $trans_id = undef;
-           $oe_id = $id;
+        $self->{dbh}->do('update oe set shipto = ? where id = ?',
+                         {},
+                         $self->{shiptolocationid},
+                         $id)
+            or die $self->{dbh}->errstr;
+    }
+    elsif ($self->{vc} eq 'customer') {
+        $self->{dbh}->do('update ar set shipto = ? where trans_id = ?',
+                         {},
+                         $self->{shiptolocationid},
+                         $id)
+            or die $self->{dbh}->errstr;
     }
     else {
-           $trans_id = $id;
-           $oe_id = undef;
-        }
-
-        $sth->execute(
-                        $trans_id,
-            $oe_id,
-            $self->{locationid}
-              ) || $self->dberror($query);
-
-    $sth->finish;
+        $self->{dbh}->do('update ap set shipto = ? where trans_id = ?',
+                         {},
+                         $self->{shiptolocationid},
+                         $id)
+            or die $self->{dbh}->errstr;
+    }
 }
 
 =item $form->get_shipto ($location_id)
@@ -1507,7 +1510,7 @@ is equal to, $myconfig->{vclimit}.
 In addition to the possible population of $form->{all_${vc}},
 $form->{employee_id} is looked up if not already set, the list
 $form->{all_language} is populated using the language table and is sorted by the
-description, and $form->all_employees, $form->all_departments,
+description, and $form->all_employees,
 $form->all_business_units, and $form->all_taxaccounts are all run.
 
 =cut
@@ -1626,7 +1629,6 @@ sub rebuild_vc {
 This is API-compatible with all_vc.  It is a handy wrapper function that calls
 the following functions:
 all_employees
-all_departments
 all_business_units
 all_taxaccounts
 
@@ -1635,7 +1637,7 @@ variable collisions, etc.
 
 $form->{employee_id} is looked up if not already set, the list
 $form->{all_language} is populated using the language table and is sorted by the
-description, and $form->all_employees, $form->all_departments,
+description, and $form->all_employees,
 $form->all_business_units, and $form->all_taxaccounts are all run.
 
 =cut
@@ -1762,26 +1764,22 @@ units assigned to other customers.
 =cut
 
 sub all_business_units {
-
     my ( $self, $transdate, $credit_id, $module_name) = @_;
     $self->{bu_class} = [];
     $self->{b_units} = {};
 
     my $dbh       = $self->{dbh};
-    my $class_sth = $dbh->prepare(
-                q|SELECT * FROM business_unit__list_classes('1', ?)|
-    );
-    $class_sth->execute($module_name)
-        || $self->dberror(q|SELECT * FROM business_unit__list_classes('1', ?)|);
+    my $query     = q|SELECT * FROM business_unit__list_classes('1', ?)|;
+    my $class_sth = $dbh->prepare($query) || $self->dberror($query);
+    $class_sth->execute($module_name) || $self->dberror($query);
 
-    my $bu_sth    = $dbh->prepare(
-                q|SELECT * FROM business_unit__list_by_class(?, ?, ?, 'false')|
-    );
+    $query        = q|SELECT * FROM business_unit__list_by_class(?, ?, ?, 'false')|;
+    my $bu_sth    = $dbh->prepare($query) || $self->dberror($query);
 
+    $transdate  ||= undef; # set '' to undef
     while (my $classref = $class_sth->fetchrow_hashref('NAME_lc')){
         push @{$self->{bu_class}}, $classref;
-        $bu_sth->execute($classref->{id}, $transdate, $credit_id)
-            || $self->dberror(q|SELECT * FROM business_unit__list_by_class(?, ?, ?, 'false')|);
+        $bu_sth->execute($classref->{id}, $transdate, $credit_id) || $self->dberror($query);
         $self->{b_units}->{$classref->{id}} = [];
         while (my $buref = $bu_sth->fetchrow_hashref('NAME_lc')){
            push @{$self->{b_units}->{$classref->{id}}}, $buref;
@@ -1874,12 +1872,12 @@ not contain 'tax', the account number is appended to the space separated list
 $form->{accounts}.  $module is typically 'AR' or 'AP' and is the base type of
 the accounts looked up.
 
-If $form->{id} is not set, check $form->{"$form->{vc}_id"}.  If neither is set,
-use $form->lastname_used to populate the details.  If $form->{id} is set,
+If $form->{id} is not set, check $form->{"$form->{vc}_id"}.
+If $form->{id} is set,
 populate the invnumber, transdate, ${vc}_id, datepaid, duedate, ordnumber,
-taxincluded, currency, notes, intnotes, ${vc}, department_id, department,
+taxincluded, currency, notes, intnotes, ${vc},
 oldinvtotal, employee_id, employee, language_code, ponumber,
-reverse, printed, emailed, recurring, exchangerate, and acc_trans
+reverse, recurring, exchangerate, and acc_trans
 attributes of $form with details about the transaction $form->{id}.  All of
 these attributes, save for acc_trans, are scalar; $form->{acc_trans} refers to
 a hash keyed by link elements whose values are lists of references to hashes
@@ -1926,39 +1924,102 @@ sub create_links {
     my $key;
     my %tax_accounts;
 
-    $sth = $dbh->prepare("SELECT accno FROM account WHERE tax");
+    my $arap = ( $vc eq 'customer' ) ? 'ar' : 'ap';
+    $vc = 'vendor' unless $vc eq 'customer';
+    my $seq = ( $vc eq 'customer' ) ? 'a.setting_sequence'
+                                    : 'NULL as setting_sequence';
+    if ( $self->{id} ) {
+        # retrieve the 'open_item_id' to query any relevant obsolete accounts
+        # for the transaction and payment lines.
+        $query = qq|
+            SELECT a.invnumber, txn.transdate,
+                a.entity_credit_account AS entity_id,
+                a.entity_credit_account AS ${vc}_id,
+                a.duedate, a.ordnumber,
+                a.taxincluded, a.curr AS currency, a.notes,
+                txn.notes as intnotes, ce.name AS $vc,
+                a.amount_tc AS oldinvtotal,
+                case when a.amount_tc = 0 then 0
+                else a.amount_bc / a.amount_tc end as exchangerate,
+                a.person_id as employee_id, e.name AS employee,
+                c.language_code, a.ponumber, a.reverse,
+                txn.approved, ctf.default_reportable,
+                txn.description, a.on_hold, a.crdate,
+                a.shipto as shiptolocationid, a.shipto_attn as shiptoattn,
+                a.is_return, $seq, a.open_item_id,
+                t.workflow_id, t.reversing, t.reversing_reference,
+                t.reversed_by, t.reversed_by_reference
+            FROM $arap a
+            JOIN transactions txn ON a.trans_id = txn.id
+            JOIN transactions_reversal t ON txn.id = t.id
+            JOIN entity_credit_account c
+                ON (a.entity_credit_account = c.id)
+            JOIN entity ce ON (ce.id = c.entity_id)
+            LEFT JOIN entity_employee er
+                                   ON (er.entity_id = a.person_id)
+            LEFT JOIN entity e ON (er.entity_id = e.id)
+            LEFT JOIN country_tax_form ctf
+                                  ON (ctf.id = c.taxform_id)
+            WHERE txn.id = ? AND c.entity_class =
+                (select id FROM entity_class
+                WHERE class ilike ?)|;
+        $sth = $dbh->prepare($query) || $self->dberror($query);
+        $sth->execute( $self->{id}, $self->{vc} ) || $self->dberror($query);
+
+        $ref = $sth->fetchrow_hashref('NAME_lc');
+        $self->db_parse_numeric(sth=>$sth, hashref=>$ref);
+
+        if (!defined $ref->{approved}){
+           $ref->{approved} = 0;
+        }
+
+        foreach my $key (keys %$ref) {
+            $self->{$key} = $ref->{$key} unless defined $self->{$key};
+
+        }
+
+        $sth->finish;
+
+    }
+
+        $sth = $dbh->prepare("SELECT accno FROM account WHERE tax");
     $sth->execute();
     while ( my $ref = $sth->fetchrow_hashref('NAME_lc') ) {
         $tax_accounts{$ref->{accno}} = 1;
     }
 
     # now get the account numbers
-    $query = qq|SELECT a.accno, a.description, as_array(l.description) as link
+    $query = qq|SELECT a.accno, a.description, array_agg(l.description) as link
                   FROM account a
-                  JOIN account_link l ON a.id = l.account_id AND NOT a.obsolete
+                  JOIN account_link l ON a.id = l.account_id
                  WHERE (l.description LIKE ? OR a.tax)
                        AND (a.id in (select acc_trans.chart_id
                                        FROM acc_trans
-                                      WHERE trans_id = coalesce(?, -1))
+                                      WHERE trans_id = ?)
+                            OR a.id in (select acc_trans.chart_id
+                                          FROM acc_trans
+                                         WHERE trans_id in (select trans_id
+                                                              from acc_trans
+                                                             where open_item_id = ?))
                            OR NOT a.obsolete)
               GROUP BY a.accno, a.description
               ORDER BY accno|;
 
     $sth = $dbh->prepare($query);
     $self->{id} = undef if $self->{id} && $self->{id} eq '';
-    $sth->execute( "%" . "$module%", $self->{id}) || $self->dberror($query);
+    $sth->execute( "%" . "$module%", $self->{id}, $self->{open_item_id}) || $self->dberror($query);
 
     $self->{accounts} = "";
 
     while ( my $ref = $sth->fetchrow_hashref('NAME_lc') ) {
+        $self->{_accno_descriptions}->{$ref->{accno}} = $ref->{description};
         my $link = $ref->{link};
 
-        push(@$link,"${module}_tax") if $tax_accounts{$ref->{accno}};
+        push(@$link,"${module}_tax") # there's no "${module}_tax" link; only a tax boolean
+            if $tax_accounts{$ref->{accno}};
 
         foreach my $key ( @$link ) {
-
-            if ( $key =~ /$module/ ) {
-
+            if ( $key =~ /$module/ ) { # *all* tax accounts selected in query above
                 # cross reference for keys
                 $xkeyref{ $ref->{accno} } = $key;
 
@@ -1973,77 +2034,9 @@ sub create_links {
             }
         }
     }
-
     $sth->finish;
 
-    my $arap = ( $vc eq 'customer' ) ? 'ar' : 'ap';
-    $vc = 'vendor' unless $vc eq 'customer';
-    my $seq = ( $vc eq 'customer' ) ? 'a.setting_sequence'
-                                    : 'NULL as setting_sequence';
     if ( $self->{id} ) {
-
-        $query = qq|
-            SELECT a.invnumber, a.transdate,
-                a.entity_credit_account AS entity_id,
-                a.entity_credit_account AS ${vc}_id,
-                a.duedate, a.ordnumber,
-                a.taxincluded, a.curr AS currency, a.notes,
-                a.intnotes, ce.name AS $vc,
-            a.amount_tc AS oldinvtotal,
-            case when a.amount_tc = 0 then 0
-            else a.amount_bc / a.amount_tc end as exchangerate,
-                a.person_id as employee_id, e.name AS employee,
-                c.language_code, a.ponumber, a.reverse,
-                                a.approved, ctf.default_reportable,
-                                a.description, a.on_hold, a.crdate,
-                                ns.location_id as locationid, a.is_return, $seq
-            FROM $arap a
-            JOIN entity_credit_account c
-                ON (a.entity_credit_account = c.id)
-            JOIN entity ce ON (ce.id = c.entity_id)
-            LEFT JOIN entity_employee er
-                                   ON (er.entity_id = a.person_id)
-            LEFT JOIN entity e ON (er.entity_id = e.id)
-                        LEFT JOIN country_tax_form ctf
-                                  ON (ctf.id = c.taxform_id)
-                        LEFT JOIN new_shipto ns on a.id = ns.trans_id
-            WHERE a.id = ? AND c.entity_class =
-                (select id FROM entity_class
-                WHERE class ilike ?)|;
-        $sth = $dbh->prepare($query);
-        $sth->execute( $self->{id}, $self->{vc} ) || $self->dberror($query);
-
-        $ref = $sth->fetchrow_hashref('NAME_lc');
-        $self->db_parse_numeric(sth=>$sth, hashref=>$ref);
-
-        if (!defined $ref->{approved}){
-           $ref->{approved} = 0;
-        }
-
-        foreach my $key (keys %$ref) {
-            $self->{$key} = $ref->{$key} unless defined $self->{$key};
-        }
-
-        $sth->finish;
-
-        # get printed, emailed
-        $query = qq|
-            SELECT s.printed, s.emailed, s.formname
-            FROM status s WHERE s.trans_id = ?|;
-        $sth = $dbh->prepare($query);
-        $sth->execute( $self->{id} ) || $self->dberror($query);
-        while ( $ref = $sth->fetchrow_hashref('NAME_lc') ) {
-            $self->{printed} .= "$ref->{formname} "
-              if $ref->{printed};
-            $self->{emailed} .= "$ref->{formname} "
-              if $ref->{emailed};
-        }
-        $sth->finish;
-
-        for (qw(printed emailed)) {
-            $self->{$_} =~ s/ +$//g if $self->{$_}
-        }
-
     # get customer e-mail accounts
     $query = qq|SELECT * FROM eca__list_contacts(?)
                       WHERE class_id BETWEEN 12 AND ?
@@ -2094,17 +2087,15 @@ sub create_links {
          SELECT c.accno, c.description, a.source, a.amount_tc as amount,
                 case when a.amount_tc = 0 then 0 else (a.amount_bc/a.amount_tc)::numeric end as exchangerate,
                 a.memo,a.entry_id, a.transdate, a.cleared,
-                                compound_array(ARRAY[ARRAY[bul.class_id, bul.bu_id]])
+                                array_agg(ARRAY[bul.class_id, bul.bu_id])
                                 AS bu_lines,
-               (exists (select 1 from payment_links pl
-                         where a.entry_id = pl.entry_id)) AS payment_line
+               approved
             FROM acc_trans a
             JOIN account c ON (c.id = a.chart_id)
                    LEFT JOIN business_unit_ac bul ON a.entry_id = bul.entry_id
             WHERE a.trans_id = ?
---          AND a.fx_transaction = '0'
                         GROUP BY c.accno, c.description, a.source, a.amount_tc,
-                           a.amount_bc, a.memo,a.entry_id, a.transdate, a.cleared
+                           a.amount_bc, a.memo, a.entry_id, a.transdate, a.cleared
             ORDER BY transdate|;
 
         $sth = $dbh->prepare($query);
@@ -2128,14 +2119,48 @@ sub create_links {
 
             push @{ $self->{acc_trans}{ $xkeyref{ $ref->{accno} } } }, $ref;
         }
-
         $sth->finish;
-    }
-    else {
 
-        if ( !$self->{"$self->{vc}_id"} ) {
-            $self->lastname_used($vc);
+        # negate amount: we're using the amount from the AR account (the allocated amount)
+        # where the code base assumes we're using the amount from the cash account
+        # which has the opposite sign of the allocated amount.
+        $query = <<~'SQL';
+            SELECT ac.memo, ac.entry_id, ac.transdate, ac.cleared,
+                   array_agg(ARRAY[bul.class_id, bul.bu_id]) as bu_lines,
+                   ac.approved, ac.source, -ac.amount_tc as amount,
+                   case when ac.amount_tc = 0 then 0 else (ac.amount_bc/ac.amount_tc)::numeric end as exchangerate,
+                   c.accno, c.description
+              FROM acc_trans ac
+                   LEFT JOIN business_unit_ac bul
+                        ON ac.entry_id = bul.entry_id
+                   JOIN payment p
+                        ON p.trans_id = ac.trans_id
+                   JOIN account c
+                        ON c.id = p.account_id
+             WHERE ac.open_item_id = ?
+             GROUP BY ac.entry_id, c.accno, c.description
+             ORDER BY ac.transdate
+            SQL
+
+        $sth = $dbh->prepare($query);
+        $sth->execute( $self->{open_item_id} ) || $self->dberror($query);
+        # store amounts in {acc_trans}{$key} for payments
+        while ( my $ref = $sth->fetchrow_hashref('NAME_lc') ) {
+            $self->db_parse_numeric(sth=>$sth, hashref=>$ref);#tshvr
+
+            for my $aref (@{$ref->{bu_lines}}){
+                if ($aref && $aref->[0]) {
+                    $ref->{"b_unit_$aref->[0]"} = $aref->[1];
+                }
+            }
+
+            if ($self->{reverse}){
+                $ref->{amount} *= -1;
+            }
+
+            push @{ $self->{acc_trans}{ $xkeyref{ $ref->{accno} } } }, $ref;
         }
+
     }
 
     for (qw(separate_duties curr lock_description)) {
@@ -2233,64 +2258,6 @@ sub is_closed {
     return $is_closed;
 }
 
-=item $form->lastname_used($vc);
-
-Fills the name, currency, ${vc}_id, duedate, and possibly invoice_notes
-attributes of $form with the last used values for the transaction type specified
-by both $vc and $form->{type}.  $vc can be either 'vendor' or 'customer' and if
-unspecified will take on the value given in $form->{vc}, defaulting to 'vendor'.
-If $form->{type} matches /_order/, the transaction type used is order, if it
-matches /_quotation/, quotations are looked through.  If $form->{type} does not
-match either of the above, then ar or ap transactions are used.
-
-=cut
-
-sub lastname_used {
-
-    my ($self, $vc) = @_;
-    $vc ||= $self->{vc};    # add default to correct for improper passing
-    my $arap;
-    my $where;
-    if ($vc eq 'customer') {
-        $arap = 'ar';
-    }
-    else {
-        $arap = 'ap';
-        $vc = 'vendor';
-    }
-
-    my $sth;
-    if ($self->{type} && $self->{type} =~ /_order/ ) {
-        $arap  = 'oe';
-        $where = "quotation = '0'";
-    }
-
-    if ($self->{type} && $self->{type} =~ /_quotation/ ) {
-        $arap  = 'oe';
-        $where = "quotation = '1'";
-    }
-
-    $where = "AND $where " if $where;
-    $where //= '';
-    my $query = qq|
-        SELECT entity.name, ct.curr AS currency, entity_id AS ${vc}_id,
-            current_date + ct.terms AS duedate,
-            ct.curr AS currency
-        FROM entity_credit_account ct
-        JOIN entity ON (ct.entity_id = entity.id)
-        WHERE entity.id = (select entity_id from $arap
-                            where entity_id IS NOT NULL $where
-                                 order by id DESC limit 1)|;
-
-    $sth = $self->{dbh}->prepare($query);
-    $sth->execute() || $self->dberror($query);
-
-    my $ref = $sth->fetchrow_hashref('NAME_lc');
-    for (keys %$ref) {
-        $self->{$_} = $ref->{$_}
-    }
-    $sth->finish;
-}
 
 =item $form->current_date($myconfig[, $thisdate, $days]);
 
@@ -2471,7 +2438,7 @@ sub get_partsgroup {
                 t.description AS translation
             FROM partsgroup pg
             JOIN parts p ON (p.partsgroup_id = pg.id)
-            LEFT JOIN translation t ON (t.trans_id = pg.id
+            LEFT JOIN partsgroup_translation t ON (t.trans_id = pg.id
                 AND t.language_code = ?)|;
         @queryargs = (
             $p->{language_code}
@@ -2490,120 +2457,6 @@ sub get_partsgroup {
     }
 
     $sth->finish;
-}
-
-=item $form->update_status();
-
-DELETEs all status rows which have a formname of $form->{formname} and a
-trans_id of $form->{id}.  INSERTs a new row into status where trans_id is
-$form->{id}, formname is $form->{formname}, printed and emailed are true if
-their respective $form attributes match /$form->{formname}/.
-
-=cut
-
-sub update_status {
-
-    my ($self) = @_;
-
-    # no id return
-    return unless $self->{id};
-
-    my $dbh = $self->{dbh};
-
-    my $query = qq|DELETE FROM status
-                    WHERE formname = ?
-                      AND trans_id = ?|;
-
-    my $sth = $dbh->prepare($query);
-    $sth->execute(
-        $self->{formname},
-        $self->{id}
-    ) || $self->dberror($query);
-
-    $sth->finish;
-
-    return unless $self->{printed} || $self->{emailed};
-
-    my $printed = ( $self->{printed} =~ /$self->{formname}/ ) ? "1" : "0";
-    my $emailed = ( $self->{emailed} =~ /$self->{formname}/ ) ? "1" : "0";
-
-    $query = qq|
-        INSERT INTO status
-            (trans_id, printed, emailed, formname)
-        VALUES (?, ?, ?, ?)|;
-
-    $sth = $dbh->prepare($query);
-    $sth->execute(
-        $self->{id},
-        $printed,
-        $emailed,
-        $self->{formname}
-    ) || $self->dberror($query);
-
-    $sth->finish;
-}
-
-=item $form->save_status();
-
-Clears out any old status entries for $form->{id} and saves new status entries.
-Printed and emailed form
-names are extracted from $form->{printed} and $form->{emailed}.  The
-printed, and emailed fields are space separated lists.
-
-=cut
-
-sub save_status {
-
-    my ($self) = @_;
-    my $dbh = $self->{dbh};
-
-    my $formnames  = $self->{printed};
-    my $emailforms = $self->{emailed};
-
-    my $query = qq|DELETE FROM status
-                    WHERE trans_id = ?|;
-
-    my $sth = $dbh->prepare($query);
-    $sth->execute(
-        $self->{id}
-    ) || $self->dberror($query);
-    $sth->finish;
-
-    my $formname;
-    my $printed;
-    my $emailed;
-
-    # save printed, emailed info
-    $formnames  =~ s/^ +//g;
-    $emailforms =~ s/^ +//g;
-
-    my %status = ();
-    for (split / +/, $formnames) {
-        $status{$_}{printed} = 1
-    }
-
-    for (split / +/, $emailforms) {
-        $status{$_}{emailed} = 1
-    }
-
-    foreach my $formname ( keys %status ) {
-        $printed = ( $formnames  =~ /$self->{formname}/ ) ? "1" : "0";
-        $emailed = ( $emailforms =~ /$self->{formname}/ ) ? "1" : "0";
-
-        $query = qq|
-            INSERT INTO status (trans_id, printed, emailed,
-                formname)
-            VALUES (?, ?, ?, ?)|;
-
-        $sth = $dbh->prepare($query);
-        $sth->execute(
-            $self->{id},
-            $printed,
-            $emailed,
-            $formname
-        );
-        $sth->finish;
-    }
 }
 
 =item $form->get_recurring();
@@ -2969,7 +2822,7 @@ sub save_intnotes {
 
     my $dbh = $self->{dbh};
 
-    my $query = qq|UPDATE $vc SET intnotes = ? WHERE id = ?|;
+    my $query = qq|UPDATE transactions SET notes = ? WHERE id = (select trans_id from $vc where id = ?)|;
 
     my $sth = $dbh->prepare($query);
     $sth->execute(
@@ -3026,52 +2879,7 @@ sub update_defaults {
 
     my $dbh = $self->{dbh};
 
-    my $query = qq|
-        SELECT value FROM defaults
-         WHERE setting_key = ? FOR UPDATE|;
-    my $sth = $dbh->prepare($query);
-    $sth->execute($fld);
-    my ($dbvar) = $sth->fetchrow_array();
-
-    $dbvar //= "0";
-    my $var = $dbvar;
-    my $num = $dbvar;
-    my ($prefix, $suffix);
-    ($prefix, $num, $suffix) = $num =~ /(\D*)(\d+)(\D*)$/;
-
-    if ( defined $num ) {
-        my $incnum;
-
-        # if we have leading zeros check how long it is
-
-        if ( $num =~ /^0/ ) {
-            my $l = length $num;
-            $incnum = $num + 1;
-            $l -= length $incnum;
-
-            # pad it out with zeros
-            my $padzero = "0" x $l;
-            $incnum = ( "0" x $l ) . $incnum;
-        }
-        else {
-            $incnum = $num + 1;
-        }
-
-        $dbvar =~ s/\Q$prefix$num$suffix\E$/$prefix$incnum$suffix/;
-    }
-
-
-    $query = qq|
-        UPDATE defaults
-           SET value = ?
-         WHERE setting_key = ?|;
-
-    $sth = $self->{dbh}->prepare($query);
-    $sth->execute(
-        $dbvar,
-        $fld
-    ) || $self->dberror($query);
-
+    my $var = $dbh->selectrow_array('select setting_increment(?)', {}, $fld);
     return $var;
 }
 
@@ -3101,35 +2909,6 @@ sub should_update_defaults {
     );
     return 1 unless $sequence->accept_input;
     return 0;
-}
-
-=item $form->update_invnumber
-
-If invnumber is not set, updates it.  Used when gapless numbering is in effect
-
-=cut
-
-sub update_invnumber {
-    my $self = shift;
-    my $query = 'select invnumber from ar where id = ?';
-    my $sth = $self->{dbh}->prepare($query)
-        or $self->dberror($query);
-    $sth->execute($self->{id}) or $self->dberror($query);
-    my ($invnumber) = $sth->fetchrow_array;
-    $self->dberror($query) if $sth->err;
-
-    return if defined $invnumber or !$sth->rows;
-    $sth->finish;
-    $query = 'update ar set invnumber = ? where id = ?';
-    $sth = $self->{dbh}->prepare($query)
-        or $self->dberror($query);
-    $sth->execute(
-        $self->update_defaults(
-            LedgerSMB::App_State::User(),
-            'sinumber'
-        ),
-        $self->{id}
-    ) or $self->dberror($query);
 }
 
 =item $form->db_prepare_vars(var1, var2, ..., varI<n>)
@@ -3194,18 +2973,21 @@ sub get_batch_description {
 
 }
 
-=item sequence_dropdown(setting_key)
+=item sequence_dropdown(setting_key, readonly)
 
 This function returns the HTML code for a dropdown box for a given setting
 key.  It is not generally to be used with code on new templates.
 
+=back
+
 =cut
 
 sub sequence_dropdown{
-    my ($self, $setting_key) = @_;
+    my ($self, $setting_key, $readonly) = @_;
     return undef if $self->{id} and ($setting_key ne 'sinumber');
     my @sequences = LedgerSMB::Setting::Sequence->list($setting_key);
-    my $retval = qq|<select data-dojo-type="dijit/form/Select" name='setting_sequence' class='sequence'>\n|;
+    $readonly = $readonly ? 'readonly="readonly"' : '';
+    my $retval = qq|<select data-dojo-type="dijit/form/Select" name='setting_sequence' class='sequence' $readonly>\n|;
     $retval .= qq|<option></option>|;
 
     for my $seq (@sequences){
@@ -3224,10 +3006,4 @@ sub sequence_dropdown{
         return '';
     }
 }
-#end decrysiption
-
-1;
-
-
-=back
 

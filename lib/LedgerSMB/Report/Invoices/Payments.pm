@@ -8,7 +8,7 @@ LedgerSMB::Report::Invoices::Payments - Payment Search Report for LedgerSMB
 =head1 SYNPOSIS
 
  my $report = LedgerSMB::Report::Invoices::Payments->new(%$request);
- $report->render($request);
+ $report->render();
 
 =cut
 
@@ -93,8 +93,7 @@ and if this is not set, an error will be returned during the reversal process.
 
 =cut
 
-has exchange_rate => (is => 'ro', isa => 'LedgerSMB::Moose::Number',
-                required => 0, coerce => 1);
+has exchange_rate => (is => 'ro', isa => 'LedgerSMB::PGNumber', required => 0);
 
 =back
 
@@ -181,13 +180,13 @@ sub header_lines {
     } else {
         die 'Invalid entity class';
     }
-    return [{name => 'meta_number', text => $meta_number },
-            {name => 'cash_accno',
-             text => $self->Text('Account Number') },
-            {name => 'from_date',
-             text => $self->Text('From Date')},
-            {name => 'to_date',
-             text => $self->Text('To Date')}
+    return [{value => $self->meta_number, text => $meta_number },
+            {value => $self->cash_accno,
+             text  => $self->Text('Account Number') },
+            {value => $self->from_date,
+             text  => $self->Text('From Date')},
+            {value => $self->to_date,
+             text  => $self->Text('To Date')}
            ];
 }
 
@@ -228,7 +227,7 @@ sub run_report{
     $self->rows(\@rows);
     $self->buttons([{
         text => $self->Text('Reverse Payments'),
-        name => 'action',
+        name => '__action',
         type => 'submit',
        class => 'submit',
        value => 'reverse_payments',

@@ -47,7 +47,6 @@ CREATE TYPE person_entity AS (
     first_name text,
     middle_name text,
     last_name text,
-    entity_class int,
     birthdate date,
     personal_id text
 );
@@ -56,7 +55,7 @@ CREATE FUNCTION person__get(in_entity_id int)
 RETURNS person_entity AS
 $$
 SELECT e.id, e.control_code, e.name, e.country_id, c.name,
-       p.first_name, p.middle_name, p.last_name, e.entity_class,
+       p.first_name, p.middle_name, p.last_name,
        p.birthdate, p.personal_id
   FROM entity e
   JOIN country c ON c.id = e.country_id
@@ -68,7 +67,7 @@ CREATE FUNCTION person__get_by_cc(in_control_code text)
 RETURNS person_entity AS
 $$
 SELECT e.id, e.control_code, e.name, e.country_id, c.name,
-       p.first_name, p.middle_name, p.last_name, e.entity_class,
+       p.first_name, p.middle_name, p.last_name,
        p.birthdate, p.personal_id
   FROM entity e
   JOIN country c ON c.id = e.country_id
@@ -83,7 +82,6 @@ $$ SELECT * FROM salutation ORDER BY id ASC $$ language sql;
 COMMENT ON FUNCTION person__list_salutations() IS
 $$ Returns a list of salutations ordered by id.$$;
 
-DROP FUNCTION IF EXISTS person__save (int, int, text, text, text, int);
 CREATE OR REPLACE FUNCTION person__save
 (in_entity_id integer, in_salutation_id int,
 in_first_name text, in_middle_name text, in_last_name text,
@@ -99,7 +97,7 @@ RETURNS INT AS $$
         p_id int;
     BEGIN
 
-    select * into e from entity where id = in_entity_id and entity_class = 3;
+    select * into e from entity where id = in_entity_id;
     e_id := in_entity_id;
 
     IF FOUND THEN
@@ -108,8 +106,8 @@ RETURNS INT AS $$
                country_id = in_country_id
          WHERE id = in_entity_id;
     ELSE
-        INSERT INTO entity (name, entity_class, country_id)
-        values (in_first_name || ' ' || in_last_name, 3, in_country_id);
+        INSERT INTO entity (name, country_id)
+        values (in_first_name || ' ' || in_last_name, in_country_id);
         e_id := currval('entity_id_seq');
 
     END IF;
@@ -200,9 +198,6 @@ COMMENT ON FUNCTION person__delete_contact
 (in_person_id int, in_contact_class_id int, in_contact text) IS
 $$ Deletes a contact record specified for the person.  Returns true if a record
 was found and deleted, false if not.$$;
-
-DROP FUNCTION IF EXISTS  person__save_contact
-(in_entity_id int, in_contact_class int, in_contact_orig text, in_contact_new TEXT);
 
 CREATE OR REPLACE FUNCTION person__save_contact
 (in_entity_id int, in_contact_class int, in_old_contact text, in_contact_new TEXT, in_description text, in_old_contact_class int)

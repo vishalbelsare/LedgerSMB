@@ -28,6 +28,12 @@ use HTML::Escape;
 use HTTP::Status qw( HTTP_OK HTTP_UNAUTHORIZED HTTP_INTERNAL_SERVER_ERROR
     HTTP_SEE_OTHER HTTP_BAD_REQUEST );
 
+use parent 'Exporter';
+our @EXPORT_OK = qw(
+    internal_server_error unauthorized session_timed_out
+    incompatible_database template_response
+    );
+
 =head1 METHODS
 
 This module declares no methods.
@@ -56,7 +62,8 @@ sub internal_server_error {
     push @body_lines, '</body></html>';
 
     return [ HTTP_INTERNAL_SERVER_ERROR,
-             [ 'Content-Type' => 'text/html; charset=UTF-8' ],
+             [ 'Content-Type' => 'text/html; charset=UTF-8',
+               'X-LedgerSMB-App-Content' => 'yes' ],
              \@body_lines ];
 }
 
@@ -69,7 +76,8 @@ Returns a standard error representation for HTTP status 401
 
 sub unauthorized {
     return [ HTTP_UNAUTHORIZED,
-             [ 'Content-Type' => 'text/plain; charset=utf-8' ],
+             [ 'Content-Type' => 'text/plain; charset=utf-8',
+               'X-LedgerSMB-App-Content' => 'yes' ],
              [ 'Credentials invalid or session expired' ]
         ];
 }
@@ -82,7 +90,7 @@ Returns a standard error representation for 'LedgerSMB session timed out'
 
 sub session_timed_out {
     return [ HTTP_SEE_OTHER,
-             [ 'Location' => 'login.pl?action=logout&reason=timeout' ],
+             [ 'Location' => 'logout.pl?__action=logout&reason=timeout' ],
              [] ];
 }
 
@@ -99,24 +107,55 @@ sub incompatible_database {
 
     return
         [ 521, ## no critic
-          [ 'Content-Type' => 'text/html; charset=utf-8' ],
+          [ 'Content-Type' => 'text/html; charset=utf-8',
+            'X-LedgerSMB-App-Content' => 'yes' ],
           [ 'Database is not the expected version.  ' .
             "Was $actual, expected $expected.  " .
             'Please re-run <a href="setup.pl">setup.pl</a> to correct.' ] ];
 }
 
 
-=head2 cookie_path($script)
+=head2 template_response( $template, %args )
 
-Returns the C<path=> parameter to be used with the C<Set-Cookie>
-(authorization) header.
+Transform a template into a PSGI response, taking additional args
+into account:
+
+=over
+
+=item disposition
+
+When set and equal to 'attach', generates a Content-Disposition header
+with the value 'attachment'.
+
+=item headers
+
+Additional headers to include in the response.
+
+=back
 
 =cut
 
-sub cookie_path {
-    my $script = shift;
 
-    return ($script =~ s|[^/]*$||r);
+sub template_response {
+    my ($template, %args) = @_;
+    my $content_type = $template->{mimetype};
+    $content_type .= '; charset=UTF-8' if $content_type =~ m|^text/|;
+
+    my @headers = (
+        'Content-Type' => $content_type,
+        ($args{headers} // [])->@*
+        );
+
+    if ($args{disposition} and $args{disposition} eq 'attach') {
+        my $name = $template->{output_options}->{filename};
+        push @headers,
+            'Content-Disposition' => qq{attachment; filename="$name"};
+    }
+
+    my $body = $template->{output};
+    utf8::encode($body) if utf8::is_utf8($body); ## no critic
+
+    return [ HTTP_OK, \@headers, [ $body ] ];
 }
 
 

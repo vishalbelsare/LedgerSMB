@@ -31,14 +31,14 @@ relevant Moose objects.
 
 =cut
 
-has from_date => (is => 'ro', isa => 'LedgerSMB::Moose::Date', coerce => 1,
+has from_date => (is => 'ro', isa => 'LedgerSMB::PGDate',
                   lazy => 1, builder => '_get_from_date');
 
 =item to_date
 
 =cut
 
-has to_date => (is => 'ro', isa => 'LedgerSMB::Moose::Date', coerce => 1,
+has to_date => (is => 'ro', isa => 'LedgerSMB::PGDate',
                 lazy => 1, builder => '_get_to_date');
 
 =item interval string
@@ -47,7 +47,7 @@ Either 'none', 'month', 'quarter', or 'year'
 
 =cut
 
-has interval => (is => 'ro', isa => 'Str', required => 0, default => 'None');
+has interval => (is => 'ro', isa => 'Str', required => 0, default => 'none');
 
 =item from_month int
 
@@ -125,7 +125,6 @@ These are the first and last date in acc_trans.
 
 =cut
 
-
 sub get_bracket_dates {
     my ($self) = @_;
     my $return_hashref = {};
@@ -150,9 +149,9 @@ sub _collect_dates_comparisons {
 
     foreach my $i (1 .. $args{comparison_periods}) {
         push @dates, {
-            from_date => LedgerSMB::PGDate->from_input($args{"from_date_$i"}),
-            to_date => LedgerSMB::PGDate->from_input($args{"to_date_$i"}),
-            column_path_prefix => [ $i ]
+            from_date => LedgerSMB::PGDate->from_input($args{"from_date_$i"},$args{formatter_options}),
+            to_date => LedgerSMB::PGDate->from_input($args{"to_date_$i"},$args{formatter_options}),
+            column_path_prefix => [ sprintf('%02u', $i) ]
         };
     }
 
@@ -178,6 +177,20 @@ around BUILDARGS => sub {
         }
     }
 
+    # There are two *mutually exclusive* ways to specify a time range
+    if ($args{from_year} && $args{from_month} && $args{interval}) {
+        # Prioritise a date range specified as a starting year, month and
+        # time interval. The corresponding from_date and to_date values will
+        # be calculated and used to populate object properties.
+        delete $args{from_date};
+        delete $args{to_date};
+    }
+    else {
+        # Use explicit from_date and to_date parameters
+        delete $args{from_year};
+        delete $args{from_month};
+    }
+
     return $class->$orig(%args);
 };
 
@@ -194,7 +207,7 @@ sub _build_comparisons {
                 from_date => $date,
                 to_date => $date->clone->add_interval($interval)
                     ->add_interval('day', -1),
-                column_path_prefix => [ $c_per ]
+                column_path_prefix => [ sprintf('%02u', $c_per) ]
             };
         }
     }
@@ -242,9 +255,6 @@ sub _set_lazy_dates {
               return;
 }
 
-
-
-
 before 'render' => sub {
               my ($self) = @_;
               # Set lazy attributes
@@ -260,7 +270,7 @@ before 'run_report' => sub {
 
 =head1 LICENSE AND COPYRIGHT
 
-Copyright (C) 2012 The LedgerSMB Core Team
+Copyright (C) 2012-2025 The LedgerSMB Core Team
 
 This file is licensed under the GNU General Public License version 2, or at your
 option any later version.  A copy of the license should have been included with

@@ -14,6 +14,11 @@
         } %]
 [% PROCESS input element_data = {
                 type = "hidden"
+                name = "entity_class"
+                value = entity_class
+        } %]
+[% PROCESS input element_data = {
+                type = "hidden"
                 name = "old_location_class"
                 value = request.location_class
         } %]
@@ -53,8 +58,8 @@
         base_suffix = "$request.script?entity_id=$entity_id&amp;location_id=$LOC.id" _
                "&amp;credit_id=$credit_act.id&amp;is_for_credit=$LOC.is_for_credit&amp;target_div=address_div" _
                "&amp;location_class=$LOC.location_class";
-        LOC.edit_href_suffix= base_suffix _ '&amp;action=edit';
-        LOC.delete_href_suffix= base_suffix _ '&amp;action=delete_location';
+        LOC.edit_href_suffix= base_suffix _ '&amp;__action=edit';
+        LOC.delete_href_suffix= base_suffix _ '&amp;__action=delete_location';
         IF LOC.id == request.location_id && request.action == 'edit';
              DISPLAY = LOC;
         END;
@@ -90,8 +95,9 @@
                 name="location_id"
                 value= DISPLAY.id
         };
-       %] <div data-dojo-type="lsmb/layout/TableContainer" data-dojo-props="cols:1"><div>
-             [% IF credit_act.id;
+%]
+        <div class="two-column-grid" style="width:fit-content">
+  [% IF credit_act.id;
                     IF DISPLAY.is_for_credit;
                        attach_to = 3;
                     ELSE;
@@ -102,85 +108,62 @@
                           id              = 'attach_address_to'
                           default_values  = [attach_to]
                           options         = attach_level_options
-                          title = text('Attach To') #'
-                          label = "_none_"
+                          label = text('Attach To') #'
                        };
                      ELSE %]
-         </div>
-        <div>
-             <label>[% text('Attach to Entity');
-                    END; %]</label>
+            <label>[% text('Attach to Entity'); %]</label><span>&nbsp;</span>
+                   [% END; %]
                 [% INCLUDE select element_data = {
                        name           = "location_class"
                        default_values = [DISPLAY.location_class]
                        options        = location_class_list
                        text_attr      = "class"
                        value_attr     = "id"
-                       title = text('Type')
-                       label = "_none_"
+                       label = text('Type')
                 } %]
-        </div>
-        <div>
+            <label style="grid-row: span 3">[% text('Address') %]</label>
                 [% INCLUDE input element_data = {
+                        name = "line_one"
                         title = text('Address'),
-                        label = "_none_"
-                        name = "line_one",
                         value = DISPLAY.line_one,
                         type = "text",
                         size = "20",
                         required = 'true',
                 } %]
-        </div>
-        <div>
                 [% PROCESS input element_data = {
                         name = "line_two"
-                        class = "addl-address"
                         value = DISPLAY.line_two
                         type = "text"
                         size = "20"
                 } %]
-        </div>
-        <div>
                 [% PROCESS input element_data = {
                         name = "line_three"
-                        class = "addl-address"
                         value = DISPLAY.line_three
                         type = "text"
                         size = "20"
                 } %]
-        </div>
-        <div>
                 [% PROCESS input element_data = {
-                        title = text('City'),
-                        label = "_none_"
+                        label = text('City'),
                         name = "city",
                         value = DISPLAY.city,
                         type = "text",
                         required = 'true',
                         size = "20"
                 } %]
-        </div>
-        <div>
                 [% PROCESS input element_data = {
-                        title = text('State/Province'),
-                        label = "_none_"
+                        label = text('State/Province'),
                         name = "state",
                         value = DISPLAY.state,
                         type = "text",
                         size = "20"
                 } %]
-        </div>
-        <div>
                 [% PROCESS input element_data = {
-                        title = text('Zip/Post Code'),
-                        label = "_none_"
+                        label = text('Zip/Post Code'),
                         name = "mail_code",
                         value = DISPLAY.mail_code,
                         type = "text",
                         size = "20"
-                } #' %]
-        </div>
-        <div>
+                } %]
                 [% IF !DISPLAY.country_id; DISPLAY.country_id = default_country; END -%]
                 [% INCLUDE select_country element_data = {
                         id = "address-country-select"
@@ -189,17 +172,16 @@
                         default_values = [DISPLAY.country_id]
                         options = country_list
                         name = "country_id"
-                        title = text('Country')
-                        label = "_none_"
+                        label = text('Country')
                         required = 'true'
                 } %]
-        </div></div>
+        </div>
         <div>
              [%
               IF request.location_class;
                 PROCESS button element_data = {
                 class = "submit"
-                name = "action"
+                name = "__action"
                 value = "save_location"
                 id = "loc_save_location"
                 text = text('Save Location') #'
@@ -207,7 +189,7 @@
               END; %]
              [% PROCESS button element_data = {
                 class = "submit"
-                name = "action"
+                name = "__action"
                 value = "save_new_location"
                 id = "loc_save_new_location"
                 text = text('Save New Location')

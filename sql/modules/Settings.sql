@@ -11,7 +11,6 @@ set client_min_messages = 'warning';
 
 BEGIN;
 
-DROP FUNCTION IF EXISTS defaults_get_defaultcurrency();
 CREATE OR REPLACE FUNCTION defaults_get_defaultcurrency()
 RETURNS char(3) AS
 $$
@@ -23,7 +22,6 @@ $$ language sql STABLE;
 COMMENT ON FUNCTION defaults_get_defaultcurrency() IS
 $$ This function return the default currency asigned by the program. $$;
 
-DROP FUNCTION IF EXISTS setting__set(varchar, varchar);
 CREATE OR REPLACE FUNCTION setting__set (in_setting_key varchar, in_value varchar)
 RETURNS BOOL AS
 $$
@@ -91,7 +89,11 @@ AS
 $$
         UPDATE defaults SET value = setting__increment_base(value)
         WHERE setting_key = in_key
-        RETURNING value;
+  RETURNING (
+    -- return the old value
+    -- note: only works at the 'read committed' isolation or lower
+    select value from defaults where setting_key = in_key
+  );
 
 $$ LANGUAGE SQL;
 
@@ -205,7 +207,7 @@ BEGIN
 
    UPDATE lsmb_sequence SET sequence = new_value WHERE label = in_label;
 
-   retval := row(t_seq.setting_key, t_seq.prefix || new_value || t_seq.suffix);
+   retval := row(t_seq.setting_key, t_seq.prefix || t_seq.sequence || t_seq.suffix);
    return retval;
 
 END;

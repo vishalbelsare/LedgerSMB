@@ -24,13 +24,11 @@ use warnings;
 
 use HTTP::Status qw( HTTP_OK );
 
-use LedgerSMB::DBObject::TaxForm;
 use LedgerSMB::Form;
 use LedgerSMB::Report::Taxform::Summary;
 use LedgerSMB::Report::Taxform::Details;
 use LedgerSMB::Report::Taxform::List;
 use LedgerSMB::Template;
-use LedgerSMB::Template::UI;
 
 our $VERSION = '1.0';
 
@@ -50,10 +48,9 @@ sub report {
     my ($request) = @_;
     $request->{report_name} = 'taxforms';
 
-    # Get tax forms.
-    my $taxform = LedgerSMB::DBObject::TaxForm->new(%$request);
-    $taxform->get_forms();
-    $request->{forms} = $taxform->{forms};
+    $request->{forms} = [
+        $request->call_procedure(funcname => 'tax_form__list_all')
+        ];
     return LedgerSMB::Scripts::reports::start_report($request);
 }
 
@@ -68,11 +65,12 @@ Display the "add taxform" screen.
 sub _taxform_screen
 {
     my ($request) = @_;
-    my $taxform = LedgerSMB::DBObject::TaxForm->new(%$request);
-    $taxform->get_metadata();
+    $request->{countries} = $request->enabled_countries;
+    $request->{default_country} =
+        $request->setting->get('default_country');
 
-    my $template = LedgerSMB::Template::UI->new_UI;
-    return $template->render($request, 'taxform/add_taxform', $taxform);
+    my $template = $request->{_wire}->get('ui');
+    return $template->render($request, 'taxform/add_taxform', $request);
 }
 
 sub add_taxform {
@@ -87,9 +85,9 @@ This retrieves and edits a tax form.  Requires that id be set.
 
 sub edit {
     my ($request) = @_;
-    my $tf =
-        LedgerSMB::DBObject::TaxForm->new(%$request)
-        ->get($request->{id});
+    my ($tf) =
+        $request->call_procedure(
+            funcname => 'tax_form__get', args => [$request->{id}]);
     $request->{$_} = $tf->{$_} for keys %$tf;
     return _taxform_screen($request);
 }
@@ -126,12 +124,45 @@ sub generate_report {
     die $request->{_locale}->text('No tax form selected')
         unless $request->{tax_form_id};
 
+    my ($tf) =
+        $request->call_procedure(
+            funcname => 'tax_form__get', args => [$request->{tax_form_id}]);
+
+    my $params = {
+        from_date   => $request->parse_date( $request->{from_date} ),
+        to_date     => $request->parse_date( $request->{to_date} ),
+        tax_form_id => $request->{tax_form_id},
+        is_accrual  => $tf->{is_accrual},
+        media       => 'screen',
+    };
+    my @options = (
+        {
+            name     => 'form_name',
+            required => 1,
+            options  => [
+                {},
+                { text => '1099-INT',  value => '1099-INT' },
+                { text => '1099-MISC', value => '1099-MISC' },
+                ]
+        }
+    );
     my $report;
     if ($request->{meta_number}){
-        $report = LedgerSMB::Report::Taxform::Details->new(%$request);
+        $report = LedgerSMB::Report::Taxform::Details->new(
+            %$request,
+            %$params,
+            options => \@options,
+            formatter_options => $request->formatter_options,
+            );
     } else {
-        $report = LedgerSMB::Report::Taxform::Summary->new(%$request);
+        $report = LedgerSMB::Report::Taxform::Summary->new(
+            %$request,
+            %$params,
+            options => \@options,
+            formatter_options => $request->formatter_options,
+            );
     }
+    $request->{hiddens} = $params;
     return $request->render_report($report);
 }
 
@@ -145,10 +176,18 @@ Saves a tax form, returns to edit screen.
 sub save
 {
     my ($request) = @_;
-    my $taxform = LedgerSMB::DBObject::TaxForm->new(%$request);
 
-    $taxform->save();
-    return edit($taxform);
+    $request->call_procedure(
+        funcname => 'tax_form__save',
+        args     => [
+            $request->{id},
+            $request->{country_id},
+            $request->{form_name},
+            $request->{default_reportable},
+            $request->{is_accrual}
+        ]);
+
+    return edit($request);
 }
 
 =item print
@@ -159,11 +198,17 @@ Prints the tax forms, using the 1099 templates.
 
 sub print {
     my ($request) = @_;
-    my $taxform = LedgerSMB::DBObject::TaxForm->new(%$request);
-    my $form_info = $taxform->get($request->{tax_form_id});
-    $request->{taxform_name} = $form_info->{form_name};
+    my ($taxform) = $request->call_procedure(
+        funcname => 'tax_form__get',
+        args     => [ $request->{tax_form_id} ]);
+    $request->{taxform_name} = $taxform->{form_name};
     $request->{format} = 'PDF';
-    my $report = LedgerSMB::Report::Taxform::Summary->new(%$request);
+    my $report = LedgerSMB::Report::Taxform::Summary->new(
+        %$request,
+        formatter_options => $request->formatter_options,
+        from_date  => $request->parse_date( $request->{from_date} ),
+        to_date  => $request->parse_date( $request->{to_date} ),
+        );
     $report->run_report($request);
     if ($request->{meta_number}){
        my @rows = $report->rows;
@@ -174,23 +219,23 @@ sub print {
        }
        $report->rows(\@rows);
     }
+    $request->{results} = $report->rows;
 
     # Business settings for 1099
     #
     my $cc = $request->{_company_config};
-    $request->{company_name}      = $cc->{company_name};
-    $request->{company_address}   = $cc->{company_address};
-    $request->{company_telephone} = $cc->{company_phone};
-    $request->{my_tax_code}       = $cc->{businessnumber};
+    $request->{SETTINGS}          = $cc;
 
     my $template = LedgerSMB::Template->new( # printed document
         user     => $request->{_user},
         locale   => $request->{_locale},
         path     => 'DB',
-        template => $request->{taxform_name},
-        format   => $request->{format},
+        template => $request->{form_name},
+        formatter_options => $request->formatter_options,
+        format_plugin   =>
+           $request->{_wire}->get( 'output_formatter' )->get( $request->{format}),
     );
-    $template->render($request);
+    $template->render({ %$request, SETTINGS => $cc });
 
     my $body = $template->{output};
     utf8::encode($body) if utf8::is_utf8($body);  ## no critic
@@ -214,30 +259,18 @@ Lists all tax forms.
 sub list_all {
     my $request= shift;
     return $request->render_report(
-        LedgerSMB::Report::Taxform::List->new(%$request)
-        );
+        LedgerSMB::Report::Taxform::List->new(
+            %$request,
+            formatter_options => $request->formatter_options
+        ));
 }
 
 =back
 
-=cut
-
-{
-    local ($!, $@) = (undef, undef);
-    my $do_ = 'scripts/custom/taxform.pl';
-    if ( -e $do_ ) {
-        unless ( do $do_ ) {
-            if ($! or $@) {
-                warn "\nFailed to execute $do_ ($!): $@\n";
-                die (  "Status: 500 Internal server error (taxform.pm)\n\n" );
-            }
-        }
-    }
-};
 
 =head1 LICENSE AND COPYRIGHT
 
-Copyright (C) 2010-2018 The LedgerSMB Core Team
+Copyright (C) 2010-2022 The LedgerSMB Core Team
 
 This file is licensed under the GNU General Public License version 2, or at your
 option any later version.  A copy of the license should have been included with

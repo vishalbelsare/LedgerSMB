@@ -9,8 +9,7 @@ transactions) in LedgerSMB
 =head1 SYNPOSIS
 
   my $report = LedgerSMB::Report::Unapproved::Drafts->new(%$request);
-  $report->run;
-  $report->render($request, $format);
+  $report->render();
 
 =head1 DESCRIPTION
 
@@ -141,18 +140,18 @@ Returns the inputs to display on header.
 
 sub header_lines {
     my ($self) = @_;
-    return [{name => 'type',
-             text => $self->Text('Draft Type')},
-            {name => 'reference',
-             text => $self->Text('Reference')},
-            {name => 'from_date',
-             text => $self->Text('From Date')},
-            {name => 'to_date',
-             text => $self->Text('To Date')},
-            {name => 'amount_gt',
-             text => $self->Text('Amount Greater Than')},
-            {name => 'amount_lt',
-             text => $self->Text('Amount Less Than')}, ]
+    return [{value => $self->type,
+             text  => $self->Text('Draft Type')},
+            {value => $self->reference,
+             text  => $self->Text('Reference')},
+            {value => $self->from_date,
+             text  => $self->Text('From Date')},
+            {value => $self->to_date,
+             text  => $self->Text('To Date')},
+            {value => $self->amount_gt,
+             text  => $self->Text('Amount Greater Than')},
+            {value => $self->amount_lt,
+             text  => $self->Text('Amount Less Than')}, ]
 }
 
 =back
@@ -185,7 +184,7 @@ Transaction date must be between from date and to date.
 
 =cut
 
-has 'from_date' => (is => 'rw', coerce => 1, isa => 'LedgerSMB::Moose::Date');
+has 'from_date' => (is => 'rw', isa => 'LedgerSMB::PGDate');
 
 =item to_date
 
@@ -193,7 +192,7 @@ Transaction date must be between from date and to date.
 
 =cut
 
-has 'to_date' => (is => 'rw', coerce => 1, isa => 'LedgerSMB::Moose::Date');
+has 'to_date' => (is => 'rw', isa => 'LedgerSMB::PGDate');
 
 =item amount_gt
 
@@ -201,7 +200,7 @@ The amount of the draft must be greater than this for it to show up.
 
 =cut
 
-has 'amount_gt' => (is => 'rw', coerce => 1, isa =>'LedgerSMB::Moose::Number');
+has 'amount_gt' => (is => 'rw', isa =>'LedgerSMB::PGNumber');
 
 =item amount_lt
 
@@ -209,7 +208,7 @@ The amount of the draft must be less than this for it to show up.
 
 =cut
 
-has 'amount_lt' => (is => 'rw', coerce => 1, isa =>'LedgerSMB::Moose::Number');
+has 'amount_lt' => (is => 'rw', isa =>'LedgerSMB::PGNumber');
 
 =back
 
@@ -224,13 +223,13 @@ has 'amount_lt' => (is => 'rw', coerce => 1, isa =>'LedgerSMB::Moose::Number');
 sub set_buttons {
     my ($self) = @_;
     return [
-      {name => 'action',
+      {name => '__action',
        type => 'submit',
        text => $self->Text('Approve'),
       value => 'approve',
       class => 'submit', },
 
-      {name => 'action',
+      {name => '__action',
        type => 'submit',
        text => $self->Text('Delete'),
       value => 'delete',
@@ -254,7 +253,7 @@ sub run_report{
             $script = 'is' if $script eq 'ar';
             $script = 'ir' if $script eq 'ap';
         }
-        $ref->{reference_href_suffix} = "$script.pl?action=edit&id=$ref->{id}";
+        $ref->{reference_href_suffix} = "$script.pl?__action=edit&id=$ref->{id}";
         $ref->{id_href_suffix} = $ref->{reference_href_suffix};
     }
     return $self->rows(\@rows);

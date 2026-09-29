@@ -29,55 +29,65 @@ BEGIN;
 
     -- Set specific data
 
-    INSERT INTO entity (id, entity_class, name, country_id)
-    VALUES (-1000, 1, '__TEST', 243);
+    INSERT INTO entity (id, name, country_id)
+    VALUES (-1000, '__TEST', 243);
 
     INSERT INTO entity_credit_account (id, meta_number, entity_class, entity_id, ar_ap_account_id, curr)
     VALUES (-1000, '_testv', 1, -1000, -1000, 'XTS');
     INSERT INTO entity_credit_account (id, meta_number, entity_class, entity_id, ar_ap_account_id, curr)
     VALUES (-1001, '_testc', 2, -1000, -1000, 'XTS');
     SELECT account__save
-           (NULL, '00001', 'test only', 'A', NULL, (select id from account_heading limit 1), FALSE, FALSE,'{}', false,
+           (NULL, '00001', 'test only', 'A', NULL, (select id from account_heading limit 1), null, FALSE, FALSE,'{}', false, false,
            false);
     SELECT account__save
-           (NULL, '00002', 'test only', 'A', NULL, (select id from account_heading limit 1), FALSE, FALSE,'{}', false,
+           (NULL, '00002', 'test only', 'A', NULL, (select id from account_heading limit 1), null, FALSE, FALSE,'{}', false, false,
            false);
-    INSERT INTO ap (invnumber, entity_credit_account, amount_bc, netamount_bc,
-            amount_tc, netamount_tc, approved, curr)
-    select '_TEST AP', -1000, '100', '100', '100', '100', FALSE, 'XTS';
+    INSERT INTO transactions (reference, transdate, trans_type_code, approved)
+    VALUES ('_TEST AP', now(), 'ap', false);
+    INSERT INTO open_item (item_number, item_type, account_id)
+    VALUES ('_TEST AP', 'ap', (select id from account where accno = '00001'));
+    INSERT INTO ap (trans_id, open_item_id, invnumber, entity_credit_account, amount_bc, netamount_bc,
+            amount_tc, netamount_tc, curr)
+    select currval('transactions_id_seq'), currval('open_item_id_seq'), '_TEST AP', -1000, '100', '100', '100', '100', 'XTS';
 
     INSERT INTO acc_trans (chart_id, trans_id, amount_bc, curr, amount_tc, approved)
-    SELECT id, currval('id'), '100', 'XTS', 100, TRUE FROM account WHERE accno = '00001';
+    SELECT id, currval('transactions_id_seq'), '100', 'XTS', 100, TRUE FROM account WHERE accno = '00001';
     INSERT INTO ac_tax_form (entry_id, reportable)
     VALUES (currval('acc_trans_entry_id_seq')::int, true);
     INSERT INTO acc_trans (chart_id, trans_id, amount_bc, curr, amount_tc, approved)
-    SELECT id, currval('id'), '-100', 'XTS', -100, TRUE FROM account WHERE accno = '00002';
+    SELECT id, currval('transactions_id_seq'), '-100', 'XTS', -100, TRUE FROM account WHERE accno = '00002';
     INSERT INTO ac_tax_form (entry_id, reportable)
     VALUES (currval('acc_trans_entry_id_seq')::int, false);
 
-    INSERT INTO ar (invnumber, entity_credit_account, amount_bc, netamount_bc,
-           amount_tc, netamount_tc, approved, curr)
-    select '_TEST AR', -1001, '100', '100', 100, 100, FALSE, 'XTS';
+
+    INSERT INTO transactions (reference, transdate, trans_type_code, approved)
+    VALUES ('_TEST AR', now(), 'ar', false);
+    INSERT INTO open_item (item_number, item_type, account_id)
+    VALUES ('_TEST AR', 'ar', (select id from account where accno = '00002'));
+    INSERT INTO ar (trans_id, open_item_id, invnumber, entity_credit_account, amount_bc, netamount_bc,
+           amount_tc, netamount_tc, curr)
+    select currval('transactions_id_seq'), currval('open_item_id_seq'), '_TEST AR', -1001, '100', '100', 100, 100, 'XTS';
 
     INSERT INTO acc_trans (chart_id, trans_id, amount_bc, curr, amount_tc, approved)
-    SELECT id, currval('id'), '-100', 'XTS', -100, TRUE FROM account WHERE accno = '00001';
+    SELECT id, currval('transactions_id_seq'), '-100', 'XTS', -100, TRUE FROM account WHERE accno = '00001';
     INSERT INTO acc_trans (chart_id, trans_id, amount_bc, curr, amount_tc, approved)
-    SELECT id, currval('id'), '100', 'XTS', 100, TRUE FROM account WHERE accno = '00002';
+    SELECT id, currval('transactions_id_seq'), '100', 'XTS', 100, TRUE FROM account WHERE accno = '00002';
 
-    INSERT INTO gl (reference, description, approved)
-    VALUES ('_TEST GL', 'Testing GL Drafts', false);
+    INSERT INTO transactions (reference, description, transdate, trans_type_code, approved)
+    VALUES ('_TEST GL', 'Testing GL Drafts', now(), 'gl', false);
+    INSERT INTO gl (id) values (currval('transactions_id_seq'));
 
     INSERT INTO acc_trans (chart_id, trans_id, amount_bc, curr, amount_tc, approved)
-    SELECT id, currval('id'), '-100', 'XTS', -100, TRUE FROM account WHERE accno = '00001';
+    SELECT id, currval('transactions_id_seq'), '-100', 'XTS', -100, TRUE FROM account WHERE accno = '00001';
     INSERT INTO acc_trans (chart_id, trans_id, amount_bc, curr, amount_tc, approved)
-    SELECT id, currval('id'), '100', 'XTS', 100, TRUE FROM account WHERE accno = '00002';
+    SELECT id, currval('transactions_id_seq'), '100', 'XTS', 100, TRUE FROM account WHERE accno = '00002';
 
     -- Run tests
 
-    PREPARE test AS SELECT count(*) = 1
+    PREPARE test AS SELECT count(*)
                     FROM draft__search('ap',  NULL, NULL, NULL, NULL, NULL)
                     WHERE reference = '_TEST AP';
-    SELECT results_eq('test',ARRAY[true],'"ap" search successful');
+    SELECT results_eq('test',ARRAY[1::bigint],'"ap" search successful');
     DEALLOCATE test;
 
     PREPARE test AS SELECT count(*) = 1
@@ -116,15 +126,15 @@ BEGIN;
     SELECT results_eq('test',ARRAY[true],'"GL" search successful');
     DEALLOCATE test;
 
-    PREPARE test AS SELECT draft_delete(currval('id')::int);
+    PREPARE test AS SELECT draft_delete(currval('transactions_id_seq')::int);
     SELECT results_eq('test',ARRAY[true],'gl draft deletion');
     DEALLOCATE test;
 
-    PREPARE test AS SELECT count(*) = 0 from gl where id = currval('id');
+    PREPARE test AS SELECT count(*) = 0 from gl where id = currval('transactions_id_seq');
     SELECT results_eq('test',ARRAY[true],'gl table cleanup');
     DEALLOCATE test;
 
-    PREPARE test AS SELECT count(*) = 0 from acc_trans where trans_id = currval('id');
+    PREPARE test AS SELECT count(*) = 0 from acc_trans where trans_id = currval('transactions_id_seq');
     SELECT results_eq('test',ARRAY[true],'acc_trans table cleanup');
     DEALLOCATE test;
 

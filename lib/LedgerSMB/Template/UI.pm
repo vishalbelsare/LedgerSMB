@@ -16,15 +16,16 @@ This module instantiates a singleton UI template rendering engine
 
 use strict;
 use warnings;
+use experimental 'signatures';
 
 use LedgerSMB::Locale;
-use LedgerSMB::Sysconfig;
 use LedgerSMB::Template;
 
 use Carp;
 use File::Spec;
 use HTML::Escape;
 use HTML::Entities;
+use Scalar::Util qw(blessed reftype);
 use Template;
 
 our $engine;
@@ -33,37 +34,13 @@ our @pre_render_cbs = (
     sub {
         my ($request, $template, $vars, $cvars) = @_;
         $vars->{USER} = $request->{_user};
-        $vars->{DBNAME} = $request->{company};
         $vars->{locale} = $vars->{language} // $vars->{locale};
         $cvars->{locale} = $cvars->{language} // $cvars->{locale};
-        if ($request->{company} && $request->{_company_config}) {
-            $vars->{SETTINGS} = {
-                (%{$request->{_company_config}},)
-            };
-        }
     },
     );
 
 
-sub _available_formats {
-    my @retval = ('HTML', 'TXT');
-
-    if ( LedgerSMB::Sysconfig::template_latex() ) {
-        push @retval, 'PDF', 'PS';
-    }
-    if ( LedgerSMB::Sysconfig::template_xls() ) {
-        push @retval, 'XLS';
-    }
-    if ( LedgerSMB::Sysconfig::template_xlsx() ) {
-        push @retval, 'XLSX';
-    }
-    if ( LedgerSMB::Sysconfig::template_ods() ) {
-        push @retval, 'ODS';
-    }
-    return \@retval;
-}
-
-=head2 new_UI()
+=head2 new_UI( cache => $path, root => $path )
 
 Constructor. Returns (singleton) template UI renderer.
 
@@ -71,14 +48,15 @@ Constructor. Returns (singleton) template UI renderer.
 
 sub new_UI {
     my $class = shift;
-    croak 'called LedgerSMB::Template::UI::new_UI with args while it takes none'
-        if @_;
+    my %args = @_;
+    my $cache = $args{cache} // 'lsmb_templates';
+    my $root = $args{root} // './UI';
 
     if (! defined $singleton) {
         if (!defined $engine) {
             $engine = Template->new(
-                ### TODO: These should be configurable absolute paths
-                INCLUDE_PATH => [ 'UI/js', 'UI/', 'UI/lib/' ],
+                INCLUDE_PATH => [
+                    map { File::Spec->catdir($root, $_) } ('js', '', 'lib') ],
                 ENCODING => 'utf8',
                 TRIM => 1,
                 START_TAG => quotemeta('[%'),
@@ -86,21 +64,18 @@ sub new_UI {
                 DELIMITER => ';',
                 COMPILE_EXT => '.lttc',
                 COMPILE_DIR =>
-                   File::Spec->rel2abs( LedgerSMB::Sysconfig::templates_cache(),
-                                        File::Spec->tmpdir ),
+                   File::Spec->rel2abs( $cache, File::Spec->tmpdir ),
                 VARIABLES => {
-                    LIST_FORMATS => sub {
-                        return _available_formats();
-                    },
                     UNESCAPE => sub {
                         return decode_entities(shift @_);
                     },
-                }
-                )
+                })
                 or die Template->error;
         }
 
         $singleton = bless {
+            root => $root,
+            stylesheet => $args{stylesheet} // 'ledgersmb.css',
             standard_vars => {
             },
         }, __PACKAGE__;
@@ -116,7 +91,8 @@ Adds template variables C<USER>, C<DBNAME>, C<locale> and C<SETTINGS>
 from C<$request>.
 
 Renders the template stored in the file indicated by C<$template>.
-The file is looked up in C<UI/> or C<UI/lib/> and should be a relative
+The file is looked up in the root templates directory as configured
+or in the C<lib/> subdirectory of it and should be a relative
 path to either of those.
 
 The values of the variables specified in C<$vars> will be HTML-encoded
@@ -127,10 +103,59 @@ be HTML encoded and ready for inclusion in the generated HTML output.
 
 =cut
 
+sub _preprocess($rawvars, $formatter_options) {
+    #
+    # Note: before changing *anything* in the function below,
+    #  please note that it's extremely performance sensitive
+    #  and that the current code is the result of extensive
+    #  profiling work.
+    #
+    return undef unless defined $rawvars;
+
+    if (not ref $rawvars) {
+        return escape_html( $rawvars );
+    }
+
+    if (blessed $rawvars and $rawvars->can('to_output') ){
+        return escape_html( $rawvars->to_output( %{ $formatter_options // {} } ) );
+    }
+
+    my $reftype = (reftype $rawvars) // ''; # '' is falsy, but works with EQ
+    if ($reftype eq 'HASH') { # Hashes and objects
+        return {
+            map { $_ => (ref $rawvars->{$_})
+                      ? _preprocess( $rawvars->{$_}, $formatter_options )
+                      : escape_html( $rawvars->{$_} ) }
+            grep { not /^(?:_|dbh$)/ }
+            keys %{$rawvars}
+        };
+    }
+
+    if ( $reftype eq 'ARRAY' ) {
+        return [ map { (ref $_)
+                           ? _preprocess( $_, $formatter_options )
+                           : escape_html( $_ )
+                 } @{$rawvars} ];
+    }
+
+    if ($reftype eq 'CODE'){ # a code reference makes no sense
+        return $rawvars;
+    }
+
+    if ($reftype eq 'SCALAR' or (ref $rawvars) eq 'Math::BigInt::GMP') {
+        return escape_html( $$rawvars );
+    }
+
+    # return undef for GLOB references (includes IO::File objects)
+    return undef;
+}
+
+
 sub render_string {
     my ($self, $request, $template, $vars, $cvars) = @_;
     my $locale;
     $vars //= {};
+    delete $vars->{HIDDENS}->{form_id} if $vars->{HIDDENS};
 
     for my $cb (@pre_render_cbs) {
         $cb->($request, $template, $vars, $cvars);
@@ -143,25 +168,39 @@ sub render_string {
         $locale = $request->{_locale};
     }
     my $cleanvars = {
-        ( %{LedgerSMB::Template::preprocess(
-                $vars,
-                sub { return escape_html($_[0]); }) },
-          %{$self->{standard_vars}},
-          dojo_theme => (
-              $request->{_company_config}->{dojo_theme}
-              || LedgerSMB::Sysconfig::dojo_theme()),
-          PRINTERS => [
-              ( ( map { { text => $_, value => $_ } }
-                  keys LedgerSMB::Sysconfig::printer()->%* ),
+        ( %{_preprocess(
                 {
-                    text  => $request->{_locale}->text('Screen'),
-                    value => 'screen'
-                } )
-          ],
+                    $vars->%*,
+                    PRINTERS => [
+                        ( $request->{_wire}->get( 'printers' )->as_options,
+                          {
+                              text  => $request->{_locale}->text('Screen'),
+                              value => 'screen'
+                          } )
+                    ],
+                    SETTINGS => {
+                        ($request->{_company_config} // {})->%*,
+                        # Reports rendered as UI elements have SETTINGS in $vars
+                        ($vars->{SETTINGS} // {})->%*
+                    },
+                    dojo_theme => (
+                        $request->{_company_config}->{dojo_theme} || 'claro'
+                        ),
+                    csrf_token => $request->{_req}->env->{'lsmb.session'}->{csrf_token},
+                },
+                $request->formatter_options,
+                )},
+          %{$self->{standard_vars}},
+          LIST_FORMATS => sub {
+              return [
+                  map { escape_html($_) }
+                  $request->{_wire}->get( 'output_formatter' )->get_formats->@*
+                  ];
+          },
           # translation of constant-string arguments
           text => sub {
               if ($locale) {
-                  return $locale->maketext(@_);
+                  return escape_html($locale->maketext(@_));
               }
               else {
                   return shift;
@@ -170,15 +209,24 @@ sub render_string {
           # translation of dynamic string content
           maketext => sub {
               if ($locale) {
-                  return $locale->maketext(@_);
+                  return escape_html($locale->maketext(@_));
               }
               else {
-                  return shift;
+                  return escape_html(shift);
               }
           },
           %{$cvars // {}}
         )
     };
+    if (defined $cleanvars->{form}->{stylesheet}
+        and not defined $cleanvars->{stylesheet}) {
+        $cleanvars->{stylesheet} = $cleanvars->{form}->{stylesheet};
+    }
+    if (not defined $cleanvars->{stylesheet}
+        or (defined $cleanvars->{stylesheet}
+            and not -e ($self->{root} . 'css/' . $cleanvars->{stylesheet}))) {
+        $cleanvars->{stylesheet} = $self->{stylesheet};
+    }
 
     my $output;
     if (! $engine->process(

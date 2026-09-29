@@ -110,11 +110,13 @@
 } %]
 <div class="button-row">
 [% PROCESS button element_data = {
-             name = 'action'
+             name = '__action'
             value = 'save_sequences'
              type = 'submit'
             class = 'submit'
              text = text('Save')
+'data-lsmb-doing' = text('Saving...')
+ 'data-lsmb-done' = text('Saved')
 } %]</div>
 </form>
 </body>

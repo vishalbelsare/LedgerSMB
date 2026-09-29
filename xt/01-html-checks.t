@@ -19,6 +19,8 @@ sub collect {
     return if $module !~ m/\.html$/
            || $module =~ m(/setup/upgrade/epilogue.html) # unbalanced by design
            || $module =~ m/\/pod\//
+           || $module =~ m/\/node_modules\//
+           || $module =~ m/\/openapi\//
            || $module =~ m(/js/)
            || $module =~ m(/js-src/(dijit|dojo|util)/);
 
@@ -93,6 +95,17 @@ sub content_test {
                 else {
                     return 0;
                 }
+            },
+            'elem-unclosed' => sub {
+                my $param = shift;
+                return 1 if $param->{tag} eq 'toaster';
+                return 0;
+            },
+            'elem-unknown' => sub {
+                my $param = shift;
+                return 1 if $param->{tag} =~ /.+-.+/;
+                return 1 if $param->{tag} eq 'toaster';
+                return 0;
             },
             'text-use-entity' => sub {
                 # As per W3C guidance, prefer characters in their normal form

@@ -44,15 +44,9 @@ use LedgerSMB::IIAA;
 use LedgerSMB::OE;
 use LedgerSMB::Tax;
 use LedgerSMB::Template;
-use LedgerSMB::Template::UI;
-use LedgerSMB::Sysconfig;
-use LedgerSMB::Setting;
 use LedgerSMB::Legacy_Util;
-use LedgerSMB::DBObject::Draft;
 use LedgerSMB::File;
 use List::Util qw(max reduce);
-
-use Workflow::Factory qw(FACTORY);
 
 
 require "old/bin/printer.pl";
@@ -94,7 +88,7 @@ if ( -f "old/bin/custom/io.pl" ) {
 
 sub _calc_taxes {
     $form->{subtotal} = $form->{invsubtotal};
-    my $moneyplaces = $form->get_setting('decimal_places');
+    my $moneyplaces = $form->{_setting_decimal_places} //= $form->get_setting('decimal_places');
     foreach my $i (1 .. $form->{rowcount}){
         local $decimalplaces = $form->{"precision_$i"};
 
@@ -137,33 +131,44 @@ sub _calc_taxes {
 }
 
 sub approve {
-    $form->update_invnumber;
-    my $draft = LedgerSMB::DBObject::Draft->new(%$form);
+    my $wf = $form->{_conn}->workflows->fetch( 'AR/AP', $form->{workflow_id} );
+    die 'No workflow found to approve' unless $wf;
 
-    $draft->approve();
-    my $wf = FACTORY->fetch_workflow( 'AR/AP', $form->{workflow_id} );
-    $wf->execute_action( 'post' ) if $wf;
+    $wf->execute_action( 'approve' );
+    my $query =
+        ($form->{vc} eq 'customer')
+        ? 'select invnumber from ar where trans_id = ?'
+        : 'select invnumber from ap where trans_id = ?';
+    my $sth = $form->{dbh}->prepare($query)
+        or $form->dberror($query);
+    $sth->execute( $form->{id} )
+        or $form->dberror($query);
+    ($form->{invnumber}) = $sth->fetchrow_array;
+    $form->dberror($query) if $sth->err;
     edit();
 }
 
 sub display_row {
+    my $readonly = ($form->{reversing} or $form->{approved}) ? 'readonly="readonly"' : '';
     my $numrows = shift;
     my $min_lines = $form->get_setting('min_empty') // 0;
     my $lsmb_module;
     my $desc_disabled = "";
     $desc_disabled = 'DISABLED="DISABLED"' if $form->{lock_description};
     if ($form->{vc} eq 'customer'){
-        $lsmb_module = 'AR';
+        $lsmb_module = 'Sales';
         $parts_list = 'sales';
     } elsif ($form->{vc} eq 'vendor'){
-        $lsmb_module = 'AP';
+        $lsmb_module = 'Purchases';
         $parts_list = 'purchase';
     }
 
+    # Re-read reporting units, limited by the module (all reporting units are loaded,
+    # which includes the ones not applicable for this module)
     # replace '' transdate with NULL
     $form->all_business_units( ($form->{transdate} or undef) ,
-                              $form->{"$form->{vc}_id"},
-                              $lsmb_module);
+                               $form->{"$form->{vc}_id"},
+                               $lsmb_module );
     @column_index = qw(deleteline runningnumber partnumber description qty);
 
     if ( $form->{type} eq "sales_order" ) {
@@ -171,7 +176,8 @@ sub display_row {
         $column_data{ship} =
             qq|<th class="listheading ship" align=center width="auto">|
           . $locale->text('Ship')
-          . qq|</th>|;
+            . qq|</th>|;
+        $readonly = '';
     }
     if ( $form->{type} eq "purchase_order" ) {
         push @column_index, "ship";
@@ -179,6 +185,7 @@ sub display_row {
             qq|<th class="listheading ship" align=center width="auto">|
           . $locale->text('Recd')
           . qq|</th>|;
+        $readonly = '';
     }
 
     for (qw(projectnumber partsgroup)) {
@@ -256,12 +263,14 @@ qq|<option value="$ref->{partsgroup}--$ref->{id}">$ref->{partsgroup}\n|;
       <table width=100% id="invoice-lines"
                         data-dojo-type="lsmb/InvoiceLines"
                         data-dojo-attach-point="lines">
+<thead>
     <tr class=listheading>|;
 
     for (@column_index) { print "\n$column_data{$_}" }
 
     print qq|
         </tr>
+</thead>
 |;
 
     $deliverydate  = $locale->text('Delivery Date');
@@ -281,7 +290,11 @@ qq|<option value="$ref->{partsgroup}--$ref->{id}">$ref->{partsgroup}\n|;
     $exchangerate = ($exchangerate) ? $exchangerate : 1;
 
     $spc = substr( $myconfig{numberformat}, -3, 1 );
+    my $moneyplaces =
+        $form->{_setting_decimal_places} //= $form->get_setting('decimal_places');
     foreach my $i ( 1 .. max($numrows, $min_lines)) {
+        next if $readonly and not $form->{"partnumber_$i"};
+
         $desc_disabled = '' if $i == $numrows;
         $dec = '';
         if ($form->{"sellprice_$i"}) {
@@ -292,7 +305,6 @@ qq|<option value="$ref->{partsgroup}--$ref->{id}">$ref->{partsgroup}\n|;
                 ( $null, $dec ) = split /,/, $form->{"sellprice_$i"};
             }
         }
-        my $moneyplaces = LedgerSMB::Setting->new(%$form)->get('decimal_places');
         $dec = length $dec;
         $decimalplaces = ( $dec > $moneyplaces ) ? $dec : $moneyplaces;
         $form->{"precision_$i"} = $decimalplaces;
@@ -345,7 +357,7 @@ qq|<option value="$ref->{partsgroup}--$ref->{id}">$ref->{partsgroup}\n|;
                 qq|<td class="description"><div data-dojo-type="dijit/form/Textarea"
                             id="description_$i" name="description_$i"
                             size=48 style="width: 100%;font:inherit !important"
-                            >$form->{"description_$i"}</div></td>|;
+                            $readonly >$form->{"description_$i"}</div></td>|;
         } else {
             $form->{"description_$i"} //= '';
             $column_data{description} =
@@ -354,7 +366,7 @@ qq|<option value="$ref->{partsgroup}--$ref->{id}">$ref->{partsgroup}\n|;
                             $desc_disabled size=48
                             data-dojo-props="channel:'/invoice/part-select/$i',fetchProperties:{type:'$parts_list'}"
                             style="width: 100%"
-                            >$form->{"description_$i"}</div></td>|;
+                            $readonly >$form->{"description_$i"}</div></td>|;
         }
 
         for (qw(partnumber sku unit)) {
@@ -381,7 +393,7 @@ qq|<option value="$ref->{partsgroup}--$ref->{id}">$ref->{partsgroup}\n|;
         $delivery = qq|
           <td colspan=2 nowrap>
              <b><label for="deliverydate_$i">${$delvar}</label></b>
-             <input class="date" data-dojo-type="lsmb/DateTextBox" id="deliverydate_$i" name="deliverydate_$i" size=11 title="$myconfig{dateformat}" value="$form->{"${delvar}_$i"}">
+             <input class="date" data-dojo-type="lsmb/DateTextBox" id="deliverydate_$i" name="deliverydate_$i" size=11 title="$myconfig{dateformat}" value="$form->{"${delvar}_$i"}" $readonly >
           </td>
 |;
 
@@ -395,7 +407,7 @@ qq|<option value="$ref->{partsgroup}--$ref->{id}">$ref->{partsgroup}\n|;
         for my $cls(@{$form->{bu_class}}){
             if (scalar @{$form->{b_units}->{"$cls->{id}"}}){
                 $column_data{"b_unit_$cls->{id}"} =
-                   qq|<td><select data-dojo-type="dijit/form/Select" id="b_unit_$cls->{id}_$i" name="b_unit_$cls->{id}_$i">
+                   qq|<td><select data-dojo-type="dijit/form/Select" id="b_unit_$cls->{id}_$i" name="b_unit_$cls->{id}_$i" $readonly >
                            <option>&nbsp;</option>|;
                 for my $bu (@{$form->{b_units}->{"$cls->{id}"}}){
                    my $selected = "";
@@ -404,7 +416,7 @@ qq|<option value="$ref->{partsgroup}--$ref->{id}">$ref->{partsgroup}\n|;
                    }
                    $column_data{"b_unit_$cls->{id}"} .= qq|
                        <option value="$bu->{id}" $selected >
-                               $bu->{control_code}
+                               $bu->{control_code} - $bu->{description}
                        </option>|;
                 }
                 $column_data{"b_unit_$cls->{id}"} .= qq|
@@ -414,17 +426,20 @@ qq|<option value="$ref->{partsgroup}--$ref->{id}">$ref->{partsgroup}\n|;
         }
 
         $column_data{runningnumber} =
-          qq|<td class="runningnumber"><input data-dojo-attach-point="runningnumber" data-dojo-type="dijit/form/TextBox" id="runningnumber_$i" name="runningnumber_$i" size="3" value="$i"></td>|;
+          qq|<td class="runningnumber"><input data-dojo-attach-point="runningnumber" data-dojo-type="dijit/form/TextBox" id="runningnumber_$i" name="runningnumber_$i" size="3" value="$i" $readonly ></td>|;
         if ($form->{"partnumber_$i"}){
             $column_data{deleteline} = qq|
-<td rowspan="2" valign="middle">
+<td rowspan="2" valign="middle">|;
+            if (not $form->{approved} and not $readonly) {
+                $column_data{deleteline} .= qq|
 <button data-dojo-type="dijit/form/Button"><span>X</span>
 <script type="dojo/on" data-dojo-event="click">
 require('dijit/registry').byId('invoice-lines').removeLine('line-$i');
 </script>
-</button>
-</td>|;
-           $column_data{partnumber} =
+</button>|;
+            }
+            $column_data{deleteline} .= q|</td>|;
+            $column_data{partnumber} =
            qq|<td> $form->{"partnumber_$i"}
                  <input type="hidden" id="partnumber_$i" name="partnumber_$i"
                        value="$form->{"partnumber_$i"}" /></td>|;
@@ -433,37 +448,37 @@ require('dijit/registry').byId('invoice-lines').removeLine('line-$i');
             $form->{"partnumber_$i"} //= '';
             $column_data{deleteline} = '<td rowspan="2"></td>';
             $column_data{partnumber} =
-qq|<td class="partnumber"><input data-dojo-type="lsmb/parts/PartSelector" data-dojo-props="required:false,channel: '/invoice/part-select/$i',fetchProperties:{type:'$parts_list'}" name="partnumber_$i" id="partnumber_$i" size=15 value="$form->{"partnumber_$i"}" accesskey="$i" title="[Alt-$i]" style="width:100%">$skunumber</td>|;
+qq|<td class="partnumber"><input data-dojo-type="lsmb/parts/PartSelector" data-dojo-props="required:false,channel: '/invoice/part-select/$i',fetchProperties:{type:'$parts_list'}" name="partnumber_$i" id="partnumber_$i" size=15 value="$form->{"partnumber_$i"}" style="width:100%"  $readonly>$skunumber</td>|;
         }
         $form->{"onhand_$i"} //= '';
         $column_data{qty} =
 qq|<td align=right class="qty"><input data-dojo-type="dijit/form/TextBox" id="qty_$i" name="qty_$i" title="$form->{"onhand_$i"}" size="5" value="|
           . $form->format_amount( \%myconfig, $form->{"qty_$i"} )
-          . qq|"></td>|;
+          . qq|" $readonly ></td>|;
         $column_data{ship} =
             qq|<td align=right class="ship"><input data-dojo-type="dijit/form/TextBox" id="ship_$i" name="ship_$i" size="5" value="|
           . $form->format_amount( \%myconfig, $form->{"ship_$i"} )
-          . qq|"></td>|;
+          . qq|" $readonly ></td>|;
         $form->{"unit_$i"} //= '';
         $column_data{unit} =
-          qq|<td class="unit"><input data-dojo-type="dijit/form/TextBox" id="unit_$i" name="unit_$i" size=5 value="$form->{"unit_$i"}"></td>|;
+          qq|<td class="unit"><input data-dojo-type="dijit/form/TextBox" id="unit_$i" name="unit_$i" size=5 value="$form->{"unit_$i"}" $readonly ></td>|;
         $column_data{sellprice} =
           qq|<td align=right class="sellprice"><input data-dojo-type="dijit/form/TextBox" id="sellprice_$i" name="sellprice_$i" size="9" value="|
           . $form->format_amount( \%myconfig, $form->{"sellprice_$i"},
             $form->{"precision_$i"} )
-          . qq|"></td>|;
+          . qq|" $readonly ></td>|;
         $column_data{discount} =
             qq|<td align=right class="discount"><input data-dojo-type="dijit/form/TextBox" id="discount_$i" name="discount_$i" size="3" value="|
           . $form->format_amount( \%myconfig, $form->{"discount_$i"} )
-          . qq|"></td>|;
+          . qq|" $readonly ></td>|;
         $column_data{linetotal} =
             qq|<td align=right class="linetotal">|
-          . $form->format_amount( \%myconfig, $linetotal, LedgerSMB::Setting->new(%$form)->get('decimal_places') )
+          . $form->format_amount( \%myconfig, $linetotal, $form->{_setting_decimal_places} )
           . qq|</td>|;
         $form->{"bin_$i"} //= '';
         $column_data{bin}    = qq|<td class="bin">$form->{"bin_$i"}</td>|;
         $column_data{onhand} = qq|<td class="onhand">|. $form->format_amount( \%myconfig, $form->{"onhand_$i"}) . qq|</td>|;
-        $column_data{taxformcheck} = qq|<td class="taxform"><input type="checkbox" data-dojo-type="dijit/form/CheckBox" id="taxformcheck_$i" name="taxformcheck_$i" value="1" $taxchecked></td>|;
+        $column_data{taxformcheck} = qq|<td class="taxform"><input type="checkbox" data-dojo-type="dijit/form/CheckBox" id="taxformcheck_$i" name="taxformcheck_$i" value="1" $taxchecked $readonly></td>|;
         print qq|
 <tbody data-dojo-type="lsmb/InvoiceLine"
  id="line-$i">
@@ -474,7 +489,7 @@ qq|<td align=right class="qty"><input data-dojo-type="dijit/form/TextBox" id="qt
         }
 
         print qq|
-        </tr>
+<td style="display:none">
 <input type=hidden name="oldqty_$i" value="$form->{"qty_$i"}">
 |;
 
@@ -485,6 +500,9 @@ qq|<td align=right class="qty"><input data-dojo-type="dijit/form/TextBox" id="qt
             $form->hide_form("${_}_$i");
         }
 
+        print qq|
+        </td></tr>
+|;
         if ($form->{selectprojectnumber}) {
             $form->{selectprojectnumber} =~ s/ selected="selected"//;
             $form->{selectprojectnumber} =~
@@ -494,32 +512,32 @@ qq|<td align=right class="qty"><input data-dojo-type="dijit/form/TextBox" id="qt
         $project = '';
         $project = qq|
                 <b>$projectnumber</b>
-        <select data-dojo-type="dijit/form/Select" id="projectnumber-$i" name="projectnumber_$i">$form->{selectprojectnumber}</select>
+        <select data-dojo-type="dijit/form/Select" id="projectnumber-$i" name="projectnumber_$i" $readonly>$form->{selectprojectnumber}</select>
 | if $form->{selectprojectnumber};
 
         if ( ( $rows = $form->numtextrows( $form->{"notes_$i"}, 36, 6 ) ) > 1 )
         {
             $form->{"notes_$i"} = $form->quote( $form->{"notes_$i"} ) // '';
             $notes =
-qq|<td><textarea data-dojo-type="dijit/form/Textarea" id="notes_$i" name="notes_$i" rows=$rows cols=36 wrap=soft>$form->{"notes_$i"}</textarea></td>|;
+qq|<td><textarea data-dojo-type="dijit/form/Textarea" id="notes_$i" name="notes_$i" rows=$rows cols=36 wrap=soft $readonly>$form->{"notes_$i"}</textarea></td>|;
         }
         else {
             $form->{"notes_$i"} = $form->quote( $form->{"notes_$i"} ) // '';
             $notes =
-qq|<td><input data-dojo-type="dijit/form/TextBox" id="notes_$i" name="notes_$i" size=38 value="$form->{"notes_$i"}"></td>|;
+qq|<td><input data-dojo-type="dijit/form/TextBox" id="notes_$i" name="notes_$i" size=38 value="$form->{"notes_$i"}" $readonly></td>|;
         }
 
         $form->{"serialnumber_$i"} //= '';
         $serial = qq|
-                <td colspan=6 nowrap><b>$serialnumber</b> <input data-dojo-type="dijit/form/TextBox" id="serialnumber_$i" name="serialnumber_$i" value="$form->{"serialnumber_$i"}"></td>|
+                <td colspan=6 nowrap><b>$serialnumber</b> <input data-dojo-type="dijit/form/TextBox" id="serialnumber_$i" name="serialnumber_$i" value="$form->{"serialnumber_$i"}" $readonly></td>|
           if $form->{type} !~ /_quotation/;
 
-        if ( $i == $numrows ) {
+        if ( $i >= $numrows ) {
             $partsgroup = "";
             if ( $form->{selectpartsgroup} ) {
                 $partsgroup = qq|
             <b>$group</b>
-        <select data-dojo-type="dijit/form/Select" id="partsgroup-$i" name="partsgroup_$i">$form->{selectpartsgroup}</select>
+        <select data-dojo-type="dijit/form/Select" id="partsgroup-$i" name="partsgroup_$i" $readonly>$form->{selectpartsgroup}</select>
 |;
             }
 
@@ -556,12 +574,7 @@ qq|<td><input data-dojo-type="dijit/form/TextBox" id="notes_$i" name="notes_$i" 
     }
 
     print qq|
-      </table>
-    </td>
-  </tr>
-|;
-
-    $form->hide_form(qw(audittrail));
+      </table>|;
 
     print qq|
 
@@ -572,85 +585,12 @@ qq|<td><input data-dojo-type="dijit/form/TextBox" id="notes_$i" name="notes_$i" 
 <input type=hidden name=selectprojectnumber value="|
       . ($form->escape( $form->{selectprojectnumber}, 1 )//'') . qq|">
 
+
+    </td>
+  </tr>
 |;
 
-}
-
-sub new_item {
-
-    # change callback
-    $form->{old_callback} = $form->escape( $form->{callback}, 1 );
-    $form->{callback} =
-      $form->escape( "$form->{script}?action=display_form", 1 );
-
-    # delete action
-    delete $form->{action};
-
-    # save all other form variables in a previousform variable
-    if ( !$form->{previousform} ) {
-        foreach my $key ( keys %$form ) {
-
-            # escape ampersands
-            $form->{$key} =~ s/&/%26/g;
-            $form->{previousform} .= qq|$key=$form->{$key}&|;
-        }
-        chop $form->{previousform};
-        $form->{previousform} = $form->escape( $form->{previousform}, 1 );
-    }
-
-    $i = $form->{rowcount};
-    for (qw(partnumber description)) {
-        $form->{"${_}_$i"} = $form->quote( $form->{"${_}_$i"} );
-    }
-
-    $form->header;
-
-    print qq|
-<body class="lsmb">
-
-<h4 class=error>| . $locale->text('Item not on file!') . qq|</h4>|;
-
-    if ( $myconfig{acs} !~
-        /(Goods \& Services--Add Part|Goods \& Services--Add Service)/ )
-    {
-
-        print qq|
-<h4>| . $locale->text('What type of item is this?') . qq|</h4>
-
-<form method="post" data-dojo-type="lsmb/Form" action=ic.pl>
-
-<p>
-
-  <input class=radio type=radio data-dojo-type="dijit/form/RadioButton" name=item value=part checked>&nbsp;|
-          . $locale->text('Part') . qq|<br>
-  <input class=radio type=radio data-dojo-type="dijit/form/RadioButton" name=item value=service>&nbsp;|
-          . $locale->text('Service')
-
-          . qq|
-<input type=hidden name=partnumber value="$form->{"partnumber_$i"}">
-<input type=hidden name=description value="$form->{"description_$i"}">
-<input type=hidden name=nextsub value=add>
-<input type=hidden name=action value=add>
-|;
-
-        $form->hide_form(qw(previousform rowcount path login sessionid));
-
-        print qq|
-<p>
-<button data-dojo-type="dijit/form/Button" class="submit" type="submit" name="action" value="continue">|
-          . $locale->text('Continue')
-          . qq|</button>
-</form>
-|;
-    }
-
-    print qq|
-</body>
-</html>
-|;
-
-    $form->finalize_request();
-
+    $form->hide_form(qw(audittrail));
 }
 
 sub display_form {
@@ -704,7 +644,7 @@ sub display_form {
 
     &{$subroutine}($numrows) if $numrows;
 
-    $form->hide_form(qw|locationid|);
+    $form->hide_form(qw|shiptolocationid|);
 
     &form_footer;
     $form->finalize_request unless $want_return;
@@ -851,7 +791,7 @@ sub check_form {
         $count = 0;
         @a     = ();
         if ( $form->{rowcount} ) {
-            foreach my $i ( 1 .. $form->{rowcount} - 1 ) {
+            foreach my $i ( 1 .. $form->{rowcount} ) {
                 if ( $form->{"partnumber_$i"} ) {
                     push @a, {};
                     my $j = $#a;
@@ -868,7 +808,7 @@ sub check_form {
 
         }
     }
-    return if $form->{action} =~ /(save|post)/ or $nodisplay;
+    return if $form->{__action} =~ /(save|post)/ or $nodisplay;
     &display_form;
     $form->finalize_request;
 }
@@ -955,7 +895,7 @@ sub validate_items {
 
 sub purchase_order {
 
-    my $wf = FACTORY()->fetch_workflow(
+    my $wf = $form->{_conn}->workflows->fetch(
         ($form->{type} eq 'invoice') ? 'AR/AP' : 'Order/Quote',
         $form->{workflow_id}
         );
@@ -974,7 +914,7 @@ sub purchase_order {
 
 sub sales_order {
 
-    my $wf = FACTORY()->fetch_workflow(
+    my $wf = $form->{_conn}->workflows->fetch(
         ($form->{type} eq 'invoice') ? 'AR/AP' : 'Order/Quote',
         $form->{workflow_id}
         );
@@ -993,7 +933,7 @@ sub sales_order {
 
 sub rfq {
 
-    my $wf = FACTORY()->fetch_workflow(
+    my $wf = $form->{_conn}->workflows->fetch(
         ($form->{type} eq 'invoice') ? 'AR/AP' : 'Order/Quote',
         $form->{workflow_id}
         );
@@ -1012,7 +952,7 @@ sub rfq {
 
 sub quotation {
 
-    my $wf = FACTORY()->fetch_workflow(
+    my $wf = $form->{_conn}->workflows->fetch(
         ($form->{type} eq 'invoice') ? 'AR/AP' : 'Order/Quote',
         $form->{workflow_id}
         );
@@ -1031,7 +971,7 @@ sub quotation {
 
 sub create_form {
 
-    for (qw(id printed emailed workflow_id)) { delete $form->{$_} }
+    for (qw(id workflow_id)) { delete $form->{$_} }
 
     $form->{script} = 'oe.pl';
 
@@ -1054,7 +994,7 @@ sub create_form {
     for ( "$form->{vc}", "currency" ) { $form->{"select$_"} = "" }
 
     for (
-        qw(currency employee department intnotes notes language_code taxincluded)
+        qw(currency employee intnotes notes language_code taxincluded)
       )
     {
         $temp{$_} = $form->{$_};
@@ -1077,8 +1017,10 @@ sub create_form {
 sub e_mail {
     my $old_form = $form;
     $form = Form->new;
-    $form->{$_} = $old_form->{$_} for (qw/ action type formname script
-                                       format language_code vc dbh id /);
+    $form->{$_} = $old_form->{$_} for (
+        qw/ __action type formname script format language_code vc dbh id /,
+        grep { /^_/ } keys %$old_form
+        );
 
     if ($form->{type} eq 'invoice') {
         &invoice_links;
@@ -1089,8 +1031,10 @@ sub e_mail {
         &prepare_order;
     }
 
-    $form->{$_} = $old_form->{$_} for (qw/ action type formname script
-                                       format language_code vc dbh id /);
+    $form->{$_} = $old_form->{$_} for (
+        qw/ __action type formname script format language_code vc dbh id /,
+        grep { /^_/ } keys %$old_form
+        );
     $form->{media} = 'email';
     $form->{rowcount}++;
     &print_form;
@@ -1102,11 +1046,11 @@ sub print {
 
     if ($form->{type} eq 'invoice') {
         &invoice_links;
-        &prepare_invoice;
+        &prepare_invoice( unquoted => 1 );
     }
     else {
         &order_links;
-        &prepare_order;
+        &prepare_order( unquoted => 1 );
     }
     $form->{$_} = $saved_form->{$_} for (qw(language_code media formname));
 
@@ -1333,11 +1277,11 @@ sub print_form {
         }
     }
     my @vars =
-      qw(name address1 address2 city state zipcode country contact phone fax email);
+      qw(name attn address1 address2 city state zipcode country contact phone fax email);
 
     $shipto = 0;
     # if there is no shipto fill it in from billto
-    $form->get_shipto($form->{locationid}) if $form->{locationid};
+    $form->get_shipto($form->{shiptolocationid}) if $form->{shiptolocationid};
     foreach my $item (@vars) {
         if ($form->{"shipto$item"} ) {
             $shipto = 1;
@@ -1345,17 +1289,20 @@ sub print_form {
         }
     }
 
-    # $logger->trace("\$form->{formname}=$form->{formname} \$form->{fax}=$form->{fax} \$shipto=$shipto \$form->{shiptofax}=$form->{shiptofax}");
+    $form->{shipto} = $shipto;
     if (! $shipto) {
         if (   $form->{formname} eq 'purchase_order'
-            || $form->{formname} eq 'request_quotation' )
-        {
+            || $form->{formname} eq 'request_quotation' ) {
             $form->{shiptoname}     = $form->{company};
             $form->{shiptoaddress1} = $form->{address};
         }
         else {
             if ( $form->{formname} !~ /bin_list/ ) {
-                for (@vars) {if($_ ne 'fax'){$form->{"shipto$_"}=$form->{$_}}} #fax contains myCompanyFax
+                for (@vars) {
+                    if($_ ne 'fax') {  #fax contains myCompanyFax
+                        $form->{"shipto$_"} = $form->{$_}
+                    }
+                }
             }
         }
     }
@@ -1368,7 +1315,8 @@ sub print_form {
 
     # before we format replace <%var%>
     for (qw(notes intnotes message)) {
-        $form->{$_} =~ s/<%(.*?)%>/$form->{$1}/g;
+        $form->{$_} =~ s/<%(.*?)%>/$form->{$1}/g
+            if $form->{$_};
     }
 
 
@@ -1380,24 +1328,13 @@ sub print_form {
 
     my %output_options;
     if ($form->{media} eq 'zip'){
-        $form->{OUT}       = $form->{zipdir};
+        $form->{OUT} = $form->{zipdir};
         $form->{printmode} = '>';
     } elsif ( $form->{media} !~ /(screen|zip|email)/ ) { # printing
-        $form->{OUT}       = LedgerSMB::Sysconfig::printer()->{ $form->{media} };
-        $form->{printmode} = '|-';
+        $form->{OUT} = $form->{_wire}->get( 'printers' )->get( $form->{media} );
         $form->{OUT} =~ s/<%(fax)%>/<%$form->{vc}$1%>/;
         $form->{OUT} =~ s/<%(.*?)%>/$form->{$1}/g;
-
-        if ( $form->{printed} !~ /$form->{formname}/ ) {
-
-            $form->{printed} .= " $form->{formname}";
-            $form->{printed} =~ s/^ //;
-
-            $form->update_status;
-        }
-
-        $old_form->{printed} = $form->{printed} if %$old_form;
-
+        $form->{printmode} = '|-';
     } elsif ( $form->{media} eq 'email' ) {
         $form->{plainpaper} = 1;
         $output_options{filename} = $form->{formname} . '-'. $form->{"${inv}number"};
@@ -1409,9 +1346,11 @@ sub print_form {
                 dbh => $form->{dbh},
                 path => 'DB',
                 language => $form->{language_code},
-                format => uc $form->{format},
                 output_options => \%output_options,
                 filename => $form->{formname} . "-" . $form->{"${inv}number"},
+                formatter_options => $form->formatter_options,
+                format_plugin   =>
+                   $form->{_wire}->get( 'output_formatter' )->get( uc($form->{format} ) ),
             );
         $template->render($form);
 
@@ -1433,6 +1372,9 @@ sub print_form {
     totalqty totalship totalweight totalparts totalservices totalweightship
 
     paid subtotal total
+
+    shipto shiptoname shiptoattn shiptoaddress1 shiptoaddress2 shiptocity shiptostate
+    shiptozipcode shiptocountry shiptocontact shiptophone shiptoemail
                        ))};
         my $body = $template->{output};
         utf8::encode($body) if utf8::is_utf8($body);  ## no critic
@@ -1443,7 +1385,7 @@ sub print_form {
             from          => $form->get_setting( 'default_email_from' ),
             subject       => ($form->{subject}
                               // qq|$form->{label} $form->{"${inv}number"}|),
-            attachments   => [
+            _attachments   => [
                 { content => $body,
                   mime_type => $template->{mimetype},
                   file_name => ($form->{formname} . '-'
@@ -1475,7 +1417,7 @@ sub print_form {
                     q{select workflow_id from oe where id = ?},
                     {}, $form->{id});
 
-            $trans_wf = FACTORY()->fetch_workflow( 'Order/Quote', $wf_id );
+            $trans_wf = $form->{_conn}->workflows->fetch( 'Order/Quote', $wf_id );
         }
         else {
             ($wf_id) =
@@ -1483,22 +1425,15 @@ sub print_form {
                     q{select workflow_id from transactions where id = ?},
                     {}, $form->{id});
 
-            $trans_wf = FACTORY()->fetch_workflow( 'AR/AP', $wf_id );
-            if (grep { $_ eq 'save' } $trans_wf->get_current_actions) {
-                $trans_wf->execute_action( 'save' );
-            }
-            if (grep { $_ eq 'post' } $trans_wf->get_current_actions) {
-                $trans_wf->execute_action( 'post' );
-            }
+            $trans_wf = $form->{_conn}->workflows->fetch( 'AR/AP', $wf_id );
         }
 
-        $trans_wf->context->param( 'email-data' => $email_data );
-        $trans_wf->execute_action( 'E-mail' );
-        $wf = $trans_wf->context->param( 'spawned_workflow' );
-        my $id = $wf->id;
+        $trans_wf->context->param( '_email_data' => $email_data );
+        $trans_wf->execute_action( 'e_mail' );
+        my $id = $trans_wf->context->param( 'spawned_workflow' );
         if (not $form->{header}) {
-            print "Location: email.pl?id=$id&action=render&callback=$form->{script}%3F"
-                . "id%3D$form->{id}%26action%3Dedit\n";
+            print "Location: email.pl?id=$id&__action=render&callback=$form->{script}%3F"
+                . "id%3D$form->{id}%26__action%3Dedit\n";
             print "Status: 302 Found\n\n";
             $form->{header} = 1;
         }
@@ -1520,9 +1455,13 @@ sub print_form {
         dbh => $form->{dbh},
         path => 'DB',
         language => $form->{language_code},
-        format => uc $form->{format},
+        #@@@TODO the formatter options need to be based
+        # on the recipient's preferences, not on the current user!
+        formatter_options => $form->formatter_options(),
         output_options => \%output_options,
         filename => $form->{formname} . "-" . $form->{"${inv}number"},
+        format_plugin   =>
+            $form->{_wire}->get( 'output_formatter' )->get( uc($form->{format} ) ),
         );
     $template->render($form);
     LedgerSMB::Legacy_Util::output_template($template, $form,
@@ -1581,7 +1520,7 @@ sub ship_to {
 
    &{"$form->{vc}_details"};
 
-   &list_locations_contacts();
+    list_locations_contacts( \%myconfig, \%$form );
 
    $number =
       ( $form->{vc} eq 'customer' )
@@ -1596,10 +1535,16 @@ sub ship_to {
     $form->header;
 
 
+    for (qw| address1_ address2_ address3_ city_ state_ zipcode_ country_ type_ contact_ description_|) {
+        delete $form->{"shipto${_}new"};
+    }
+    my $country=&construct_countrys_types("country");
+    my $contacttype=&construct_countrys_types("type");
+
     print qq|
                <body class="lsmb">
 
-<form name="form" method="post" data-dojo-type="lsmb/Form" action=$form->{script}>
+<form name="form" method="post" data-dojo-type="lsmb/Form" action="$form->{script}">
 
 <table width=100% cellspacing="0" cellpadding="0" border="0">
     <tr>
@@ -1620,63 +1565,63 @@ sub ship_to {
             <table  cellspacing="0" cellpadding="0" border="0">
                   <tr>
                   <td valign="top">
-                             <table width=70% >
+                             <table style="margin-top:1em">
+                             <caption><b>| . $locale->text('Shipping Address') . qq|</b></caption>
 
-                             <tr class=listheading> |
-                                         . qq|<th class=listheading width=1% >
-                                  |
-                                        .    $locale->text(' ')
-                                         . qq|</th>
-                                   <th class=listheading width=5%>|
-                                  .     $locale->text('Add line1')
+                             <tr class=listheading>
+                                <th class=listheading width=1% rowspan=2>&nbsp;</th>
+                                <th class=listheading colspan=3 nowrap>|
+                                . $locale->text('Address')
+                                . qq|</th>
+                                   <th class=listheading rowspan=2 width=5% nowrap>|
+                                  .     $locale->text('City')
                                   . qq|</th>
-                                   <th class=listheading width=5%>|
-                                  .    $locale->text('Add line2')
-                                  . qq|</th>
-                                   <th class=listheading width=1% >
-                                  |
-                                  .     $locale->text('Add line3 ')
-                                        . qq|</th>
-                                   <th class=listheading width=5%>|
-                                  .     $locale->text('city')
-                                  . qq|</th>
-                                   <th class=listheading width=5%>|
+                                   <th class=listheading rowspan=2 width=5% nowrap>|
                                   .    $locale->text('State')
                                   . qq|</th>
-                                   <th class=listheading width=5%>|
-                                  .     $locale->text('Zip Code')
+                                   <th class=listheading rowspan=2 width=5% nowrap>|
+                                  .     $locale->text('Zipcode')
                                   . qq|</th>
-                                   <th class=listheading width=5%>|
+                                   <th class=listheading rowspan=2 width=5% nowrap>|
                                   .     $locale->text('Country')
                                   . qq|
+                             </tr>
+                             <tr class=listheading>
+                                   <th class=listheading width=5% nowrap>|
+                                  .     $locale->text('Line 1')
+                                  . qq|</th>
+                                   <th class=listheading width=5% nowrap>|
+                                  .    $locale->text('Line 2')
+                                  . qq|</th>
+                                   <th class=listheading width=1% nowrap>
+                                  |
+                                  .     $locale->text('Line 3')
+                                        . qq|</th>
                            </tr>
                         |;
 
-                           my $i;
 
-                           for($i=1;$i<=$form->{totallocations};$i++)
+                           for ($i=1;$i<=$form->{totallocations};$i++)
                            {
                                my $checked = '';
                                $checked = 'CHECKED="CHECKED"'
-                                   if ($form->{locationid}
-                                       and ($form->{locationid} == $form->{"shiptolocationid_$i"}
-                                            or $form->{locationid} == $form->{"locationid_$i"}));
+                                   if ($form->{shiptolocationid}
+                                       and ($form->{shiptolocationid} == $form->{"shiptolocationid_$i"}
+                                            or $form->{shiptolocationid} == $form->{"locationid_$i"}));
 
                                 print qq|
                            <tr>
 
-                              <td><input type=radio data-dojo-type="dijit/form/RadioButton" name=shiptoradio id="shiptoradio_$i" value="$i"  $checked ></td>
-                              <input name="shiptolocationid_$i" id="shiptolocationid_$i" type="hidden" value="$form->{"shiptolocationid_$i"}" readonly>
-                              <td><input data-dojo-type="dijit/form/TextBox" name=shiptoaddress1_$i size=12 maxlength=64 id="ad1_$i" value="$form->{"shiptoaddress1_$i"}" readonly></td>
-                              <td><input data-dojo-type="dijit/form/TextBox" name=shiptoaddress2_$i size=12 maxlength=64 id="ad2_$i" value="$form->{"shiptoaddress2_$i"}" readonly></td>
-                              <td><input data-dojo-type="dijit/form/TextBox" name=shiptoaddress3_$i size=12 maxlength=64 id="ad3_$i" value="$form->{"shiptoaddress3_$i"}" readonly></td>
-                              <td><input data-dojo-type="dijit/form/TextBox" name=shiptocity_$i size=8 maxlength=32 id="ci_$i" value="$form->{"shiptocity_$i"}" readonly></td>
-                              <td><input data-dojo-type="dijit/form/TextBox" name=shiptostate_$i size=10 maxlength=32 id="st_$i" value="$form->{"shiptostate_$i"}" readonly></td>
-                              <td><input data-dojo-type="dijit/form/TextBox" name=shiptozipcode_$i size=8 maxlength=10 id="zi_$i" value="$form->{"shiptozipcode_$i"}" readonly></td>
-                              <td><input data-dojo-type="dijit/form/TextBox" name=shiptocountry_$i size=5 maxlength=32 id="co_$i" value="$form->{"shiptocountry_$i"}" readonly></td>
-
+                              <td><input type=radio data-dojo-type="dijit/form/RadioButton" name="shiptoradio" id="shiptoradio_$i" value="$i"  $checked >
+                              <input name="shiptolocationid_$i" id="shiptolocationid_$i" type="hidden" value="$form->{"shiptolocationid_$i"}" readonly></td>
+                              <td nowrap>$form->{"shiptoaddress1_$i"}</td>
+                              <td nowrap>$form->{"shiptoaddress2_$i"}</td>
+                              <td nowrap>$form->{"shiptoaddress3_$i"}</td>
+                              <td nowrap>$form->{"shiptocity_$i"}</td>
+                              <td nowrap>$form->{"shiptostate_$i"}</td>
+                              <td nowrap>$form->{"shiptozipcode_$i"}</td>
+                              <td nowrap>$form->{"shiptocountry_$i"}</td>
                              <tr>
-
                                 |;
 
                              }
@@ -1686,48 +1631,72 @@ sub ship_to {
                               print qq|<input type=hidden name=nextsub value=$nextsub>|;
 
                              # delete shipto
-                              for (qw(action nextsub)) { delete $form->{$_} }
+                              for (qw(__action nextsub)) { delete $form->{$_} }
 
                                   $form->{title} = $title;
 
 
                                     print qq|
+                </tr>
+                <tr>
+                      <td><input type=radio data-dojo-type="dijit/form/RadioButton" name=shiptoradio id="shiptoradio-new" value="new"></td>
+                      <td><input data-dojo-type="dijit/form/TextBox" name=shiptoaddress1_new size=12 maxlength=64 value="$form->{shiptoaddress1_new}"></td>
+                      <td><input data-dojo-type="dijit/form/TextBox" name=shiptoaddress2_new size=12 maxlength=64 value="$form->{shiptoaddress2_new}"></td>
+                      <td><input data-dojo-type="dijit/form/TextBox" name=shiptoaddress3_new size=12 maxlength=64 value="$form->{shiptoaddress3_new}"></td>
+                      <td><input data-dojo-type="dijit/form/TextBox" name=shiptocity_new size=8 maxlength=32 value="$form->{shiptocity_new}"></td>
+                      <td><input data-dojo-type="dijit/form/TextBox" name=shiptostate_new size=10 maxlength=32 value="$form->{shiptostate_new}"></td>
+                      <td><input data-dojo-type="dijit/form/TextBox" name=shiptozipcode_new size=8 maxlength=10 value="$form->{shiptozipcode_new}"></td>
+                      <td><select data-dojo-type="dijit/form/Select" id="shiptocountry-new" name="shiptocountry_new">$country</select></td>
+
+                 </tr>
 
                     </table>
 
                 </td>
-                <td>&nbsp;</td>
+                </tr>
+                <tr>
                 <td valign="top" >
-                      <table width=30%>
+                      <table style="margin-top:1em">
+                        <caption><b>| . $locale->text('Shipping Attn') . qq|</b></caption>
                              <tr class=listheading>
                                  <th>&nbsp</th>
                                  <th class=listheading width="20%">|
                                     . $locale->text('Type')
                                 . qq|</th>
-                                   <th class=listheading width="35%">|
-                                . $locale->text('Contact')
-                                . qq|</th>
                                   <th class="listheading" width="35%">|
                                 . $locale->text('Description')
                                 . qq|</th>
+                                   <th class=listheading width="35%">|
+                                . $locale->text('Contact')
+                                . qq|</th>
                             </tr>
-                           <tr></tr>
-                              |;
+                              <tr>
+                                  <td><input type="radio" data-dojo-type="dijit/form/RadioButton" name="shiptoradiocontact" id="shiptoradiocontact_current" value="" CHECKED="CHECKED"></td>
+                                  <td colspan=2 nowrap>| . $locale->text('Current Attn') . qq|</td>
+                                  <td nowrap>$form->{shiptoattn}</td>
+                             </tr>    |;
 
                            for($i=1;$i<=$form->{totalcontacts};$i++)
                            {
+                               my $checked = '';
                         print qq|
                               <tr>
-                                  <td>&nbsp</td>
-                                  <td><input data-dojo-type="dijit/form/TextBox" name=shiptotype_$i size=5 maxlength=100 value="$form->{"shiptotype_$i"}" readonly></td>
-                                  <td><input data-dojo-type="dijit/form/TextBox" name=shiptocontact_$i size=11 maxlength=100 value="$form->{"shiptocontact_$i"}" readonly></td>
-                                  <td><input data-dojo-type="dijit/form/TextBox" name=shiptodescription_$i size=12 maxlength=100 value="$form->{"shiptodescription_$i"}" readonly></td>
+                                  <td><input type="radio" data-dojo-type="dijit/form/RadioButton" name="shiptoradiocontact" id="shiptoradiocontact_$i" value="$form->{"shiptocontact_$i"}"></td>
+                                  <td nowrap>$form->{"shiptotype_$i"}</td>
+                                  <td nowrap>$form->{"shiptodescription_$i"}</td>
+                                  <td nowrap>$form->{"shiptocontact_$i"}</td>
                              </tr>    |;
 
                               }
                                  my $deletecontacts=$i;
 
                              print qq|
+                   <tr>
+                      <td><input type=radio data-dojo-type="dijit/form/RadioButton" name=shiptoradiocontact id="shiptoradiocontact-new" value="new"></td>
+                      <td><select data-dojo-type="dijit/form/Select" id="shiptotype-new" name="shiptotype_new">$contacttype</select></td>
+                      <td><input data-dojo-type="dijit/form/TextBox" name=shiptocontact_new size=10 maxlength=100 value="$form->{shiptocontact_new}" ></td>
+                       <td><input data-dojo-type="dijit/form/TextBox" name=shiptodescription_new size=10 maxlength=100 value="$form->{shiptodescription_new}" ></td>
+                       </tr>
                       </table>
                  </td>
                </tr>
@@ -1735,16 +1704,11 @@ sub ship_to {
                 </table>
                 |;
 
-                 my $country=&construct_countrys_types("country");
-
-             my $contacttype=&construct_countrys_types("type");
-
-
               for(my $k=1;$k<$deletecontacts;$k++)
             {
-                for (qq| type_$k contact_$k description_$k |)
+                for (qw| type_ contact_ description_ |)
                 {
-                delete $form->{"shipto$_"};
+                delete $form->{"shipto$_$k"};
                 }
 
                }
@@ -1752,49 +1716,18 @@ sub ship_to {
                  delete $form->{shiptoradiocontact};
                delete $form->{shiptoradio};
 
-               for (qq| address1_new address2_new address3_new city_new state_new zipcode_new country_new type_new contact_new description_new|)
-               {
-                delete $form->{"shipto$_"};
-               }
-
-
 
               for(my $k=1;$k<$deletelocations;$k++)
               {
-                    for (qq| locationid_$k address1_$k address2_$k address3_$k city_$k state_$k zipcode_$k country_$k|)
+                    for (qw| locationid_ address1_ address2_ address3_ city_ state_ zipcode_ country_|)
                     {
-                    delete $form->{"shipto$_"};
+                    delete $form->{"shipto$_$k"};
                     }
 
               }
 
               $form->hide_form;
               print qq|
-
-              <hr valign="type" size=1 noshade >
-
-              <table valign="top">
-                <tr>
-                     Others
-                  </tr>
-                </tr>
-                      <td><input type=radio data-dojo-type="dijit/form/RadioButton" name=shiptoradio id="shiptoradio-new" value="new"></td>
-                      <td><input data-dojo-type="dijit/form/TextBox" name=shiptoaddress1_new size=12 maxlength=64 value="$form->{shiptoaddress1_new}" ></td>
-                      <td><input data-dojo-type="dijit/form/TextBox" name=shiptoaddress2_new size=12 maxlength=64 value="$form->{shiptoaddress2_new}" ></td>
-                      <td><input data-dojo-type="dijit/form/TextBox" name=shiptoaddress3_new size=12 maxlength=64 value="$form->{shiptoaddress3_new}" ></td>
-                      <td><input data-dojo-type="dijit/form/TextBox" name=shiptocity_new size=8 maxlength=32 value="$form->{shiptocity_new}" ></td>
-                      <td><input data-dojo-type="dijit/form/TextBox" name=shiptostate_new size=10 maxlength=32 value="$form->{shiptostate_new}" ></td>
-                      <td><input data-dojo-type="dijit/form/TextBox" name=shiptozipcode_new size=8 maxlength=10 value="$form->{shiptozipcode_new}" ></td>
-                      <td><select data-dojo-type="dijit/form/Select" id="shiptocountry-new" name="shiptocountry_new">$country</select></td>
-
-                      <td>&nbsp;</td>
-                      <td><input type=radio data-dojo-type="dijit/form/RadioButton" name=shiptoradiocontact value="1"></td>
-                      <td><select data-dojo-type="dijit/form/Select" id="shiptotype-new" name="shiptotype_new">$contacttype</select></td>
-                      <td><input data-dojo-type="dijit/form/TextBox" name=shiptocontact_new size=10 maxlength=100 value="$form->{shiptocontact_new}" ></td>
-                       <td><input data-dojo-type="dijit/form/TextBox" name=shiptodescription_new size=10 maxlength=100 value="$form->{shiptodescription_new}" ></td>
-
-                 </tr>
-
 
               </table>
           </td>
@@ -1810,15 +1743,15 @@ sub ship_to {
 
 print qq|
 
-<button data-dojo-type="dijit/form/Button" class="submit" type="submit" name="action" value="continuenew">|
+<button data-dojo-type="dijit/form/Button" class="submit" type="submit" name="__action" value="continuenew">|
 . $locale->text('Use Shipto')
 . qq|
 </button>
-<button data-dojo-type="dijit/form/Button" class="submit" type="submit" name="action" value="updatenew">|
+<button data-dojo-type="dijit/form/Button" class="submit" type="submit" name="__action" value="updatenew">|
 . $locale->text('Add To List')
 . qq|
 </button>
-<button data-dojo-type="dijit/form/Button" class="submit" type="submit" name="action" value="update">|.
+<button data-dojo-type="dijit/form/Button" class="submit" type="submit" name="__action" value="update">|.
 $locale->text('Cancel')
 .qq|</button>
 
@@ -1837,7 +1770,7 @@ $locale->text('Cancel')
 
 Author...Sadashiva
 
-The list of functions would create the new location / uses existing locations , and sets the $form->{locationid}.
+The list of functions would create the new location / uses existing locations , and sets the $form->{shiptolocationid}.
 
 list_locations_contacts() would extracts all locations and sets into form parameter...
 
@@ -1847,23 +1780,11 @@ construct_countrys_types return the drop down list of the country/contact_class 
 
 createlocations called by update action... calling eca__location_save and eca__save_contact
 
-setlocation_id called by continue action... just setting $form->{locationid} this is the final location id which is returned by shipto service
+setlocation_id called by continue action... just setting $form->{shiptolocationid} this is the final location id which is returned by shipto service
 
 
 
 =cut
-
-
-
-sub list_locations_contacts
-{
-
-
-        IS->list_locations_contacts( \%myconfig, \%$form );
-
-
-}
-
 
 
 sub construct_countrys_types
@@ -1874,13 +1795,13 @@ sub construct_countrys_types
     if($_[0] eq "country")
     {
 
-            $retvalue=IS->construct_countrys(\%$form);
+            $retvalue=construct_countrys(\%$form);
 
      }
     elsif($_[0] eq "type")
     {
 
-            $retvalue=IS->construct_types(\%$form);
+            $retvalue=construct_types(\%$form);
 
     }
         return($retvalue);
@@ -1897,7 +1818,7 @@ sub createlocations
 
     my $loc_id_index=$form->{"shiptoradio"};
 
-    my $index="locationid_".$loc_id_index;
+    my $index="shiptolocationid_".$loc_id_index;
 
     my $loc_id=$form->{$index};
 
@@ -1909,12 +1830,12 @@ sub createlocations
 
          &validatelocation;
 
-         $form->{locationid} = IIAA->createlocation($form);
+         $form->{shiptolocationid} = IIAA->createlocation($form);
 
 
     }
 
-    if($form->{shiptoradiocontact}==1)
+    if($form->{shiptoradiocontact} eq 'new')
     {
          &validatecontact;
          IIAA->createcontact($form);
@@ -1970,11 +1891,182 @@ sub setlocation_id
 
        my $loc_id_index=$form->{"shiptoradio"};
 
-       my $index="locationid_".$loc_id_index;
+       my $index="shiptolocationid_".$loc_id_index;
 
-       $form->{"locationid"}=$form->{$index};
+       $form->{"shiptolocationid"}=$form->{$index};
 
+
+       $form->{"shiptoattn"} = $form->{shiptoradiocontact} if $form->{shiptoradiocontact};
 
 }
+
+
+sub list_locations_contacts
+{
+
+    my ( $myconfig, $form ) = @_;
+
+
+
+    my $dbh = $form->{dbh};
+
+    # get rest for the customer
+    my $query = qq|
+WITH eca AS (
+  select * from entity_credit_account
+   where id = ?
+)
+select id as shiptolocationid,
+       line_one as shiptoaddress1,
+       line_two as shiptoaddress2,
+       line_three as shiptoaddress3,
+       city as shiptocity,
+       state as shiptostate,
+       mail_code as shiptozipcode,
+       country as shiptocountry
+  from (
+    select (eca__list_locations(id)).*
+      FROM eca
+     UNION
+    SELECT (entity__list_locations(entity_id)).*
+      FROM eca
+  ) l
+ WHERE location_class = 3;
+          |;
+
+
+
+    my $sth = $dbh->prepare($query);
+
+    $sth->execute( $form->{customer_id} // $form->{vendor_id} ) || $form->dberror($query);
+
+    my $i=0;
+
+    while($ref = $sth->fetchrow_hashref(NAME_lc))
+    {
+           $i++;
+           for ( keys %$ref )
+       {
+         $form->{"$_\_$i"} = $ref->{$_};
+       }
+
+    }
+
+    $form->{totallocations}=$i;
+
+    $sth->finish();
+
+
+
+
+
+
+    $query = qq|
+select c.class as shiptotype,
+       ec.contact as shiptocontact,
+       ec.description as shiptodescription
+  from eca_to_contact ec
+  join contact_class c
+       on (c.id=ec.contact_class_id)
+ where ec.credit_id = ?;
+          |;
+
+
+
+    $sth = $dbh->prepare($query);
+
+    $sth->execute( $form->{customer_id} ) || $form->dberror($query);
+
+    $i=0;
+
+    while($ref = $sth->fetchrow_hashref(NAME_lc))
+    {
+           $i++;
+           for ( keys %$ref )
+       {
+         $form->{"$_\_$i"} = $ref->{$_};
+       }
+
+    }
+
+    $form->{totalcontacts}=$i;
+
+    $sth->finish();
+
+    # for ( keys %$ref ) { $form->{$_} = $ref->{$_} }
+}
+
+
+sub construct_countrys
+{
+
+
+    my ( $form ) = @_;
+
+    my $dbh = $form->{dbh};
+
+
+    my $query = qq|
+            select id,name  from location_list_country();
+          |;
+
+
+
+    my $sth = $dbh->prepare($query);
+
+    $sth->execute() || $form->dberror($query);
+
+    my $returnvalue=qq|<option value=""></option>|;
+
+    while(my $ref = $sth->fetchrow_hashref(NAME_lc))
+    {
+
+      $returnvalue.=qq|<option value="$ref->{id} ">$ref->{name}</option>|;
+
+    }
+
+
+   $sth->finish();
+
+   return($returnvalue);
+
+}
+
+
+sub construct_types
+{
+
+
+    my ( $form ) = @_;
+
+    my $dbh = $form->{dbh};
+
+
+    my $query = qq|
+            select id,class from contact_class;
+          |;
+
+
+
+    my $sth = $dbh->prepare($query);
+
+    $sth->execute() || $form->dberror($query);
+
+    my $returnvalue=qq|<option value=""></option>|;
+
+    while(my $ref = $sth->fetchrow_hashref(NAME_lc))
+    {
+
+      $returnvalue.=qq|<option value="$ref->{id} ">|.$ref->{class}.qq|</option>|;  ## no critic (ProhibitMagicNumbers) sniff
+
+    }
+
+
+   $sth->finish();
+
+   return($returnvalue);
+
+}
+
 
 1;

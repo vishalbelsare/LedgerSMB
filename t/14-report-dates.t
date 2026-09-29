@@ -3,13 +3,11 @@
 use Test2::V0;
 
 use Data::Dumper;
+use URI;
 
-use LedgerSMB::App_State;
+use LedgerSMB::PGDate;
 use LedgerSMB::Report::PNL::Income_Statement;
 use LedgerSMB::Report::Balance_Sheet;
-
-
-LedgerSMB::App_State::set_User({});
 
 
 #   Test report date and comparison period calculations
@@ -25,10 +23,11 @@ LedgerSMB::App_State::set_User({});
 
 {  # Scenario 1: PNL, from & to dates, no comparison periods
     my $rpt = LedgerSMB::Report::PNL::Income_Statement->new(
+        _uri => URI->new,
         basis => 'accrual',
         ignore_yearend => 'all',
-        from_date => '2016-01-01',
-        to_date => '2016-12-31',
+        from_date => LedgerSMB::PGDate->from_input( '2016-01-01', format => 'YYYY-MM-DD' ),
+        to_date => LedgerSMB::PGDate->from_input( '2016-12-31', format => 'YYYY-MM-DD' ),
         interval => 'year', # just a random valid value
         comparison_type => 'by_dates',
         );
@@ -40,15 +39,16 @@ LedgerSMB::App_State::set_User({});
 
 {  # Scenario 2: PNL, from & to dates, 1 comparison period (by dates)
     my $rpt = LedgerSMB::Report::PNL::Income_Statement->new(
+        _uri => URI->new,
         basis => 'accrual',
         ignore_yearend => 'all',
-        from_date => '2016-01-01',
-        to_date => '2016-12-31',
+        from_date => LedgerSMB::PGDate->from_input( '2016-01-01', format => 'YYYY-MM-DD' ),
+        to_date => LedgerSMB::PGDate->from_input( '2016-12-31', format => 'YYYY-MM-DD' ),
         interval => 'year', # just a random valid value
         comparison_periods => '1',
         comparison_type => 'by_dates',
-        from_date_1 => '2015-01-01',
-        to_date_1 => '2015-12-31',
+        from_date_1 => LedgerSMB::PGDate->from_input( '2015-01-01', format => 'YYYY-MM-DD' ),
+        to_date_1 => LedgerSMB::PGDate->from_input( '2015-12-31', format => 'YYYY-MM-DD' ),
         );
     is($rpt->date_from->to_output, '2016-01-01',
        'pnl, 1 cmp by dates, from date');
@@ -62,9 +62,11 @@ LedgerSMB::App_State::set_User({});
 
 {  # Scenario 3: PNL, from date, 1 comparison period (by periods/year/date)
     my $rpt = LedgerSMB::Report::PNL::Income_Statement->new(
+        _uri => URI->new,
         basis => 'accrual',
         ignore_yearend => 'all',
-        from_date => '2016-01-05',
+        from_date => LedgerSMB::PGDate->from_input( '2016-01-05', format => 'YYYY-MM-DD' ),
+        to_date => LedgerSMB::PGDate->from_input( '2017-01-04', format => 'YYYY-MM-DD' ),
         interval => 'year', # just a random valid value
         comparison_periods => '1',
         comparison_type => 'by_periods',
@@ -83,10 +85,11 @@ LedgerSMB::App_State::set_User({});
 
 {  # Scenario 4: PNL, from month & year, 1 comparison period (by periods/year)
     my $rpt = LedgerSMB::Report::PNL::Income_Statement->new(
+        _uri => URI->new,
         basis => 'accrual',
         ignore_yearend => 'all',
-        from_date => '2016-01-01',
-        to_date => '2016-12-31',
+        from_date => LedgerSMB::PGDate->from_input( '2016-01-01', format => 'YYYY-MM-DD' ),
+        to_date => LedgerSMB::PGDate->from_input( '2016-12-31', format => 'YYYY-MM-DD' ),
         interval => 'year', # just a random valid value
         comparison_periods => '1',
         comparison_type => 'by_periods',
@@ -106,6 +109,7 @@ LedgerSMB::App_State::set_User({});
 
 {  # Scenario 5: PNL, from month & year, 1 comparison period (by periods/quarter)
     my $rpt = LedgerSMB::Report::PNL::Income_Statement->new(
+        _uri => URI->new,
         basis => 'accrual',
         ignore_yearend => 'all',
         from_month => '01',
@@ -128,6 +132,7 @@ LedgerSMB::App_State::set_User({});
 
 {  # Scenario 6: PNL, from date, 1 comparison period (by periods/month)
     my $rpt = LedgerSMB::Report::PNL::Income_Statement->new(
+        _uri => URI->new,
         basis => 'accrual',
         ignore_yearend => 'all',
         from_month => '01',
@@ -150,6 +155,7 @@ LedgerSMB::App_State::set_User({});
 
 {  # Scenario 7: PNL, from date, 9 comparisons period (by periods/month)
     my $rpt = LedgerSMB::Report::PNL::Income_Statement->new(
+        _uri => URI->new,
         basis => 'accrual',
         ignore_yearend => 'all',
         from_month => '01',
@@ -208,10 +214,11 @@ LedgerSMB::App_State::set_User({});
 
 {  # Scenario 1: B/S, from & to dates, no comparison periods
     my $rpt = LedgerSMB::Report::Balance_Sheet->new(
+        _uri => URI->new,
         basis => 'accrual',
         ignore_yearend => 'all',
-        from_date => '2016-01-01',
-        to_date => '2016-12-31',
+        from_date => LedgerSMB::PGDate->from_input( '2016-01-01', format => 'YYYY-MM-DD' ),
+        to_date => LedgerSMB::PGDate->from_input( '2016-12-31', format => 'YYYY-MM-DD' ),
         interval => 'year', # just a random valid value
         comparison_type => 'by_dates',
         );
@@ -223,14 +230,15 @@ LedgerSMB::App_State::set_User({});
 
 {  # Scenario 2: B/S, from & to dates, 1 comparison period (by dates)
     my $rpt = LedgerSMB::Report::Balance_Sheet->new(
+        _uri => URI->new,
         ignore_yearend => 'all',
-        from_date => '2016-01-01',
-        to_date => '2016-12-31',
+        from_date => LedgerSMB::PGDate->from_input( '2016-01-01', format => 'YYYY-MM-DD' ),
+        to_date => LedgerSMB::PGDate->from_input( '2016-12-31', format => 'YYYY-MM-DD' ),
         interval => 'year', # just a random valid value
         comparison_periods => '1',
         comparison_type => 'by_dates',
-        from_date_1 => '2015-01-01',
-        to_date_1 => '2015-12-31',
+        from_date_1 => LedgerSMB::PGDate->from_input( '2015-01-01', format => 'YYYY-MM-DD' ),
+        to_date_1 => LedgerSMB::PGDate->from_input( '2015-12-31', format => 'YYYY-MM-DD' ),
         );
     is($rpt->date_from->to_output, '2016-01-01',
        'b/s, 1 cmp by dates, from date');
@@ -246,9 +254,10 @@ LedgerSMB::App_State::set_User({});
 
 {  # Scenario 3: B/S, from & to dates, 1 comparison period (by periods)
     my $rpt = LedgerSMB::Report::Balance_Sheet->new(
+        _uri => URI->new,
         ignore_yearend => 'all',
-        from_date => '2016-01-01',
-        to_date => '2016-12-31',
+        from_date => LedgerSMB::PGDate->from_input( '2016-01-01', format => 'YYYY-MM-DD' ),
+        to_date => LedgerSMB::PGDate->from_input( '2016-12-31', format => 'YYYY-MM-DD' ),
         interval => 'year', # just a random valid value
         comparison_periods => '1',
         comparison_type => 'by_periods',
@@ -267,6 +276,7 @@ LedgerSMB::App_State::set_User({});
 
 {  # Scenario 4: B/S, from month & year, 1 comparison period (by periods)
     my $rpt = LedgerSMB::Report::Balance_Sheet->new(
+        _uri => URI->new,
         basis => 'accrual',
         ignore_yearend => 'all',
         from_month => '01',

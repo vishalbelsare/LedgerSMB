@@ -51,21 +51,14 @@ require "old/bin/io.pl";
 sub add {
 
     %label = (
-        part     => 'Part',
-        service  => 'Service',
-        assembly => 'Assembly',
-        labor    => 'Labor/Overhead',
+        part     => $locale->text( 'Add Part' ),
+        service  => $locale->text( 'Add Service' ),
+        assembly => $locale->text( 'Add Assembly' ),
+        labor    => $locale->text( 'Add Labor/Overhead' ),
     );
+    $form->{title} = $label{$form->{item}};
 
-    # $locale->text('Add Part')
-    # $locale->text('Add Service')
-    # $locale->text('Add Assembly')
-    # $locale->text('Add Labor/Overhead')
-
-    $label = "Add $label{$form->{item}}";
-    $form->{title} = $locale->maketext($label);
-
-    $form->{callback} = "$form->{script}?action=add&item=$form->{item}"
+    $form->{callback} = "$form->{script}?__action=add&item=$form->{item}"
       unless $form->{callback};
 
     $form->{orphaned} = 1;
@@ -85,21 +78,14 @@ sub add {
 sub edit {
 
     %label = (
-        part     => 'Part',
-        service  => 'Service',
-        assembly => 'Assembly',
-        labor    => 'Labor/Overhead',
+        part     => $locale->text( 'Edit Part' ),
+        service  => $locale->text( 'Edit Service' ),
+        assembly => $locale->text( 'Edit Assembly' ),
+        labor    => $locale->text( 'Edit Labor/Overhead' ),
     );
-
-    # $locale->text('Edit Part')
-    # $locale->text('Edit Service')
-    # $locale->text('Edit Assembly')
-    # $locale->text('Edit Labor/Overhead')
+    $form->{title} = $label{$form->{item}};
 
     IC->get_part( \%myconfig, \%$form );
-
-    $label = "Edit $label{$form->{item}}";
-    $form->{title} = $locale->maketext($label);
 
     $form->{previousform} = $form->escape( $form->{previousform}, 1 )
       if $form->{previousform};
@@ -116,8 +102,6 @@ sub link_part {
 
     # readonly
     if ( $form->{item} eq 'part' or $form->{item} eq 'assembly') {
-        $form->{readonly} = 1
-            if $myconfig{acs} and $myconfig{acs} =~ /Goods \& Services--Add Part/;
         $form->error(
             $locale->text(
                 'Cannot create Part; Inventory account does not exist!')
@@ -131,8 +115,6 @@ sub link_part {
     }
 
     if ( $form->{item} eq 'service' ) {
-        $form->{readonly} = 1
-          if $myconfig{acs} =~ /Goods \& Services--Add Service/;
         $form->error(
             $locale->text(
                 'Cannot create Service; Income account does not exist!')
@@ -144,8 +126,6 @@ sub link_part {
     }
 
     if ( $form->{item} eq 'labor' ) {
-        $form->{readonly} = 1
-          if $myconfig{acs} =~ /Goods \& Services--Add Labor\/Overhead/;
         $form->error(
             $locale->text(
                 'Cannot create Labor; Inventory account does not exist!')
@@ -212,11 +192,6 @@ sub link_part {
     delete $form->{amount};
 
     $form->get_partsgroup({ all => 1 });
-    if ( $form->{partsgroup} ) {
-        $form->{partsgroup} =
-          $form->quote( $form->{partsgroup} ) . "--$form->{partsgroup_id}";
-    }
-
     if ( $form->{all_partsgroups} and @{ $form->{all_partsgroup} } ) {
         $form->{selectpartsgroup} = qq|<option></option>\n|;
 
@@ -252,13 +227,15 @@ qq|<option value="$_->{partsgroup}--$_->{id}">$_->{partsgroup}</option>\n|;
     }
 
     # setup make and models
-    $i = 1;
-    foreach my $ref ( @{ $form->{makemodels} } ) {
-        for (qw(make model barcode)) { $form->{"${_}_$i"} = $ref->{$_} }
-        $i++;
+    if ($form->{makemodels}) {
+        $i = 1;
+        foreach my $ref ( @{ $form->{makemodels} } ) {
+            for (qw(make model barcode)) { $form->{"${_}_$i"} = $ref->{$_} }
+            $i++;
+        }
+        $form->{makemodel_rows} = $i - 1;
+        delete $form->{makemodels};
     }
-    $form->{makemodel_rows} = $i - 1;
-    delete $form->{makemodels};
 
     # setup vendors
     if ( $form->{all_vendor} and @{ $form->{all_vendor} } ) {
@@ -332,6 +309,7 @@ sub form_header {
 
 
     $status_div_id = $form->{item};
+    $markup = '';
     if ( $form->{lastcost} > 0 ) {
         $markup =
           $form->round_amount(
@@ -725,6 +703,13 @@ qq|<textarea data-dojo-type="dijit/form/Textarea" name="description" rows="$rows
         qw(id item title makemodel alternate onhand orphaned taxaccounts rowcount baseassembly project_id)
     );
 
+    $weight //= '';
+    $onhand //= '';
+    $stock //= '';
+    $rop //= '';
+    $bin //= '';
+    $obsolete //= '';
+    $imagelinks //= '';
     print qq|
 <table style="width: 100%">
   <tr>
@@ -827,37 +812,34 @@ sub form_footer {
     # type=submit $locale->text('Save as new')
     # type=submit $locale->text('Delete')
 
-    if ( !$form->{readonly} ) {
-
-        %button = (
-            'update' =>
-              { ndx => 1, key => 'U', value => $locale->text('Update') },
-            'save' => { ndx => 3, key => 'S', value => $locale->text('Save') },
+    %button = (
+        'update' =>
+        { ndx => 1, key => 'U', value => $locale->text('Update') },
+        'save' => { ndx => 3, key => 'S', value => $locale->text('Save') },
         );
 
-        if ( $form->{id} ) {
+    if ( $form->{id} ) {
 
-            if ( !$form->{isassemblyitem} ) {
-                $button{'save_as_new'} = {
-                    ndx   => 7,
-                    key   => 'N',
-                    value => $locale->text('Save as new')
-                };
-            }
-
-            if ( $form->{orphaned} ) {
-                $button{'delete'} =
-                  { ndx => 16, key => 'D', value => $locale->text('Delete') };
-            }
-        }
-        %button = () if $form->{isassemblyitem} && $form->{item} eq 'assembly';
-
-        for ( sort { $button{$a}->{ndx} <=> $button{$b}->{ndx} } keys %button )
-        {
-            $form->print_button( \%button, $_ );
+        if ( !$form->{isassemblyitem} ) {
+            $button{'save_as_new'} = {
+                ndx   => 7,
+                key   => 'N',
+                value => $locale->text('Save as new')
+            };
         }
 
+        if ( $form->{orphaned} ) {
+            $button{'delete'} =
+            { ndx => 16, key => 'D', value => $locale->text('Delete') };
+        }
     }
+    %button = () if $form->{isassemblyitem} && $form->{item} eq 'assembly';
+
+    for ( sort { $button{$a}->{ndx} <=> $button{$b}->{ndx} } keys %button )
+    {
+        $form->print_button( \%button, $_ );
+    }
+
     if ($form->{callback} and $form->{id}){
         print qq|<div class='returnlink'><a href='$form->{callback}'>|
               . $locale->text('Continue Previous Workflow')
@@ -877,7 +859,7 @@ sub form_footer {
         foreach my $file (@{$form->{files}}){
               print qq|
 <tr>
-<td><a href="file.pl?action=get&file_class=3&ref_key=$form->{id}&id=$file->{id}"
+<td><a href="file.pl?__action=get&file_class=3&ref_key=$form->{id}&id=$file->{id}"
        target="_download">$file->{file_name}</a></td>
 <td>$file->{mime_type}</td>
 <td>|.$file->{uploaded_at} . qq|</td>
@@ -915,10 +897,10 @@ sub form_footer {
        print qq|
 </table>|;
        $callback = $form->escape(
-               "ic.pl?action=edit&id=".$form->{id}
+               "ic.pl?__action=edit&id=".$form->{id}
        );
        print qq|
-<a href="file.pl?action=show_attachment_screen&ref_key=$form->{id}&file_class=3&callback=$callback"
+<a href="file.pl?__action=show_attachment_screen&ref_key=$form->{id}&file_class=3&callback=$callback"
    >[| . $locale->text('Attach') . qq|]</a>|;
     }
 
@@ -944,7 +926,7 @@ sub form_footer {
             <th>| . $locale->text('Date To') . qq|</th>
             <td><input data-dojo-type="dijit/form/TextBox" type="text" size="12" name="date_to" class="date"></td>
         </tr><tr>
-            <td><button data-dojo-type="dijit/form/Button" type="submit" name="action"
+            <td><button data-dojo-type="dijit/form/Button" type="submit" name="__action"
                         value="generate_income_statement"
                         class="submit">| . $locale->text('Continue') .
                         qq|</button><td>
@@ -977,9 +959,9 @@ sub makemodel_row {
     </tr>
 |;
 
-    $form->{"${_}_$i"} //= '' for (qw(make model barcode));
-    foreach my $i ( 1 .. $numrows ) {
-        print qq|
+     foreach my $i ( 1 .. $numrows ) {
+       $form->{"${_}_$i"} //= '' for (qw(make model barcode));
+       print qq|
     <tr>
       <td><input data-dojo-type="dijit/form/TextBox" name="make_$i" size=30 value="$form->{"make_$i"}"></td>
       <td><input data-dojo-type="dijit/form/TextBox" name="model_$i" size=30 value="$form->{"model_$i"}"></td>
@@ -1020,6 +1002,7 @@ sub vendor_row {
     </tr>
 |;
 
+    $form->{_setting_decimal_places} //= $form->get_setting('decimal_places');
     foreach my $i ( 1 .. $numrows ) {
 
         if ( $form->{selectcurrency} ) {
@@ -1066,7 +1049,7 @@ sub vendor_row {
       $vendor
       <td><input data-dojo-type="dijit/form/TextBox" name="partnumber_$i" size=20 value="$form->{"partnumber_$i"}"></td>
       <td><input data-dojo-type="dijit/form/TextBox" name="lastcost_$i" size=10 value=|
-          . $form->format_amount( \%myconfig, $form->{"lastcost_$i"}, LedgerSMB::Setting->new(%$form)->get('decimal_places') )
+          . $form->format_amount( \%myconfig, $form->{"lastcost_$i"}, $form->{_setting_decimal_places} )
           . qq|></td>
       $currency
       <td nowrap><input data-dojo-type="dijit/form/TextBox" name="leadtime_$i" size=5 value=|
@@ -1092,7 +1075,7 @@ sub customer_row {
 
     if ( $form->{selectpricegroup} ) {
         $pricegroup = qq|
-          <th class="listheading">| . $locale->text('Pricegroup') . qq|
+          <th class="listheading">| . $locale->text('Price group') . qq|
           </th>
 |;
     }
@@ -1100,6 +1083,8 @@ sub customer_row {
     $currency = qq|<th class="listheading">| . $locale->text('Curr') . qq|</th>|
       if $form->{selectcurrency};
 
+    $currency //= '';
+    $pricegroup //= '';
     print qq|
   <tr>
     <td>
@@ -1117,6 +1102,7 @@ sub customer_row {
     </tr>
 |;
 
+    $form->{_setting_decimal_places} //= $form->get_setting('decimal_places');
     foreach my $i ( 1 .. $numrows ) {
 
         if ( $form->{selectcurrency} ) {
@@ -1181,7 +1167,7 @@ sub customer_row {
           . $form->format_amount( \%myconfig, $form->{"pricebreak_$i"} )
           . qq|></td>
       <td><input data-dojo-type="dijit/form/TextBox" name="customerprice_$i" size=10 value=|
-          . $form->format_amount( \%myconfig, $form->{"customerprice_$i"}, LedgerSMB::Setting->new(%$form)->get('decimal_places') )
+          . $form->format_amount( \%myconfig, $form->{"customerprice_$i"}, $form->{_setting_decimal_places} )
           . qq|></td>
       $currency
       <td><input class="date" data-dojo-type="lsmb/DateTextBox" name="validfrom_$i" size=11 title="$myconfig{dateformat}" value="$form->{"validfrom_$i"}"></td>
@@ -1217,10 +1203,10 @@ sub assembly_row {
     # change callback
     $form->{old_callback} = $form->{callback};
     $callback             = $form->{callback};
-    $form->{callback}     = "$form->{script}?action=display_form";
+    $form->{callback}     = "$form->{script}?__action=display_form";
 
     # delete action
-    for (qw(action header)) { delete $form->{$_} }
+    for (qw(header)) { delete $form->{$_} }
 
     $form->{baseassembly} = 0;
     $previousform = "";
@@ -1287,6 +1273,7 @@ sub assembly_row {
 
     $numrows-- if $form->{project_id};
 
+    $form->{_setting_decimal_places} //= $form->get_setting('decimal_places');
     foreach my $i ( 1 .. $numrows ) {
         for (qw(partnumber description)) {
             $form->{"${_}_$i"} = $form->quote( $form->{"${_}_$i"} );
@@ -1308,11 +1295,11 @@ sub assembly_row {
           $form->format_amount( \%myconfig, $form->{"qty_$i"} );
 
         $linetotalsellprice =
-          $form->format_amount( \%myconfig, $linetotalsellprice, LedgerSMB::Setting->new(%$form)->get('decimal_places') );
+          $form->format_amount( \%myconfig, $linetotalsellprice, $form->{_setting_decimal_places} );
         $linetotallistprice =
-          $form->format_amount( \%myconfig, $linetotallistprice, LedgerSMB::Setting->new(%$form)->get('decimal_places') );
+          $form->format_amount( \%myconfig, $linetotallistprice, $form->{_setting_decimal_places} );
         $linetotallastcost =
-          $form->format_amount( \%myconfig, $linetotallastcost, LedgerSMB::Setting->new(%$form)->get('decimal_places') );
+          $form->format_amount( \%myconfig, $linetotallastcost, $form->{_setting_decimal_places} );
 
         if ( $i == $numrows && !$form->{project_id} ) {
 
@@ -1321,7 +1308,7 @@ sub assembly_row {
             }
 
             $column_data{qty} =
-qq|<td><input data-dojo-type="dijit/form/TextBox" name="qty_$i" size=6 value="$form->{"qty_$i"}" accesskey="$i" title="[Alt-$i]"></td>|;
+qq|<td><input data-dojo-type="dijit/form/TextBox" name="qty_$i" size=6 value="$form->{"qty_$i"}"></td>|;
             $column_data{partnumber} =
 qq|<td><input data-dojo-type="lsmb/parts/PartSelector" name="partnumber_$i" size=15 value="$form->{"partnumber_$i"}" data-dojo-props="required:false,channel: '/part/part-select/$i'"></td>|;
             $column_data{description} =
@@ -1333,13 +1320,13 @@ qq|<td><select data-dojo-type="dijit/form/Select" id="partsgroup-$i" name="parts
         else {
 
             $column_data{partnumber} =
-qq|<td><a href="ic.pl?action=edit&id=$form->{"id_$i"}" target="new">$form->{"partnumber_$i"}</a></td>
+qq|<td><a href="ic.pl?__action=edit&id=$form->{"id_$i"}" target="new">$form->{"partnumber_$i"}</a></td>
       <input type=hidden name="partnumber_$i" value="$form->{"partnumber_$i"}">|;
 
             $column_data{runningnumber} =
               qq|<td><input data-dojo-type="dijit/form/TextBox" name="runningnumber_$i" size=3 value="$i"></td>|;
             $column_data{qty} =
-qq|<td><input data-dojo-type="dijit/form/TextBox" name="qty_$i" size=6 value="$form->{"qty_$i"}" accesskey="$i" title="[Alt-$i]"></td>|;
+qq|<td><input data-dojo-type="dijit/form/TextBox" name="qty_$i" size=6 value="$form->{"qty_$i"}"></td>|;
 
             for (qw(bom adj)) {
                 $form->{"${_}_$i"} = ( $form->{"${_}_$i"} ) ? "checked" : "";
@@ -1383,13 +1370,13 @@ qq|<td><input type=hidden name="description_$i" value="$form->{"description_$i"}
 
     $column_data{sellprice} =
       "<th align=right>"
-      . $form->format_amount( \%myconfig, $form->{sellprice}, LedgerSMB::Setting->new(%$form)->get('decimal_places') ) . "</th>";
+      . $form->format_amount( \%myconfig, $form->{sellprice}, $form->{_setting_decimal_places} ) . "</th>";
     $column_data{listprice} =
       "<th align=right>"
-      . $form->format_amount( \%myconfig, $form->{listprice}, LedgerSMB::Setting->new(%$form)->get('decimal_places') ) . "</th>";
+      . $form->format_amount( \%myconfig, $form->{listprice}, $form->{_setting_decimal_places} ) . "</th>";
     $column_data{lastcost} =
       "<th align=right>"
-      . $form->format_amount( \%myconfig, $form->{lastcost}, LedgerSMB::Setting->new(%$form)->get('decimal_places') ) . "</th>";
+      . $form->format_amount( \%myconfig, $form->{lastcost}, $form->{_setting_decimal_places} ) . "</th>";
 
     print qq|
         <tr>|;
@@ -1415,7 +1402,7 @@ qq|<td><input type=hidden name="description_$i" value="$form->{"description_$i"}
 
 sub edit_assemblyitem {
 
-    $pn = substr( $form->{action}, 1 );
+    $pn = substr( $form->{__action}, 1 );
 
     $i = 0;
     for ( 1 .. $form->{assembly_rows} - 1 ) {
@@ -1431,7 +1418,7 @@ sub edit_assemblyitem {
       : $form->{"assembly_$i"};
 
     $form->{callback} =
-qq|$form->{script}?action=edit&id=$form->{"id_$i"}&rowcount=$i&baseassembly=$form->{baseassembly}&isassemblyitem=1&previousform=$form->{previousform}|;
+qq|$form->{script}?__action=edit&id=$form->{"id_$i"}&rowcount=$i&baseassembly=$form->{baseassembly}&isassemblyitem=1&previousform=$form->{previousform}|;
 
     $form->redirect;
 
@@ -1484,8 +1471,9 @@ sub update {
                 $form->{rowcount} = $i;
                 $form->{assembly_rows}++;
 
-                &new_item;
-
+                $form->error(
+                    $locale->text('Part [_1] not on file!', $form->{"partnumber_$i"})
+                    );
             }
         }
 
@@ -1746,7 +1734,7 @@ qq|<td>$ref->{meta_number}</td>|;
 |;
 
     # delete variables
-    for (qw(action nextsub name_list)) { delete $form->{$_} }
+    for (qw(nextsub name_list)) { delete $form->{$_} }
 
     $form->hide_form;
 
@@ -1754,7 +1742,7 @@ qq|<td>$ref->{meta_number}</td>|;
 <input type=hidden name=nextsub value=name_selected>
 <input type=hidden name=vc value=$table>
 <br>
-<button data-dojo-type="dijit/form/Button" class="submit" type="submit" name="action" value="continue">|
+<button data-dojo-type="dijit/form/Button" class="submit" type="submit" name="__action" value="continue">|
       . $locale->text('Continue')
       . qq|</button>
 </form>
@@ -1932,7 +1920,7 @@ sub save {
         }
 
         $form->{"id_$i"} = $parts_id;
-        delete $form->{action};
+        delete $form->{__action};
 
         # restore original callback
         $callback = $form->unescape( $form->{callback} );
@@ -1993,7 +1981,7 @@ sub stock_assembly {
     print qq|
 <body class="lsmb">
 
-<form method="post" data-dojo-type="lsmb/Form" action=$form->{script}>
+<form method="post" data-dojo-type="lsmb/Form" action="$form->{script}">
 
 <table width="100%">
   <tr>
@@ -2035,7 +2023,7 @@ sub stock_assembly {
 <input type="hidden" name="nextsub" value="list_assemblies">
 
 <br>
-<button data-dojo-type="dijit/form/Button" class="submit" type="submit" name="action" value="continue">|
+<button data-dojo-type="dijit/form/Button" class="submit" type="submit" name="__action" value="continue">|
       . $locale->text('Continue')
       . qq|</button>
 </form>
@@ -2054,11 +2042,11 @@ sub list_assemblies {
     IC->retrieve_assemblies( \%myconfig, \%$form );
 
     $callback =
-"$form->{script}?action=list_assemblies&direction=$form->{direction}&oldsort=$form->{oldsort}&checkinventory=$form->{checkinventory}";
+"$form->{script}?__action=list_assemblies&direction=$form->{direction}&oldsort=$form->{oldsort}&checkinventory=$form->{checkinventory}";
 
     $form->sort_order();
     $href =
-"$form->{script}?action=list_assemblies&direction=$form->{direction}&oldsort=$form->{oldsort}&checkinventory=$form->{checkinventory}";
+"$form->{script}?__action=list_assemblies&direction=$form->{direction}&oldsort=$form->{oldsort}&checkinventory=$form->{checkinventory}";
 
     if ( $form->{partnumber} ) {
         $callback .= "&partnumber=" . $form->escape( $form->{partnumber}, 1 );
@@ -2100,7 +2088,7 @@ sub list_assemblies {
     print qq|
 <body class="lsmb">
 
-<form method="post" data-dojo-type="lsmb/Form" action=$form->{script}>
+<form method="post" data-dojo-type="lsmb/Form" action="$form->{script}">
 
 <table width=100%>
   <tr>
@@ -2133,7 +2121,7 @@ sub list_assemblies {
         }
 
         $column_data{partnumber} =
-"<td width=20%><a href=$form->{script}?action=edit&id=$ref->{id}&callback=$callback>$ref->{partnumber}&nbsp;</a></td>";
+"<td width=20%><a href=$form->{script}?__action=edit&id=$ref->{id}&callback=$callback>$ref->{partnumber}&nbsp;</a></td>";
 
         $column_data{description} =
           qq|<td width=50%>$ref->{description}&nbsp;</td>|;
@@ -2184,7 +2172,7 @@ qq|<tr class=listrow$j><input name="id_$i" type=hidden value="$ref->{id}">\n|;
 <input type="hidden" name="nextsub" value="restock_assemblies">
 
 <br>
-<button data-dojo-type="dijit/form/Button" class="submit" type="submit" name="action" value="continue">|
+<button data-dojo-type="dijit/form/Button" class="submit" type="submit" name="__action" value="continue">|
       . $locale->text('Continue')
       . qq|</button>
 

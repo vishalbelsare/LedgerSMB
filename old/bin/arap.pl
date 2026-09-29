@@ -180,7 +180,7 @@ sub select_name {
     print qq|
 <body class="lsmb">
 
-<form method="post" data-dojo-type="lsmb/Form" action=$form->{script}>
+<form method="post" data-dojo-type="lsmb/Form" action="$form->{script}">
 
 <table width=100%>
   <tr>
@@ -251,7 +251,7 @@ qq|<td><input name="new_meta_number_$i" type=hidden value="$ref->{meta_number}">
     # delete variables
     for (qw(nextsub name_list)) { delete $form->{$_} }
 
-    $form->{action} = "name_selected";
+    $form->{__action} = "name_selected";
 
     $form->hide_form;
 
@@ -259,7 +259,7 @@ qq|<td><input name="new_meta_number_$i" type=hidden value="$ref->{meta_number}">
 <input type=hidden name=nextsub value=name_selected>
 <input type=hidden name=vc value="$table">
 <br>
-<button data-dojo-type="dijit/form/Button" class="submit" type="submit" name="action" value="continue">|
+<button data-dojo-type="dijit/form/Button" class="submit" type="submit" name="__action" value="continue">|
       . $locale->text('Continue')
       . qq|</button>
 </form>
@@ -304,7 +304,7 @@ sub add_transaction {
     my ($module) = @_;
 
     delete $form->{script};
-    $form->{action} = "add";
+    $form->{__action} = "add";
     $form->{type} = "invoice" if $module =~ /(is|ir)/;
 
     $form->{callback} = $form->escape( $form->{callback}, 1 );
@@ -317,21 +317,29 @@ sub add_transaction {
 
 }
 
-
 sub post_as_new {
+    my %args = @_;
 
     $form->{old_workflow_id} = $form->{workflow_id};
-    for (qw(id printed emailed workflow_id)) { delete $form->{$_} }
-    &post;
+    for (qw(id workflow_id invnumber)) { delete $form->{$_} }
+    $form->{invnumber} = $args{invnumber} // '';
 
+    my $wf = $form->{_conn}->workflows->create( 'AR/AP' );
+    $form->{workflow_id} = $wf->id;
+    $form->{__action} = 'post';
+
+    &post;
 }
 
 sub print_and_post_as_new {
 
     $form->{old_workflow_id} = $form->{workflow_id};
-    for (qw(id printed emailed workflow_id)) { delete $form->{$_} }
-    &print_and_post;
+    for (qw(id workflow_id)) { delete $form->{$_} }
 
+    my $wf = $form->{_conn}->workflows->create( 'AR/AP' );
+    $form->{workflow_id} = $wf->id;
+
+    &print_and_post;
 }
 
 sub repost {
@@ -446,13 +454,13 @@ sub schedule {
 
     }
 
-    if (   LedgerSMB::Sysconfig::printer()->%*
-        && LedgerSMB::Sysconfig::latex()
+    if ( $form->{_wire}->get( 'printers' )->names # any printers ?
         && %formname )
     {
-        $selectprinter = qq|<option>\n|;
-        for ( sort keys LedgerSMB::Sysconfig::printer()->%* ) {
-            $selectprinter .= qq|<option value="$_">$_\n|;
+        $selectprinter = qq|<option></option>\n|;
+        for ( sort $form->{_wire}->get( 'printers' )->names ) {
+            my $prn = $form->escape($_);
+            $selectprinter .= qq|<option value="$prn">$prn</option>\n|;
         }
 
         # formname:format:printer
@@ -555,7 +563,7 @@ sub schedule {
     print qq|
 <body class="lsmb">
 
-<form method="post" data-dojo-type="lsmb/Form" action=$form->{script}>
+<form method="post" data-dojo-type="lsmb/Form" action="$form->{script}">
 
 <table width=100%>
   <tr class=listtop>
@@ -631,7 +639,7 @@ sub schedule {
     }
 
     # delete variables
-    for (qw(action recurring)) { delete $form->{$_} }
+    for (qw(recurring)) { delete $form->{$_} }
     for (
         qw(reference startdate nextdate enddate repeat unit howmany payment print email message)
       )
@@ -741,18 +749,20 @@ sub reprint {
             $form->{rowcount}--;
             for ( 1 .. $form->{rowcount} ) {
                 $form->{"amount_$_"} =
-                  $form->format_amount( \%myconfig, $form->{"amount_$_"}, LedgerSMB::Setting->new(%$form)->get('decimal_places') );
+                    $form->format_amount( \%myconfig, $form->{"amount_$_"},
+                                          $form->get_setting('decimal_places') );
             }
             for ( split / /, $form->{taxaccounts} ) {
                 $form->{"tax_$_"} =
-                  $form->format_amount( \%myconfig, $form->{"tax_$_"}, LedgerSMB::Setting->new(%$form)->get('decimal_places') );
+                    $form->format_amount( \%myconfig, $form->{"tax_$_"},
+                                          $form->get_setting('decimal_places') );
             }
             $pf = "print_transaction";
         }
         for (qw(acc_trans invoice_details)) { delete $form->{$_} }
     }
 
-    for (qw(department employee language month partsgroup project years)) {
+    for (qw(employee language month partsgroup project years)) {
         delete $form->{"all_$_"};
     }
 
@@ -765,7 +775,8 @@ sub reprint {
 
     for ( 1 .. $form->{paidaccounts} ) {
         $form->{"paid_$_"} =
-          $form->format_amount( \%myconfig, $form->{"paid_$_"}, LedgerSMB::Setting->new(%$form)->get('decimal_places') );
+            $form->format_amount( \%myconfig, $form->{"paid_$_"},
+                                  $form->get_setting('decimal_places') );
     }
 
     $form->{copies} = 1;

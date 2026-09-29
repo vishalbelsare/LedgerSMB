@@ -15,24 +15,12 @@ user, and other application state objects.
 
 use strict;
 use warnings;
-use LedgerSMB::User;
 
 =head1 OBJECTS FOR STORAGE
 
 The following are objects that are expected to be stored in this namespace:
 
 =over
-
-=cut
-
-our $User;
-
-=item User
-
-Stores a LedgerSMB::User object for the currently logged in user.
-
-=cut
-
 
 =item DBH
 
@@ -52,22 +40,6 @@ The direct access approach is deprecated and is likely to go away in 1.5 with
 the variables above given a "my" scope instead of an "our" one.
 
 =over
-
-=item User
-
-=cut
-
-sub User {
-    return $User;
-}
-
-=item set_User
-
-=cut
-
-sub set_User {
-    return $User = shift;
-}
 
 =item DBH
 
@@ -100,11 +72,7 @@ sub run_with_state {
     my $block = shift;
     my $state = { @_ };
 
-    local ($DBH, $User) = (
-        $state->{DBH} // $DBH,
-        $state->{User} // $User,
-        );
-
+    local $DBH = $state->{DBH} // $DBH;
     return $block->();
 }
 

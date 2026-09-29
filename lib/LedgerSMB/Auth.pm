@@ -18,8 +18,7 @@ possible though currently every LedgerSMB user must be a database user.
 =head2 factory($env)
 
 This method instantiates an authentication class as of type
-LedgerSMB::Auth::C<LedgerSMB::Sysconfig::auth()>.
-More about plugin classes is described below.
+LedgerSMB::Auth::DB. More about plugin classes is described below.
 
 =head2 plugin classes
 
@@ -52,8 +51,7 @@ login data is available.
 use strict;
 use warnings;
 
-use LedgerSMB::Sysconfig;
-use Module::Runtime qw(use_module compose_module_name);
+use Module::Runtime qw(use_module);
 
 
 my $plugin = '';
@@ -62,8 +60,7 @@ sub factory {
     my ($psgi_env, $domain) = @_;
 
     unless ($plugin) {
-        $plugin =
-            compose_module_name('LedgerSMB::Auth', LedgerSMB::Sysconfig::auth);
+        $plugin = 'LedgerSMB::Auth::DB';
         use_module($plugin);
     }
 

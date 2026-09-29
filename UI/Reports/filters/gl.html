@@ -30,37 +30,8 @@
             <tr>
               <th align="right">[% text('Account') %]</th>
               <td colspan="3">
-                <!-- tshvr fixed accno is better here, but commented for test
-                            PROCESS input element_data = {
-                            name = "accno"
-                            id = 'accno'
-                            size = '15'
-                            value = accno
-                            type = 'text'
-                            class = 'AccountBox'
-                            };
-                            END %] </td>
-              -->
-                <!-- tshvr test http://sourceforge.net/p/ledger-smb/bugs/1057/ -->
-                     [% IF accno;
-                            accno;
-                            PROCESS input element_data = {
-                            name = 'accno',
-                            id = 'accno',
-                            type = 'hidden',
-                            value = accno
-                            };
-                            ELSE;
-                  PROCESS input element_data = {
-                       name = "accno"
-                       id = 'accno'
-                       size = '15'
-                       value = accno
-                       type = 'text'
-                       class = 'AccountBox'
-                       "data-dojo-type"='lsmb/accounts/AccountSelector'
-                       "data-dojo-props"="required:false"
-                       }; END %] </td>
+                <lsmb-account-select id="accno" name="accno"></lsmb-account-select>
+              </td>
               <!--tshvr end test-->
             </tr>
             <tr>
@@ -111,10 +82,47 @@
                          } %]</td>
             </tr>
             <tr>
-              <th align="right">[% text('Include in Report') %]</th>
+              <th align="right" valign="top">[% text('Transaction status') %]</th>
 
               <td colspan="5">
                 <table class='criteria'>
+                  <tr>
+                    <td>
+                      [% PROCESS input element_data = {
+                                name = 'is_approved'
+                                type = 'radio'
+                               value = 'All'
+                             checked = 'CHECKED'
+                      }; %]&nbsp;[% text('All'); %]</td>
+                    <td>[% PROCESS input element_data = {
+                                name = 'is_approved'
+                                type = 'radio'
+                               value = 'Y'
+                      }; %]&nbsp;[% text('Approved'); %]</td><td>
+                    [% PROCESS input element_data = {
+                                name = 'is_approved'
+                                type = 'radio'
+                               value = 'N'
+                    }; %]&nbsp;[% text('Unapproved'); %]</td>
+                  </tr>
+                  <tr>
+                    <td>[% PROCESS input element_data = {
+                                name = 'is_voided'
+                                type = 'radio'
+                               value = 'All'
+                             checked = 'CHECKED'
+                      }; %]&nbsp;[% text('All'); %]</td>
+                    <td>[% PROCESS input element_data = {
+                                name = 'is_voided'
+                                type = 'radio'
+                               value = 'Y'
+                    }; %]&nbsp;[% text('Reversed'); %]</td><td>
+                    [% PROCESS input element_data = {
+                                name = 'is_voided'
+                                type = 'radio'
+                               value = 'N'
+                    }; %]&nbsp;[% text('Non-reversed'); %]</td>
+                  </tr>
                   <tr>
                     <td>
                       [% PROCESS input element_data = {
@@ -125,7 +133,7 @@
                              value="X"
                              checked = "checked"
                              } %]&nbsp;[% text('All') %]</td>
-                      <td align="left">
+                    <td align="left">
                       [% PROCESS input element_data = {
                              name="category"
                              id="category-asset"
@@ -133,7 +141,7 @@
                              type="radio"
                              value="A"
                              } %]&nbsp;[% text('Asset') %]</td>
-                      <td align="left">
+                    <td align="left">
                       [% PROCESS input element_data = {
                              name="category"
                              id="category-liability"
@@ -141,7 +149,7 @@
                              type="radio"
                              value="L"
                              } %]&nbsp;[% text('Liability') %]</td>
-                      <td align="left">
+                    <td align="left">
                       [% PROCESS input element_data = {
                              name="category"
                              id="category-equity"
@@ -149,7 +157,7 @@
                              type="radio"
                              value="Q"
                              } %]&nbsp;[% text('Equity') %]</td>
-                      <td align="left">
+                    <td align="left">
                       [% PROCESS input element_data = {
                              name="category"
                              id="category-income"
@@ -157,7 +165,7 @@
                              type="radio"
                              value="I"
                              } %]&nbsp;[% text('Income') %]</td>
-                      <td align="left">
+                    <td align="left">
                       [% PROCESS input element_data = {
                              name="category"
                              id="category-expense"
@@ -165,29 +173,16 @@
                              type="radio"
                              value="E"
                              } %]&nbsp;[% text('Expense') %]
-                      </td>
+                    </td>
                   </tr>
+                </table>
+              </td>
+            </tr>
+            <tr>
+              <th align="right" valign="top">[% text('Include in Report') %]</th>
+              <td colspan="5">
+                <table>
                   <tr>
-                    <td>[% PROCESS input element_data = {
-                                name = 'is_approved'
-                                type = 'radio'
-                               value = 'Y'
-                             checked = 'CHECKED'
-                    }; %]&nbsp;[% text('Approved'); %]</td><td>
-                    [% PROCESS input element_data = {
-                                name = 'is_approved'
-                                type = 'radio'
-                               value = 'N'
-                    }; %]&nbsp;[% text('Unapproved'); %]</td><td>
-                    [% PROCESS input element_data = {
-                                name = 'is_approved'
-                                type = 'radio'
-                               value = 'All'
-                    }; %]&nbsp;[% text('All'); %]</td>
-                  </tr>
-                  <tr>
-                    <table>
-                      <tr>
                         <td nowrap>[% PROCESS input element_data = {
                                           name="col_id"
                                           class="checkbox"
@@ -222,8 +217,8 @@
                                           value="1"
                                           checked="checked"
                                           } %] [% text('Description') %]</td>
-                      </tr>
-                      <tr>
+                  </tr>
+                  <tr>
                         <td nowrap>[% PROCESS input element_data = {
                                           name="col_debits"
                                           class="checkbox"
@@ -238,6 +233,26 @@
                                           value="1"
                                           checked="checked"
                                           } %] [% text('Credit') %]</td>
+                        <td nowrap>[% PROCESS input element_data = {
+                                          name="col_curr"
+                                          class="checkbox"
+                                          type="checkbox"
+                                          value="1"
+                                          } %] [% text('Currency') %]</td>
+                        <td nowrap>[% PROCESS input element_data = {
+                                          name="col_fx_debits"
+                                          class="checkbox"
+                                          type="checkbox"
+                                          value="1"
+                                          } %] [% text('FX Debit') %]</td>
+                        <td nowrap>[% PROCESS input element_data = {
+                                          name="col_fx_credits"
+                                          class="checkbox"
+                                          type="checkbox"
+                                          value="1"
+                                          } %] [% text('FX Credit') %]</td>
+                  </tr>
+                  <tr>
                         <td nowrap>[% PROCESS input element_data = {
                                           name="col_source"
                                           class="checkbox"
@@ -257,14 +272,8 @@
                                           type="checkbox"
                                           value="1"
                                           } %] [% text('Cleared') %]</td>
-                      </tr>
-                      <tr>
-                        <td nowrap>[% PROCESS input element_data = {
-                                          name="col_till"
-                                          class="checkbox"
-                                          type="checkbox"
-                                          value="1"
-                                          } %] [% text('Till') %]</td>
+                  </tr>
+                  <tr>
                         <td nowrap>[% PROCESS input element_data = {
                                           name="col_accno"
                                           class="checkbox"
@@ -273,38 +282,33 @@
                                           checked="checked"
                                           } %] [% text('Account') %]</td>
                         <td nowrap>[% PROCESS input element_data = {
-                                          name="col_gifi_accno"
-                                          class="checkbox"
-                                          type="checkbox"
-                                          value="1"
-                                          } %] [% text('GIFI') %]</td>
-                        <td nowrap>[% PROCESS input element_data = {
                                           name="col_accname"
                                           class="checkbox"
                                           type="checkbox"
                                           value="1"
                                           } %] [% text('Account Name') %]</td>
                         <td nowrap>[% PROCESS input element_data = {
+                                          name="col_gifi_accno"
+                                          class="checkbox"
+                                          type="checkbox"
+                                          value="1"
+                                          } %] [% text('GIFI') %]</td>
+                        <td nowrap>[% PROCESS input element_data = {
                                           name="col_running_balance"
                                           class="checkbox"
                                           type="checkbox"
                                           value="1"
                                           } %] [% text('Balance') %]</td>
-                      </tr>
-                      <tr>
                         <td nowrap>[% PROCESS input element_data = {
                                           name="subtotal"
                                           class="checkbox"
                                           type="checkbox"
                                           value="1"
                                           } %] [% text('Subtotal') %]</td>
-                      </tr>
-                    </table>
                   </tr>
                 </table>
               </td>
             </tr>
-
           </table>
         </td>
       </tr>
@@ -329,7 +333,7 @@
            text = text('Continue')
            class="submit"
            type="submit"
-           name="action"
+           name="__action"
            value="search"
            } %]
   </form>

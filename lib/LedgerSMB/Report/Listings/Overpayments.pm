@@ -61,8 +61,7 @@ submission.
 =cut
 
 has batch_id => (is => 'ro', isa => 'Int', required => 0);
-has post_date => (is => 'ro', isa => 'LedgerSMB::Moose::Date',
-                required => 0, coerce => 1);
+has post_date => (is => 'ro', isa => 'LedgerSMB::PGDate', required => 0);
 
 has batch_number => (is => 'ro', isa => 'Str', required => 0);
 
@@ -102,11 +101,11 @@ sub name {
 sub header_lines {
     my ($self) = @_;
     return [
-      {name => 'meta_number', text => $self->Text('Counterparty Code')}.
-      {name => 'date_from',   text => $self->Text('Date From')},
-      {name => 'date_to',     text => $self->Text('Date To')},
-      {name => 'amount_from', text => $self->Text('Amount From')},
-      {name => 'amount_to',   text =>  $self->Text('Amount To')},
+      { value => $self->meta_number, text => $self->Text('Counterparty Code')}.
+      { value => $self->date_from,   text => $self->Text('Date From')},
+      { value => $self->date_to,     text => $self->Text('Date To')},
+      { value => $self->amount_from, text => $self->Text('Amount From')},
+      { value => $self->amount_to,   text => $self->Text('Amount To')},
     ];
 }
 
@@ -160,7 +159,7 @@ If there is a batch_id, returns the the set of buttons.  Otherwise not.
 sub set_buttons {
    my $self = shift;
    return [
-          { name => 'action',
+          { name => '__action',
             text => $self->Text('Reverse'),
            value => 'reverse_overpayment',
             type => 'submit',

@@ -11,11 +11,12 @@
 END %]
 <h4>[% text('Saving over an existing document.  Continue?') %]</h4>
 [% PROCESS button element_data = {
-      name="action"
+      name="__action"
      class="submit"
       type="submit"
      value="save"
-      text=text('Continue')
-} %]
+     text=text('Continue')
+}
+%]
 </form>
 </body>

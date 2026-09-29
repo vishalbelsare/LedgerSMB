@@ -14,14 +14,14 @@ Unlike other reports, trial balance reports can be saved:
 
 We can then run it:
 
- $report->run_report;
- $report->render($request);
+ $report->run_report($request);
+ $report->render();
 
 We can also retrieve a previous report from the database and run it:
 
  my $report = LedgerSMB::Report::Trial_Balance->get($id);
- $report->run_report;
- $report->render($request);
+ $report->run_report($request);
+ $report->render();
 
 =cut
 
@@ -142,19 +142,19 @@ sub columns {
     return [
       {col_id => 'account_number',
          type => 'href',
-    href_base => 'journal.pl?action=search&col_running_balance=Y&col_transdate=Y&col_reference=Y&col_description=Y&col_debits=Y&col_credits=Y&col_source=Y&col_accno=Y',
+    href_base => 'journal.pl?__action=search&col_running_balance=Y&col_transdate=Y&col_reference=Y&col_description=Y&col_debits=Y&col_credits=Y&col_source=Y&col_accno=Y',
          name => $self->Text('Account Number'),
        pwidth => 1,},
 
       {col_id => 'account_desc',
          type => 'href',
-    href_base => 'journal.pl?action=search&col_running_balance=Y&col_transdate=Y&col_reference=Y&col_description=Y&col_debits=Y&col_credits=Y&col_source=Y&col_accno=Y',
+    href_base => 'journal.pl?__action=search&col_running_balance=Y&col_transdate=Y&col_reference=Y&col_description=Y&col_debits=Y&col_credits=Y&col_source=Y&col_accno=Y',
          name => $self->Text('Account Description'),
        pwidth => 3,},
 
       {col_id => 'gifi_accno',
          type => 'href',
-    href_base => 'journal.pl?action=search&col_running_balance=Y&col_transdate=Y&col_reference=Y&col_description=Y&col_debits=Y&col_credits=Y&col_source=Y&col_accno=Y',
+    href_base => 'journal.pl?__action=search&col_running_balance=Y&col_transdate=Y&col_reference=Y&col_description=Y&col_debits=Y&col_credits=Y&col_source=Y&col_accno=Y',
          name => $self->Text('GIFI'),
        pwidth => 1, } ,
 
@@ -176,12 +176,23 @@ sub columns {
          name => $self->Text('Credits'),
        pwidth => 1} ,
 
+      {col_id => 'ending_balance_debit',
+         type => 'text',
+         money => 1,
+         name => $self->Text('Ending Balance Debit'),
+        pwidth => 1} ,
+
+      {col_id => 'ending_balance_credit',
+         type => 'text',
+         money => 1,
+         name => $self->Text('Ending Balance Credit'),
+        pwidth => 1} ,
+
       {col_id => 'ending_balance',
          type => 'text',
          money => 1,
          name => $self->Text('Ending Balance'),
         pwidth => 1} ,
-
 
     ];
 }
@@ -192,12 +203,10 @@ sub columns {
 
 sub header_lines {
     my ($self) = @_;
-    return [{name => 'from_date',
+    return [{value => $self->from_date,
              text => $self->Text('From date') },
-            {name => 'to_date',
+            {value => $self->to_date,
              text => $self->Text('To Date') },
-            {name => 'ignore_yearend',
-             text => $self->Text('Ignore Year-ends') },
             ];
 }
 
@@ -222,14 +231,16 @@ sub run_report {
     my $total_credits;
     my @rows = ();
     for my $ref(@rawrows){
-        next if ! $self->all_accounts
-                && (($ref->{starting_balance} == 0)
-                    and ($ref->{credits} == 0) and ($ref->{debits} == 0));
+        next if (! $self->all_accounts
+                 && (($ref->{starting_balance} == 0)
+                     and ($ref->{credits} == 0) and ($ref->{debits} == 0)));
         my $href_suffix = '&accno=' . $ref->{account_number};
         $href_suffix .= '&from_date=' . $self->from_date->to_db
-              if defined $self->from_date;
+            if defined $self->from_date;
         $href_suffix .= '&to_date=' . $self->to_date->to_db
-              if defined $self->to_date;
+            if defined $self->to_date;
+        $href_suffix .= '&is_approved=' . $self->is_approved
+            if defined $self->is_approved;
 
         $total_debits += $ref->{debits};
         $total_credits += $ref->{credits};

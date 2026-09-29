@@ -9,7 +9,7 @@ LedgerSMB
 =head1 SYNPOSIS
 
  my $report = LedgerSMB::Report::Inventory::Search->new(%$request);
- $report->render($request);
+ $report->render();
 
 =cut
 
@@ -41,6 +41,28 @@ Prefix search on partnumber.
 =cut
 
 has partnumber => (is => 'ro', isa => 'Str', required => 0);
+
+=item parttype string
+
+Restriction on part type. Possible values:
+
+=over
+
+=item * all
+
+=item * parts
+
+=item * services
+
+=item * overhead
+
+=item * assemblies
+
+=back
+
+=cut
+
+has parttype => (is => 'ro', isa => 'Str', required => 0);
 
 =item description string
 
@@ -188,12 +210,12 @@ sub columns {
    return [
     {col_id => 'id',
        type => 'href',
-  href_base => 'ic.pl?action=edit&id=',
+  href_base => 'ic.pl?__action=edit&id=',
        name => $self->Text('ID'),},
 
     {col_id => 'partnumber',
        type => 'href',
-  href_base => 'ic.pl?action=edit&id=',
+  href_base => 'ic.pl?__action=edit&id=',
        name => $self->Text('Part Number'),},
 
     {col_id => 'description',

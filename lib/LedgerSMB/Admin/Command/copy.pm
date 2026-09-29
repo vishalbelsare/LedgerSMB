@@ -1,4 +1,7 @@
 
+use v5.38;
+use experimental 'try';
+
 package LedgerSMB::Admin::Command::copy;
 
 =head1 NAME
@@ -7,20 +10,19 @@ LedgerSMB::Admin::Command::copy - ledgersmb-admin 'copy' command
 
 =cut
 
-use strict;
-use warnings;
-
 use LedgerSMB::Admin::Command;
 use LedgerSMB::Database;
 
 use Moose;
+use experimental 'try'; # Work around Moose re-enabling experimenal warnings
 extends 'LedgerSMB::Admin::Command';
 use namespace::autoclean;
 
-use Feature::Compat::Try;
+sub run($self, $dbname, $newname) {
 
-sub run {
-    my ($self, $dbname, $newname) = @_;
+    return $self->help('copy')
+        if !$dbname || $dbname eq 'help';
+
     my $logger = $self->logger;
     my $existing_db = $self->connect_data_from_arg($dbname);
     my $connect_data = {
@@ -52,8 +54,6 @@ sub run {
 }
 
 __PACKAGE__->meta->make_immutable;
-
-1;
 
 __END__
 

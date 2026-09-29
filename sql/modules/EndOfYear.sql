@@ -28,10 +28,10 @@ BEGIN
 
         SELECT count(*) into approval_check
         FROM acc_trans ac
-        JOIN (select id, approved, transdate from transactions
-             ) gl ON (gl.id = ac.trans_id)
+        JOIN transactions txn
+             ON txn.id = ac.trans_id
         WHERE (ac.approved IS NOT TRUE AND ac.transdate <= in_end_date)
-                OR (gl.approved IS NOT TRUE AND gl.transdate <= in_end_date);
+                OR (txn.approved IS NOT TRUE AND txn.transdate <= in_end_date);
 
         if approval_check > 0 THEN
                 RAISE EXCEPTION 'Unapproved transactions in closed period';
@@ -42,9 +42,9 @@ BEGIN
           FROM account_checkpoint
          WHERE end_date < in_end_date;
 
-        INSERT INTO
-        account_checkpoint (end_date, account_id, amount_bc,
-                            amount_tc, curr, debits, credits)
+        INSERT INTO account_checkpoint (
+              end_date, account_id, amount_bc,
+              amount_tc, curr, debits, credits)
         SELECT in_end_date, account.id,
             COALESCE(a.amount_bc,0) + COALESCE(cp.amount_bc, 0),
             COALESCE(a.amount_tc,0) + COALESCE(cp.amount_tc, 0),
@@ -96,12 +96,12 @@ DECLARE
    ret_val int;
    cp_date date;
 BEGIN
-        INSERT INTO gl (transdate, reference, description, approved,
-                        trans_type_code)
+        INSERT INTO transactions (transdate, reference, description, approved,
+                                  trans_type_code)
         VALUES (in_end_date, in_reference, in_description, true, 'ye');
 
         INSERT INTO yearend (trans_id, transdate)
-             VALUES (currval('id'), in_end_date);
+             VALUES (currval('transactions_id_seq'), in_end_date);
 
         SELECT coalesce(max(end_date),
                         (SELECT min(transdate)-1 FROM acc_trans)) INTO cp_date
@@ -109,7 +109,7 @@ BEGIN
 
         INSERT INTO acc_trans (transdate, chart_id, trans_id,
                                amount_bc, curr, amount_tc)
-        SELECT in_end_date, a.chart_id, currval('id'),
+        SELECT in_end_date, a.chart_id, currval('transactions_id_seq'),
                (coalesce(a.amount_bc, 0) + coalesce(cp.amount_bc, 0)) * -1,
                coalesce(a.curr,cp.curr),
                (coalesce(a.amount_tc, 0) + coalesce(cp.amount_tc, 0)) * -1
@@ -132,16 +132,16 @@ BEGIN
 
         INSERT INTO acc_trans (transdate, trans_id, chart_id,
                                amount_bc, curr, amount_tc)
-        SELECT in_end_date, currval('id'), in_retention_acc_id,
+        SELECT in_end_date, currval('transactions_id_seq'), in_retention_acc_id,
                coalesce(sum(amount_bc) * -1, 0),
                -- post only default currency in retained earnings
                defaults_get_defaultcurrency(),
                coalesce(sum(amount_tc) * -1, 0)
-        FROM acc_trans WHERE trans_id = currval('id');
+        FROM acc_trans WHERE trans_id = currval('transactions_id_seq');
 
 
         SELECT count(*) INTO ret_val from acc_trans
-        where trans_id = currval('id');
+        where trans_id = currval('transactions_id_seq');
 
         RETURN ret_val;
 end;
@@ -174,45 +174,61 @@ COMMENT ON FUNCTION eoy_close_books
 in_retention_acc_id int) IS
 $$ Zeroes accounts and then creates a checkpoint. in_end_date is the date when
 the books are to be closed, in_reference and in_description become the
-reference and description of the gl transaction, and in_retention_acc_id is
+reference and description of the transaction, and in_retention_acc_id is
 the retained earnings account id.$$;
 
 CREATE OR REPLACE FUNCTION eoy_reopen_books(in_end_date date)
 RETURNS bool AS
 $$
 BEGIN
-        PERFORM count(*) FROM account_checkpoint WHERE end_date = in_end_date;
+  PERFORM count(*) FROM account_checkpoint WHERE end_date = in_end_date;
+  IF NOT FOUND THEN
+    RETURN FALSE;
+  END IF;
 
-        IF NOT FOUND THEN
-                RETURN FALSE;
-        END IF;
+  PERFORM * FROM account_checkpoint WHERE end_date > in_end_date;
+  IF FOUND THEN
+    RAISE EXCEPTION 'Only last closed period can be reopened';
+  END IF;
 
-        DELETE FROM account_checkpoint WHERE end_date = in_end_date;
+  DELETE FROM account_checkpoint WHERE end_date = in_end_date;
 
-        PERFORM count(*) FROM yearend
-        WHERE transdate = in_end_date and reversed is not true;
+  PERFORM count(*) FROM yearend
+    WHERE transdate = in_end_date and reversed is not true;
 
-        IF FOUND THEN
-                INSERT INTO gl (reference, description, approved,
-                                trans_type_code)
-                SELECT 'Reversing ' || reference, 'Reversing ' || description,
-                        true, 'ye'
-                FROM gl WHERE id = (select trans_id from yearend
-                        where transdate = in_end_date and reversed is not true);
+  IF FOUND THEN
+    DECLARE
+      t_new_trans_id int;
+    BEGIN
+      INSERT INTO transactions (
+        transdate, reference,
+        description, approved, reversing, trans_type_code)
+      SELECT in_end_date, 'Reversing ' || reference,
+             'Reversing ' || description, true, id, 'ye'
+        FROM transactions
+       WHERE id = (select trans_id from yearend
+                    where transdate = in_end_date
+                      and reversed is not true)
+             RETURNING id INTO t_new_trans_id;
 
-                INSERT INTO acc_trans (chart_id, amount_bc, curr, amount_tc,
-                                       transdate, trans_id, approved)
-                SELECT chart_id, amount_bc * -1, curr, amount_tc * -1,
-                       in_end_date, currval('id'), true
-                FROM acc_trans where trans_id = (select trans_id from yearend
-                        where transdate = in_end_date and reversed is not true);
+      INSERT INTO acc_trans (chart_id, amount_bc, curr, amount_tc,
+                             transdate, trans_id, approved)
+      SELECT chart_id, amount_bc * -1, curr, amount_tc * -1,
+             in_end_date, t_new_trans_id, true
+        FROM acc_trans where trans_id = (select trans_id
+                                           from yearend
+                                          where transdate = in_end_date
+                                            and reversed is not true);
 
-                UPDATE yearend SET reversed = true where transdate = in_end_date
+      UPDATE yearend
+         SET reversed = true
+       where transdate = in_end_date
                         and reversed is not true;
-        END IF;
+    END;
+  END IF;
 
-        DELETE FROM account_checkpoint WHERE end_date = in_end_date;
-        RETURN TRUE;
+  DELETE FROM account_checkpoint WHERE end_date = in_end_date;
+  RETURN TRUE;
 END;
 $$ LANGUAGE PLPGSQL;
 
@@ -242,17 +258,62 @@ SELECT CASE WHEN (SELECT count(*) > 0 from account_checkpoint
 
 $$;
 
+DROP TYPE IF EXISTS account__balance_by_currency CASCADE;
+CREATE TYPE account__balance_by_currency AS (
+  curr char(3),
+  amount_bc numeric,
+  amount_tc numeric
+);
+
+CREATE OR REPLACE FUNCTION account__obtain_balance_by_currency(
+  in_transdate date,
+  in_account_id int
+) RETURNS setof account__balance_by_currency AS
+$$
+WITH cp AS (
+  SELECT amount_bc, amount_tc, curr
+    FROM account_checkpoint
+   WHERE account_id = in_account_id
+     AND end_date = (select max(end_date)
+                       from account_checkpoint
+                      where end_date <= in_transdate)
+),
+ac AS (
+  SELECT sum(acc.amount_bc), sum(acc.amount_tc), curr
+    FROM acc_trans acc
+    JOIN (select id from transactions where approved) txn
+        ON acc.trans_id = txn.id
+   WHERE transdate <= in_transdate
+     AND transdate > coalesce((select max(end_date)
+                                 from account_checkpoint),
+                              (select min(transdate) - '1 day'::interval
+                                 from acc_trans))
+     AND acc.chart_id = in_account_id
+   GROUP BY curr
+)
+  SELECT curr,
+         sum(amount_bc) as amount_bc,
+         sum(amount_tc) as amount_tc
+    FROM (
+      SELECT * FROM cp
+       UNION ALL
+      SELECT * FROM ac
+    ) x
+  GROUP BY curr;
+$$ language sql;
 
 CREATE OR REPLACE FUNCTION account__obtain_balance
 (in_transdate date, in_account_id int)
 RETURNS numeric AS
 $$
 WITH cp AS (
-  SELECT amount_bc, end_date, account_id
+  SELECT sum(amount_bc) as amount_bc, end_date, account_id
     FROM account_checkpoint
    WHERE account_id = in_account_id
-     AND end_date <= in_transdate
-ORDER BY end_date DESC LIMIT 1
+     AND end_date = (select max(end_date)
+                       from account_checkpoint
+                      where end_date <= in_transdate)
+   GROUP BY end_date, account_id
 ),
 ac AS (
   SELECT acc_trans.amount_bc

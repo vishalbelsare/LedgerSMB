@@ -213,7 +213,6 @@ CREATE TYPE budget_line_details AS (
 );
 
 
-DROP FUNCTION IF EXISTS budget__get_details(int) CASCADE;
 CREATE OR REPLACE FUNCTION budget__get_details(in_id int)
 RETURNS SETOF budget_line_details AS
 $$
@@ -243,9 +242,8 @@ CREATE OR REPLACE FUNCTION budget__save_note
 RETURNS budget_note AS
 $$
 INSERT INTO budget_note (subject, note, ref_key)
-     values ($2, $3, $1);
-
-SELECT * FROM budget_note WHERE id = currval('note_id_seq'::regclass);
+  values ($2, $3, $1)
+RETURNING *;
 $$ language sql;
 
 COMMENT ON FUNCTION budget__save_note

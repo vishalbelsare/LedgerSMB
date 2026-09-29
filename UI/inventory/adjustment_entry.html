@@ -7,16 +7,16 @@
     <div class="listtop">[% text('Enter Inventory')%]</div>
         <div class="label" id="date_div">
                 <label for="date_span">[% text('Adjustment Date') %]</label>
-                <span id="date_span">[% transdate %]</span>
+                <span id="date_span">[% report_date %]</span>
                 [% INCLUDE input element_data = {
                         name  = "source"
                         type  = "hidden"
                         value = source
                 } %]
                 [% INCLUDE input element_data = {
-                        name  = "transdate"
+                        name  = "report_date"
                         type  = "hidden"
-                        value = transdate
+                        value = report_date
                 } %]
         </div>
         <table>
@@ -82,15 +82,17 @@
                         text  = text('Next')
                         type  = "submit"
                         class = "submit"
-                        name  = "action"
+                        name  = "__action"
                         value = "adjustment_next"
                 } %]
                 [% INCLUDE button element_data = {
                         text  = text('Save')
                         type  = "submit"
                         class = "submit"
-                        name  = "action"
+                        name  = "__action"
                         value = "adjustment_save"
+                        'data-lsmb-doing' = text('Saving...')
+                        'data-lsmb-done' = text('Saved')
                 } %]
         </div>
         </form>

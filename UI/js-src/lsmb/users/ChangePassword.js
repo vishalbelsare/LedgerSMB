@@ -1,4 +1,5 @@
 /** @format */
+/* eslint-disable camelcase */
 
 define([
     "dojo/_base/declare",
@@ -29,10 +30,9 @@ define([
             _lstrings: {
                 title: "Change Password",
                 "old password": "Old Password",
-                "new password": "New password",
+                "new password": "New Password",
                 verify: "Verify",
                 change: "Change Password",
-                "no-oldpw": "No Old Password",
                 strength: "Strength"
             },
             lstrings: {},
@@ -43,7 +43,6 @@ define([
                 return this.lstrings[toTranslate];
             },
             startup: function () {
-                // eslint-disable-next-line guard-for-in
                 for (var str in this._lstrings) {
                     if (this.lstrings[str]) {
                         continue;
@@ -53,18 +52,11 @@ define([
                 document.getElementById("pwtitle").innerHTML =
                     this.lstrings.title;
                 var I = this;
-                on(this.oldpw, "keypress", function () {
-                    I.setFeedback(0, "");
-                });
                 on(this.newpw, "change", function () {
                     I.setStrengthClass();
                 });
-                on(this.newpw, "keypress", function () {
+                on(this.newpw, "keyup", function () {
                     I.setStrengthClass();
-                    I.setFeedback(0, "");
-                });
-                on(this.verified, "keypress", function () {
-                    I.setFeedback(0, "");
                 });
 
                 domAttr.set(
@@ -135,17 +127,19 @@ define([
                 domAttr.set("pw-strength", "innerHTML", score);
             },
             submitForm: function () {
-                var I = this;
                 var r = request;
-                var oldPassword = I.oldpw.get("value");
-                var newPassword = I.newpw.get("value");
-                var confirmedPassword = I.verified.get("value");
+                var oldPassword = this.oldpw.get("value");
+                var newPassword = this.newpw.get("value");
+                var confirmedPassword = this.verified.get("value");
                 if (oldPassword === "" || newPassword === "") {
-                    I.setFeedback(0, I.text("Password Required"));
+                    this.setFeedback(false, this.text("Password Required"));
                     return;
                 }
                 if (newPassword !== confirmedPassword) {
-                    I.setFeedback(0, I.text("Confirmation did not match"));
+                    this.setFeedback(
+                        false,
+                        this.text("Confirmation did not match")
+                    );
                     return;
                 }
                 r("user.pl", {
@@ -157,21 +151,20 @@ define([
                     },
                     method: "POST"
                 })
-                    // eslint-disable-next-line no-unused-vars
-                    .then(function (response) {
-                        I.setFeedback(1, I.text("Password Changed"));
+                    .then(() => {
+                        this.setFeedback(true, this.text("Password Changed"));
                     })
-                    .otherwise(function (err) {
+                    .otherwise((err) => {
                         if (err.response.status !== 200) {
                             if (err.response.status !== 500) {
-                                I.setFeedback(
-                                    0,
-                                    I.text("Bad username/Password")
+                                this.setFeedback(
+                                    false,
+                                    this.text("Bad username/Password")
                                 );
                             } else {
-                                I.setFeedback(
-                                    0,
-                                    I.text("Error changing password.")
+                                this.setFeedback(
+                                    false,
+                                    this.text("Error changing password.")
                                 );
                             }
                         }

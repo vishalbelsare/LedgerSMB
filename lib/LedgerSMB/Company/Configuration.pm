@@ -159,7 +159,8 @@ sub _build_industry_codes {
 Configures the company based on the XML content provided in C<$source>,
 which can be either a string or a file handle. In case of a string,
 C<$source> is interpreted as an XML source document. In case of a file
-handle, the XML content will be read from the backing file.
+handle, the XML content will be read from the backing file. The file handle
+should be opened in C<:raw> mode.
 
 The specification of the XML structure (XSD) can be found at
 C<doc/company-setup/configuration.xsd> in the LedgerSMB repository.
@@ -455,11 +456,15 @@ sub from_xml {
     my $item = _skip_text_siblings($root->firstChild);
 
     # $root is a <configuration> tag, which has the following children:
+    #   documentation            (optional)
     #   gifi-list                (optional)
     #   custom-account-link-list (optional)
     #   coa                      (required)
     #   currencies               (required)
     #   settings                 (required)
+    if ($item and $item->nodeName eq 'documentation') {
+        $item = _skip_text_siblings($item->nextSibling);
+    }
     if ($item and $item->nodeName eq 'gifi-list') {
         $self->_process_gifis($item);
         $item =  _skip_text_siblings($item->nextSibling);

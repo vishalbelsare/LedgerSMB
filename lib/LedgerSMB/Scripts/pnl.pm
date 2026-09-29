@@ -9,7 +9,7 @@ LedgerSMB::Scripts::pnl - PNL report workflows for LedgerSMB
 
 Called via lsmb-handler.pl:
 
- LedgerSMB::Scripts::pnl->can($request->{action})->($request);
+ LedgerSMB::Scripts::pnl->can($request->{__action})->($request);
 
 =head1 DESCRIPTION
 
@@ -31,7 +31,6 @@ use LedgerSMB::Report::PNL::Product;
 use LedgerSMB::Report::PNL::ECA;
 use LedgerSMB::Report::PNL::Invoice;
 use LedgerSMB::Report;
-use LedgerSMB::Setting;
 
 use LedgerSMB::PGDate;
 use strict;
@@ -49,16 +48,35 @@ sub generate_income_statement {
     my $rpt;
     $request->{pnl_type} = '' unless defined $request->{pnl_type};
     if ($request->{pnl_type} eq 'invoice'){
-        $rpt = LedgerSMB::Report::PNL::Invoice->new(%$request);
+        $rpt = LedgerSMB::Report::PNL::Invoice->new(
+            %$request,
+            formatter_options => $request->formatter_options,
+            from_date  => $request->parse_date( $request->{from_date} ),
+            to_date  => $request->parse_date( $request->{to_date} ),
+            transdate => $request->parse_date( $request->{transdate} ),
+            );
     } elsif ($request->{pnl_type} eq 'eca'){
-        $rpt = LedgerSMB::Report::PNL::ECA->new(%$request);
+        $rpt = LedgerSMB::Report::PNL::ECA->new(
+            %$request,
+            formatter_options => $request->formatter_options,
+            from_date  => $request->parse_date( $request->{from_date} ),
+            to_date  => $request->parse_date( $request->{to_date} ),
+            );
     } elsif ($request->{pnl_type} eq 'product'){
-        $rpt = LedgerSMB::Report::PNL::Product->new(%$request);
+        $rpt = LedgerSMB::Report::PNL::Product->new(
+            %$request,
+            formatter_options => $request->formatter_options,
+            from_date  => $request->parse_date( $request->{from_date} ),
+            to_date  => $request->parse_date( $request->{to_date} ),
+            );
     } else {
         $rpt = LedgerSMB::Report::PNL::Income_Statement->new(
             %$request,
+            formatter_options => $request->formatter_options,
+            from_date  => $request->{from_date} ? $request->parse_date( $request->{from_date} ) : undef,
+            to_date  => $request->{to_date} ? $request->parse_date( $request->{to_date} ) : undef,
             column_path_prefix => [ 0 ]);
-        $rpt->run_report;
+        $rpt->run_report($request);
 
         for my $key (qw(from_month from_year from_date to_date interval)) {
             delete $request->{$_} for (grep { /^$key/ } keys %$request);
@@ -66,8 +84,11 @@ sub generate_income_statement {
 
         for my $cmp_dates (@{$rpt->comparisons}) {
             my $cmp = LedgerSMB::Report::PNL::Income_Statement->new(
-                %$request, %$cmp_dates);
-            $cmp->run_report;
+                %$request,
+                comparison_periods => 0,
+                formatter_options => $request->formatter_options,
+                %$cmp_dates);
+            $cmp->run_report($request);
             $rpt->add_comparison($cmp);
         }
     }

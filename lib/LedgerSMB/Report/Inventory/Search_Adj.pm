@@ -9,8 +9,8 @@ inventory adjustments
 =head1 SYNPOSIS
 
  my $rpt = LedgerSMB::Report::Inventory::Search_Adj->new(%$request);
- $rpt->run_report;
- $rpt->render($request);
+ $rpt->run_report($request);
+ $report->render();
 
 =cut
 
@@ -38,8 +38,8 @@ Standard to date
 
 =cut
 
-has 'from_date' => (is => 'ro', coerce => 1, isa => 'LedgerSMB::Moose::Date');
-has 'to_date' => (is => 'ro', coerce => 1, isa => 'LedgerSMB::Moose::Date');
+has 'from_date' => (is => 'ro', isa => 'LedgerSMB::PGDate');
+has 'to_date' => (is => 'ro', isa => 'LedgerSMB::PGDate');
 
 =item partnumber
 
@@ -79,13 +79,13 @@ sub name {
 
 sub header_lines {
     my ($self) = @_;
-    return [{name => 'from_date',
+    return [{value => $self->from_date,
              text => $self->Text('Start Date') },
-            {name => 'to_date',
+            {value => $self->to_date,
              text => $self->Text('End Date') },
-            {name => 'partnumber',
+            {value => $self->partnumber,
              text => $self->Text('Including partnumber') },
-            {name => 'source',
+            {value => $self->source,
              text => $self->Text('Source starting with') },
            ];
 }
@@ -98,20 +98,20 @@ sub columns {
     my ($self) = @_;
     return [{col_id => 'transdate',
                type => 'href',
-          href_base => 'inv_reports.pl?action=adj_detail&id=',
+          href_base => 'inv_reports.pl?__action=adj_detail&id=',
                name => $self->Text('Date')},
             {col_id => 'source',
                type => 'href',
-          href_base => 'inv_reports.pl?action=adj_detail&id=',
+          href_base => 'inv_reports.pl?__action=adj_detail&id=',
                name => $self->Text('Reference')},
             {col_id => 'ar_invnumber',
                type => 'href',
                name => $self->Text('AR Invoice'),
-          href_base => 'is.pl?action=edit&id='},
+          href_base => 'is.pl?__action=edit&id='},
             {col_id => 'ap_invnumber',
                type => 'href',
                name => $self->Text('AP Invoice'),
-          href_base => 'ir.pl?action=edit&id='},
+          href_base => 'ir.pl?__action=edit&id='},
       ];
 }
 

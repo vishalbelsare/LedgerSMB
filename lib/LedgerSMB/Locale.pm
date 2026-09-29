@@ -97,17 +97,18 @@ $myconfig->{dateformat}.
 use strict;
 use warnings;
 
-use base qw( Locale::Maketext Exporter );
+use parent qw( Locale::Maketext Exporter );
 our @EXPORT_OK = qw(marktext);
 
-use LedgerSMB::Sysconfig;
 use Locale::Maketext::Lexicon;
 use Encode;
 
 sub initialize {
+    my $class = shift;
+    my $wire = shift;
     Locale::Maketext::Lexicon->import(
         {
-            '*'     => [ Gettext => (LedgerSMB::Sysconfig::localepath() . '/*.po'), ],
+            '*'     => [ Gettext => ($wire->get( 'paths/locale' ) . '/*.po'), ],
                 _auto   => 1,
                 _decode => 1,
         }

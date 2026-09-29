@@ -1,8 +1,9 @@
 /* stylesheet for ledger-smb, purple theme */
 
-@import url("ledgersmb-common.css");
+@import url("system/ledgersmb-common.css");
 
 /* CSS3 Variables */
+
 :root {
     /* Backgrounds */
     --a-hover-bg-clr: #bbb;
@@ -89,6 +90,7 @@
     --submit-clr: #000080;
     --td-cleared-future-clr: initial;
     --td-cleared-past-clr: initial;
+    --textBox-ReadOnly-color: initial;
     --thead-a-link-clr: initial;
     --tr-suspect-clr: initial;
     --tr-warning-clr: initial;

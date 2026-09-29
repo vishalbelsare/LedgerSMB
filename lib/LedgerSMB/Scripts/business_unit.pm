@@ -26,7 +26,6 @@ use LedgerSMB::Business_Unit_Class;
 use LedgerSMB::PGDate;
 use LedgerSMB::Report::Listings::Business_Unit;
 use LedgerSMB::Setting::Sequence;
-use LedgerSMB::Template::UI;
 
 =head1 FUNCTIONS
 
@@ -44,7 +43,7 @@ sub list_classes {
     my $lsmb_modules = LedgerSMB::App_Module->new(%$request);
     @{$request->{classes}} = $bu_class->list;
     @{$request->{modules}} = $lsmb_modules->list;
-    my $template = LedgerSMB::Template::UI->new_UI;
+    my $template = $request->{_wire}->get('ui');
     return $template->render($request, 'business_units/list_classes',
                              {request => $request});
 }
@@ -94,7 +93,7 @@ sub edit {
 
 sub _display {
     my ($request, $bu) = @_;
-    my $template = LedgerSMB::Template::UI->new_UI;
+    my $template = $request->{_wire}->get('ui');
     return $template->render($request, 'business_units/edit', $bu);
 
 }
@@ -130,8 +129,10 @@ If set, excludes those which are not associated with customers/vendors.
 sub list {
     my ($request) = @_;
     return $request->render_report(
-        LedgerSMB::Report::Listings::Business_Unit->new(%$request)
-        );
+        LedgerSMB::Report::Listings::Business_Unit->new(
+            %$request,
+            formatter_options => $request->formatter_options
+        ));
 }
 
 =item delete
@@ -203,10 +204,10 @@ sub _save {
               if LedgerSMB::Setting::Sequence->should_increment(
                         $request, 'control_code', $request->{sequence});
     }
-    $request->{start_date} = LedgerSMB::PGDate->from_input($request->{start_date}, 0)
-                              if defined $request->{start_date};
-    $request->{end_date} = LedgerSMB::PGDate->from_input($request->{end_date}, 0)
-                              if defined $request->{end_date};
+    $request->{start_date} = $request->parse_date( $request->{start_date} )
+        if defined $request->{start_date};
+    $request->{end_date} = $request->parse_date( $request->{end_date})
+        if defined $request->{end_date};
     my $unit = LedgerSMB::Business_Unit->new(%$request);
     $unit = $unit->save;
 

@@ -16,8 +16,9 @@ use Test2::Require::Module 'Test::Pod::Coverage';
 
 use Test::Pod::Coverage;
 
+use Config;
 use File::Find;
-use File::Util;
+use File::Spec;
 use Log::Log4perl qw(:easy);
 Log::Log4perl->easy_init($OFF);
 
@@ -25,9 +26,6 @@ if ($ENV{COVERAGE} && $ENV{CI}) {
     skip_all q{CI && COVERAGE excludes POD checks};
 }
 
-
-use LedgerSMB::Sysconfig;
-LedgerSMB::Sysconfig->initialize;
 
 #### Test setup
 
@@ -59,10 +57,6 @@ sub collect {
 # only check new code; we're scaling down on old code anyway
 find(\&collect, 'lib');
 
-@on_disk =
-    grep { ! m#^lib/LedgerSMB/Sysconfig.pm# } # LedgerSMB::Sysconfig false fail
-    @on_disk;
-
 
 my %also_private = (
     'LedgerSMB::Scripts::payment' => [ qr/(^p\_)|(_p$)/ ],
@@ -77,7 +71,7 @@ sub module_covered {
 
     $tested{$module} = 1;
 
-    tests modules_covered => sub {
+    tests "Coverage for $module" => sub {
         for (@required_modules) {
             eval "require $_"
                 or skip_all "Test missing required module '$_'";
@@ -91,24 +85,26 @@ sub module_covered {
 ##### The actual tests
 
 
-module_covered 'LedgerSMB::Template::ODS' => qw( XML::Twig OpenOffice::OODoc );
+module_covered
+    'LedgerSMB::Template::Plugin::ODS' => qw( XML::Twig OpenOffice::OODoc );
 
 module_covered
-    'LedgerSMB::Template::LaTeX' => qw( Template::Plugin::Latex Template::Latex );
+    'LedgerSMB::Template::Plugin::LaTeX'
+    => qw( Template::Plugin::Latex Template::Latex );
 
 module_covered
-    'LedgerSMB::Template::XLSX' => qw( Excel::Writer::XLSX Spreadsheet::WriteExcel );
+    'LedgerSMB::Template::Plugin::XLSX'
+    => qw( Excel::Writer::XLSX Spreadsheet::WriteExcel );
 
 for ('LedgerSMB::X12', 'LedgerSMB::X12::EDI850', 'LedgerSMB::X12::EDI894') {
     module_covered $_ => qw( X12::Parser );
 }
 
 
-my $sep = File::Util::SL();
 for my $f (@on_disk) {
     $f =~ s/\.pm//g;
     $f =~ s#lib/##g;
-    $f =~ s#\Q$sep\E#::#g;
+    $f = join('::', File::Spec->splitdir( $f ) );
 
     module_covered $f;
 }

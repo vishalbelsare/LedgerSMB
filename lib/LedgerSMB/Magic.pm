@@ -2,7 +2,7 @@ package LedgerSMB::Magic;
 use strict;
 use warnings;
 
-use base 'Exporter';
+use parent 'Exporter';
 
 
 our @EXPORT_OK = qw(
@@ -303,12 +303,12 @@ Whitelist for e.g. redirect destination
 =cut
 
 use constant SCRIPT_NEWSCRIPTS => [ qw(
-   account.pl admin.pl asset.pl budget_reports.pl budgets.pl business_unit.pl
-   configuration.pl contact.pl contact_reports.pl currency.pl drafts.pl erp.pl
-   file.pl goods.pl import_csv.pl inventory.pl invoice.pl inv_reports.pl
-   journal.pl login.pl lreports_co.pl order.pl payment.pl email.pl
+   account.pl admin.pl asset.pl batches.pl budget_reports.pl budgets.pl
+   business_unit.pl configuration.pl contact.pl contact_reports.pl currency.pl
+   drafts.pl email.pl erp.pl file.pl goods.pl import_csv.pl inventory.pl
+   invoice.pl inv_reports.pl journal.pl login.pl logout.pl order.pl payment.pl
    payroll.pl pnl.pl recon.pl report_aging.pl reports.pl setup.pl taxform.pl
-   template.pl timecard.pl transtemplate.pl trial_balance.pl user.pl vouchers.pl
+   template.pl timecard.pl transtemplate.pl trial_balance.pl user.pl
                                     ) ];
 
 use constant SCRIPT_OLDSCRIPTS => [

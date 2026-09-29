@@ -26,39 +26,35 @@ define([
             channel: "",
             mode: "by-dates",
             postCreate: function () {
-                var self = this;
                 this.inherited(arguments);
                 this.own(
-                    topic.subscribe(this.channel, function (action, value) {
+                    topic.subscribe(this.channel, (action, value) => {
                         var display = "";
 
                         if (action === "changed-period-type") {
-                            self.mode = value;
+                            this.mode = value;
 
                             if (value === "by-dates") {
-                                display = self._comparison_periods.get("value");
+                                display = this.comparisonPeriods.get("value");
                             }
                         }
-                        self._update_display(display);
+                        this._updateDisplay(display);
                     })
                 );
             },
             startup: function () {
-                var self = this;
-
                 this.inherited(arguments);
-                this._comparison_periods = registry.byId("comparison-periods");
+                this.comparisonPeriods = registry.byId("comparison-periods");
                 this.own(
-                    // eslint-disable-next-line no-unused-vars
-                    on(this._comparison_periods, "change", function (newvalue) {
-                        self._update_display(
-                            self._comparison_periods.get("value")
+                    on(this.comparisonPeriods, "change", () => {
+                        this._updateDisplay(
+                            this.comparisonPeriods.get("value")
                         );
                     })
                 );
-                this._update_display("");
+                this._updateDisplay("");
             },
-            _update_display: function (count) {
+            _updateDisplay: function (count) {
                 if (count === "" || this.mode === "by-periods") {
                     domStyle.set(
                         dom.byId("comparison_dates"),
@@ -73,7 +69,7 @@ define([
                 } // invalid input
 
                 domStyle.set(dom.byId("comparison_dates"), "display", "");
-                for (var i = 1; i <= 9; i++) {
+                for (var i = 1; i <= 13; i++) {
                     domStyle.set(
                         dom.byId("comparison_dates_" + i),
                         "display",

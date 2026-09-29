@@ -1,4 +1,6 @@
 
+use v5.38;
+
 package LedgerSMB::PGDate;
 
 =head1 NAME
@@ -14,9 +16,7 @@ The type behaves internally as a Datetime module.
 
 =cut
 
-use strict;
-use warnings;
-use base qw(PGObject::Type::DateTime);
+use parent qw(PGObject::Type::DateTime);
 
 use Carp;
 use DateTime;
@@ -24,7 +24,6 @@ use DateTime::Format::Strptime;
 use Memoize;
 use PGObject;
 
-use LedgerSMB::App_State;
 use LedgerSMB::Magic
     qw( MONTHS_PER_QUARTER YEARS_PER_CENTURY FUTURE_YEARS_LIMIT );
 
@@ -143,10 +142,7 @@ defers object creation to the superclass.
 
 =cut
 
-sub new {
-    my $class = shift;
-    my @args = @_;
-
+sub new($class, @args) {
     if (! @args) {
         my $self = {};
         bless $self, $class;
@@ -166,8 +162,7 @@ This adds $n * $interval to the date, defaulting to 1 if $n is not supplied.
 
 =cut
 
-sub add_interval {
-    my ($self,$interval,$n) = @_;
+sub add_interval($self,$interval,$n = 1) {
 
     my %delta_names = (
         day => 'days',
@@ -180,7 +175,6 @@ sub add_interval {
     #Validate asked interval
     die "Bad interval: $interval" if not defined $delta_name;
 
-    $n //= 1;    # Default to 1
     $n *= MONTHS_PER_QUARTER if $interval eq 'quarter'; # A quarter is 3 months
 
     my $has_time = $self->is_time();
@@ -197,24 +191,17 @@ unless C<$format> has been specified to override it.
 
 =cut
 
-sub from_input{
-    my ($self, $input, $format) = @_;
-
-    local $@ = undef;
-    return $input if eval {$input->isa(__PACKAGE__)} && $input->is_date;
-
+sub from_input($self, $input, @args) {
+    return $input if $input isa __PACKAGE__ && $input->is_date;
     return __PACKAGE__->new()
         if ! $input; # matches undefined as well as ''
 
-    my $dt;
-    my @fmts;
-    if ($format) {
-        @fmts = @{$regexes->{uc($format)}};
-    }
-    elsif (defined LedgerSMB::App_State::User()->{dateformat}) {
-        @fmts = @{$regexes->{uc(LedgerSMB::App_State::User()->{dateformat})}};
-    }
+    my %args   = (ref($args[0]) eq 'HASH') ? %{$args[0]} : @args;
+    my $format = $args{format} // $args{dateformat};
+    croak 'LedgerSMB::PGDate No Format Set' if !$format;
 
+    my $dt;
+    my @fmts = @{$regexes->{uc($format)}};
     for my $fmt (@fmts, @{$regexes->{'YYYY-MM-DD'}} ) {
         my ($success, %args);
         if ($input =~ $fmt->{regex}) {
@@ -243,8 +230,8 @@ used.  If $format is not supplied, the dateformat of the user is used.
 
 =cut
 
-sub _formatter {
-    return DateTime::Format::Strptime->new(@_);
+sub _formatter(@args) {
+    return DateTime::Format::Strptime->new(@args);
 }
 
 # Together with the memoization in PGNumber,
@@ -252,15 +239,22 @@ sub _formatter {
 # table (being GL>Search-ed without restrictions)
 memoize('_formatter');
 
-sub to_output {
-    my ($self) = @_;
+# Provide a stringification routine instead of the one inherited
+use overload (
+    fallback => 1,
+    q{""}    => '_stringification',
+);
+
+sub _stringification($self, $, $) {
+    # drop the second and third parameters before calling to_output()
+    return $self->to_output();
+}
+
+sub to_output($self, @args) {
     return '' if not $self->is_date();
-    my $fmt;
-    if (defined LedgerSMB::App_State::User()->{dateformat}){
-        $fmt = LedgerSMB::App_State::User()->{dateformat};
-    } else {
-        $fmt = '%F';
-    }
+    my %args  = (ref($args[0]) eq 'HASH')? %{$args[0]}: @args;
+
+    my $fmt = $args{format} // $args{dateformat} // '%F';
     $fmt = $formats->{uc($fmt)} if defined $formats->{uc($fmt)};
 
     $fmt .= ' %T' if $self->is_time();
@@ -285,8 +279,7 @@ Returns sortable key for the Date/Time value (epoch)
 
 =cut
 
-sub to_sort {
-    my $self = shift;
+sub to_sort($self) {
     return $self->epoch;
 }
 
@@ -303,6 +296,3 @@ option any later version.  A copy of the license should have been included with
 your software.
 
 =cut
-
-
-1;

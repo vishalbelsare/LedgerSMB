@@ -5,7 +5,7 @@ BEGIN;
 
     -- Plan the tests.
 
-    SELECT plan(44);
+    SELECT plan(51);
 
     -- Add data
 
@@ -15,7 +15,6 @@ BEGIN;
 
     SELECT has_table('ap');
     SELECT has_table('payment');
-    SELECT has_table('payment_links');
     SELECT has_table('payment_type');
 
     -- Validate required functions
@@ -30,7 +29,6 @@ BEGIN;
     SELECT has_function('payment_get_available_overpayment_amount',ARRAY['integer','integer']);
     SELECT has_function('payment_get_entity_account_payment_info',ARRAY['integer']);
     SELECT has_function('payment_get_entity_accounts',ARRAY['integer','text','text','date','date']);
-    SELECT has_function('payment__get_gl',ARRAY['integer']);
     SELECT has_function('payment_get_open_accounts',ARRAY['integer','date','date']);
     SELECT has_function('payment_get_open_invoice',ARRAY['integer','integer','character','date','date','numeric','numeric','text','date']);
     SELECT has_function('payment_get_open_invoices',ARRAY['integer','integer','character','date','date','numeric','numeric','date']);
@@ -38,7 +36,7 @@ BEGIN;
     SELECT has_function('payment_get_unused_overpayment',ARRAY['integer','integer','integer']);
     SELECT has_function('payment_get_vc_info',ARRAY['integer','integer']);
     SELECT has_function('payment__overpayments_list',ARRAY['date','date','text','text','text']);
-    SELECT has_function('payment_post',ARRAY['date','integer','integer','character','numeric','text','text','integer[]','numeric[]','text[]','text[]','integer[]','numeric[]','integer[]','text[]','text[]','integer[]','integer[]','boolean']);
+    SELECT has_function('payment_post',ARRAY['date','integer','integer','character','numeric','text','text','integer[]','numeric[]','text[]','text[]','integer[]','integer[]','numeric[]','integer[]','text[]','text[]','integer[]','integer[]','boolean']);
     SELECT has_function('payment__reverse',ARRAY['integer','date','boolean','integer']);
     SELECT has_function('payment__search',ARRAY['text','date','date','integer','text','integer','character','text']);
     SELECT has_function('payments_get_open_currencies',ARRAY['integer']);
@@ -55,7 +53,7 @@ BEGIN;
 
     SELECT account__save(null, accno, description, category, null,
                          (select id from account_heading limit 1),
-                         false, false, array[link], false, false)
+                         null, false, false, array[link], false, false, false)
       FROM (VALUES ('00001', 'testing', 'L', 'AP'),
                    ('00001AP2', 'testing', 'L', 'AP'),
                    ('00002', 'testing2', 'E', 'AP_amount'),
@@ -92,12 +90,14 @@ BEGIN;
                  (select id from account where accno = '00001'), 'XTS',
                  0.1, 30, -2000); -- 10%, 30 days
 
-    INSERT INTO ap (invnumber, entity_credit_account, approved,
+    INSERT INTO transactions (transdate, trans_type_code, approved)
+    VALUES (now(), 'ap', false);
+    INSERT INTO open_item (item_number, item_type, account_id)
+    VALUES ('test_hide', 'ap', (select id from account where accno = '-2000000000'));
+    INSERT INTO ap (trans_id, open_item_id, invnumber, entity_credit_account,
                     amount_bc, amount_tc, netamount_bc, curr)
-            values ('test_hide', -101, false, '1', '1', '1', 'XTS');
-
-    INSERT INTO voucher (trans_id, batch_class, batch_id)
-                 VALUES (currval('id'), 1, currval('batch_id_seq'));
+    values (currval('transactions_id_seq'),
+            currval('open_item_id_seq'), 'test_hide', -101, '1', '1', '1', 'XTS');
 
     PREPARE test AS SELECT batch_create('test2', 'test2', 'ap', now()::date)
                     IS NOT NULL;
@@ -109,49 +109,66 @@ BEGIN;
 
     -- Test contact invoice selection (payment__get_all_contact_invoices())
 
-    INSERT INTO ap (invnumber, entity_credit_account, approved,
-                    amount_bc, amount_tc, netamount_bc, curr, transdate)
-            VALUES ('test_show2', -101, true, 100000, 100000, 100000,
-                    'XTS', now()::date);
+    INSERT INTO transactions (transdate, trans_type_code, approved)
+    VALUES (now(), 'ap', true);
+    INSERT INTO open_item (item_number, item_type, account_id)
+    VALUES ('test_show2', 'ap', (select id from account where accno = '00001'));
+    INSERT INTO ap (trans_id, open_item_id, invnumber, entity_credit_account,
+                    amount_bc, amount_tc, netamount_bc, curr)
+    VALUES (currval('transactions_id_seq'),
+            currval('open_item_id_seq'), 'test_show2', -101, 100000, 100000, 100000,
+                    'XTS');
 
     INSERT INTO acc_trans (approved, transdate, amount_bc, curr,
-                           amount_tc, trans_id, chart_id)
+                           amount_tc, trans_id, chart_id, open_item_id)
                    VALUES (true, now()::date, '100000', 'XTS',
-                           '100000', currval('id'),
-                           (select id from account where accno = '00001')),
+                           '100000', currval('transactions_id_seq'),
+                           (select id from account where accno = '00001'),
+                           currval('open_item_id_seq')),
                           (true, now()::date, '-100000', 'XTS',
-                           '-100000', currval('id'),
-                           (select id from account where accno = '00002'));
+                           '-100000', currval('transactions_id_seq'),
+                           (select id from account where accno = '00002'),
+                          null);
 
-    INSERT INTO ap (id, invnumber, entity_credit_account, approved,
-                    amount_bc, amount_tc, netamount_bc, curr, transdate)
-            VALUES (-300, 'test_show3', -101, true, 1000000, 1000000, 1000000,
-                    'XTS', now()::date);
+    INSERT INTO transactions (id, transdate, trans_type_code, approved)
+    VALUES (-300, now(), 'ap', true);
+    INSERT INTO open_item (item_number, item_type, account_id)
+    VALUES ('test_show3', 'ap', (select id from account where accno = '00001'));
+    INSERT INTO ap (trans_id, open_item_id, invnumber, entity_credit_account,
+                    amount_bc, amount_tc, netamount_bc, curr)
+            VALUES (-300, currval('open_item_id_seq'), 'test_show3', -101, 1000000, 1000000, 1000000,
+                    'XTS');
 
     INSERT INTO acc_trans (approved, transdate, amount_bc, curr,
-                           amount_tc, trans_id, chart_id)
+                           amount_tc, trans_id, chart_id, open_item_id)
                    VALUES (true, now()::date, '1000000', 'XTS',
                            '1000000', -300,
-                           (select id from account where accno = '00001')),
+                           (select id from account where accno = '00001'),
+                           currval('open_item_id_seq')),
                           (true, now()::date, '-1000000', 'XTS',
                            '-1000000', -300,
-                           (select id from account where accno = '00002'));
+                           (select id from account where accno = '00002'),
+                          null);
 
     update transactions set locked_by = -200 where id = -300;
 
-    INSERT INTO ap (invnumber, entity_credit_account, approved,
-                    amount_bc, amount_tc, netamount_bc, curr, transdate)
-            values ('test_show', -101, false, '1', '1', '1', 'XTS', now()::date);
+    INSERT INTO transactions (transdate, trans_type_code, approved, batch_id)
+    VALUES (now(), 'ap', false, :batch_id);
+    INSERT INTO open_item (item_number, item_type, account_id)
+    VALUES ('test_show', 'ap', (select id from account where accno = '00001'));
+    INSERT INTO ap (trans_id, open_item_id, invnumber, entity_credit_account,
+                    amount_bc, amount_tc, netamount_bc, curr)
+    values (currval('transactions_id_seq'),
+            currval('open_item_id_seq'), 'test_show', -101, '1', '1', '1', 'XTS');
 
     INSERT INTO acc_trans (approved, transdate, amount_bc,
-                           curr, amount_tc, trans_id, chart_id)
-                   VALUES (true, now()::date, '1', 'XTS', '1', currval('id'),
-                           (select id from account where accno = '00001')),
-                          (true, now()::date, '-1', 'XTS', '-1', currval('id'),
-                           (select id from account where accno = '00002'));
-
-    INSERT INTO voucher (trans_id, batch_class, batch_id)
-                 VALUES (currval('id'), 1, :batch_id);
+                           curr, amount_tc, trans_id, chart_id, open_item_id)
+                   VALUES (true, now()::date, '1', 'XTS', '1', currval('transactions_id_seq'),
+                           (select id from account where accno = '00001'),
+                           currval('open_item_id_seq')),
+                          (true, now()::date, '-1', 'XTS', '-1', currval('transactions_id_seq'),
+                          (select id from account where accno = '00002'),
+                          null);
 
     CREATE FUNCTION test_convert_array(anyarray) RETURNS text AS $$
         SELECT array_to_string($1, '::');
@@ -229,22 +246,61 @@ BEGIN;
     SELECT results_eq('test', ARRAY[true], 'Locked Invoice not in total');
     DEALLOCATE test;
 
+    UPDATE entity_credit_account SET enddate = '2022-01-01', startdate = null;
+    PREPARE test AS
+      SELECT count(*)::int
+      FROM payment_get_open_accounts(1, null, null);
+    SELECT results_eq('test', ARRAY[1], 'Open accounts(enddate), no startdate & no enddate');
+    DEALLOCATE test;
 
-    -- Test vouchers (TODO)
+    PREPARE test AS
+      SELECT count(*)::int
+      FROM payment_get_open_accounts(1, '2020-01-01', null);
+    SELECT results_eq('test', ARRAY[1], 'Open accounts(enddate), startdate(before enddate) & no enddate');
+    DEALLOCATE test;
 
-    INSERT INTO voucher (batch_id, batch_class, id, trans_id)
-                 values (currval('batch_id_seq')::int, 4, -100,
-                         currval('id')::int);
-    INSERT INTO acc_trans (trans_id, chart_id, voucher_id, approved,
-                           amount_bc, curr, amount_tc, transdate, source)
-                   values (currval('id')::int,
-                           (select id from account where accno = '00003'),
-                           -100, true, '1', 'XTS', '1', now(), '_test_src1'),
-                          (currval('id')::int,
-                           (select id from account where accno = '00001'),
-                           -100, true, '-1', 'XTS', '-1', now(), '_test_src1');
+    PREPARE test AS
+      SELECT count(*)::int
+      FROM payment_get_open_accounts(1, '2023-01-01', null);
+    SELECT results_eq('test', ARRAY[0], 'Open accounts(enddate), startdate(after enddate) & no enddate');
+    DEALLOCATE test;
 
-    SELECT todo('Missing Voucher test',0);
+    PREPARE test AS
+      SELECT count(*)::int
+      FROM payment_get_open_accounts(1, null, '2023-01-01');
+    SELECT results_eq('test', ARRAY[1], 'Open accounts(enddate), no startdate & enddate(after enddate)');
+    DEALLOCATE test;
+
+    UPDATE entity_credit_account SET enddate = null, startdate = '2022-01-01';
+    PREPARE test AS
+      SELECT count(*)::int
+      FROM payment_get_open_accounts(1, null, null);
+    SELECT results_eq('test', ARRAY[1], 'Open accounts(startdate), no startdate & no enddate');
+    DEALLOCATE test;
+
+    PREPARE test AS
+      SELECT count(*)::int
+      FROM payment_get_open_accounts(1, '2020-01-01', null);
+    SELECT results_eq('test', ARRAY[1], 'Open accounts(startdate), startdate(before startdate) & no enddate');
+    DEALLOCATE test;
+
+    PREPARE test AS
+      SELECT count(*)::int
+      FROM payment_get_open_accounts(1, '2023-01-01', null);
+    SELECT results_eq('test', ARRAY[1], 'Open accounts(startdate), startdate(after startdate) & no enddate');
+    DEALLOCATE test;
+
+    PREPARE test AS
+      SELECT count(*)::int
+      FROM payment_get_open_accounts(1, null, '2023-01-01');
+    SELECT results_eq('test', ARRAY[1], 'Open accounts(startdate), no startdate & enddate(after startdate)');
+    DEALLOCATE test;
+
+    PREPARE test AS
+      SELECT count(*)::int
+      FROM payment_get_open_accounts(1, null, '2020-01-01');
+    SELECT results_eq('test', ARRAY[0], 'Open accounts(startdate), no startdate & enddate(before startdate)');
+    DEALLOCATE test;
 
 
     -- Test payment reversal
@@ -252,19 +308,25 @@ BEGIN;
     -- Explicitly tests posting to a non-default (for the ECA) AP account
     -- as a test for GitHub issue #2558
 
-    INSERT INTO ap (invnumber, entity_credit_account, approved,
-                    amount_bc, amount_tc, netamount_bc, curr, transdate)
-            values ('test_reverse', -101, true, '1', '1', '1',
-                    'XTS', now()::date)
-       returning id as invoice_id
+    INSERT INTO transactions (transdate, trans_type_code, approved)
+    VALUES (now(), 'ap', true);
+    INSERT INTO open_item (item_number, item_type, account_id)
+    VALUES ('test_reverse', 'ap', (select id from account where accno = '00001AP2'));
+    INSERT INTO ap (trans_id, open_item_id, invnumber, entity_credit_account,
+                    amount_bc, amount_tc, netamount_bc, curr)
+    values (currval('transactions_id_seq'),
+            currval('open_item_id_seq'), 'test_reverse', -101, '1', '1', '1',
+                    'XTS')
+       returning trans_id as invoice_id, open_item_id
     \gset
 
     INSERT INTO acc_trans (approved, transdate, amount_bc, curr, amount_tc,
-                           trans_id, chart_id)
-                   VALUES (true, now()::date, '1', 'XTS', '1', currval('id'),
-                           (select id from account where accno = '00001AP2')),
+                           trans_id, chart_id, open_item_id)
+                   VALUES (true, now()::date, '1', 'XTS', '1', currval('transactions_id_seq'),
+                           (select id from account where accno = '00001AP2'),
+                           currval('open_item_id_seq')),
                           (true, now()::date, '-1', 'XTS', '-1', :invoice_id,
-                           (select id from account where accno = '00002'));
+                           (select id from account where accno = '00002'), null);
 
 
     PREPARE test AS
@@ -281,6 +343,7 @@ BEGIN;
                         array[1]::numeric[],
                         array['pmt-rev-src1']::text[], NULL,
                         array[:invoice_id]::int[],
+                        array[:open_item_id]::int[],
                         -- overpayments section
                         null, null, null, null, null, null,
                         -- approved:
@@ -295,7 +358,7 @@ BEGIN;
     DEALLOCATE test;
 
    SELECT payment__reverse(currval('payment_id_seq')::int, now()::date,
-                           null::boolean, null::int);
+                           true, null::int);
 
    PREPARE test AS
    SELECT amount::int, due::int
@@ -308,7 +371,7 @@ BEGIN;
    PREPARE test AS
    SELECT count(distinct act.id) = 1
      FROM ap
-          JOIN acc_trans ac ON ap.id = ac.trans_id
+          JOIN acc_trans ac ON ap.trans_id = ac.trans_id
           JOIN account act ON ac.chart_id = act.id
           JOIN account_link al ON al.account_id = act.id
     WHERE ap.invnumber = 'test_reverse'
@@ -321,13 +384,19 @@ BEGIN;
     -- bulk post payment
     SELECT batch_create('test3', 'test3', 'payment', now()::date) as batch_id
     \gset
-    INSERT INTO ap (invnumber, entity_credit_account, approved,
-                    amount_bc, amount_tc, netamount_bc, curr, transdate)
-            values ('test_bulk', -101, true, '1', '1', '1',
-                    'XTS', now()::date)
-       returning id as invoice_id
+
+    INSERT INTO transactions (transdate, trans_type_code, approved)
+    VALUES (now(), 'ap', true);
+    INSERT INTO open_item (item_number, item_type, account_id)
+    VALUES ('test_bulk', 'ap', (select id from account where accno = '00001'));
+    INSERT INTO ap (trans_id, open_item_id, invnumber, entity_credit_account,
+                    amount_bc, amount_tc, netamount_bc, curr)
+    values (currval('transactions_id_seq'),
+            currval('open_item_id_seq'), 'test_bulk', -101, '1', '1', '1',
+                    'XTS')
+       returning trans_id as invoice_id, open_item_id
     \gset
-    SELECT payment_bulk_post(ARRAY[ARRAY[(:invoice_id)::numeric, 1::numeric]]::numeric[],
+    SELECT payment_bulk_post(ARRAY[ARRAY[(:invoice_id)::numeric, (:open_item_id)::numeric, 1::numeric]]::numeric[],
                              (:batch_id)::int, 'bulk'::text, '00001'::text, '00003'::text, now()::date,
                              1::int, 1::numeric, 'XTS'::text);
     SELECT currval('payment_id_seq') as payment_id
@@ -336,36 +405,35 @@ BEGIN;
     PREPARE test AS
     SELECT count(*)::int FROM payment p
      WHERE notes = 'generated from bulk payment'
-           AND EXISTS (select 1 from payment_links pl
-                                join acc_trans ac on pl.entry_id = ac.entry_id
-                                join ap on ac.trans_id = ap.id
-                        where ap.invnumber = 'test_bulk');
+           AND EXISTS (select 1 from acc_trans ac
+                                join ap on ac.open_item_id = ap.open_item_id
+                        where ap.invnumber = 'test_bulk'
+                          and ac.trans_id = p.trans_id);
     SELECT results_eq('test', array[1::int],
                       'After payment, the payment table contains a record');
     DEALLOCATE test;
 
-    SELECT id as payment_id FROM payment p
+    SELECT trans_id as trans_id FROM payment p
      WHERE notes = 'generated from bulk payment'
-           AND EXISTS (select 1 from payment_links pl
-                                join acc_trans ac on pl.entry_id = ac.entry_id
-                                join ap on ac.trans_id = ap.id
-                        where ap.invnumber = 'test_bulk')
+           AND EXISTS (select 1 from acc_trans ac
+                                join ap on ac.open_item_id = ap.open_item_id
+                        where ap.invnumber = 'test_bulk'
+                          and ac.trans_id = p.trans_id)
     \gset
 
 
 
     PREPARE test AS
-    SELECT count(*)::int FROM payment_links
-     WHERE payment_id = :payment_id ;
+    SELECT count(*)::int FROM acc_trans
+     WHERE trans_id = :trans_id ;
     SELECT results_eq('test', array[3::int],
                       'There are 3 links: the cash account, the discount account and the ap account line');
     DEALLOCATE test;
 
     PREPARE test AS
     SELECT count(*)::int FROM acc_trans a
-                    JOIN voucher v ON v.id = a.voucher_id
-                    JOIN batch b ON v.batch_id = b.id
-     WHERE b.id = :batch_id ;
+                    JOIN transactions txn ON a.trans_id = txn.id
+     WHERE txn.batch_id = :batch_id ;
     SELECT results_eq('test', array[3::int],
                       'There are 3 journal lines as there are 3 payment links');
     DEALLOCATE test;

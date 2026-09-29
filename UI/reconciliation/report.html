@@ -5,10 +5,10 @@
 <body class="lsmb [% dojo_theme %]">
 <div id="reconciliation">
 [% IF check.unapproved_transactions
-%]<div class="warning"><a href="drafts.pl?action=list_drafts&amp;to_date=[% end_date %]">[% text('There are [_1] unapproved transactions before the end date of this report.',check.unapproved_transactions)
+%]<div class="warning"><a href="drafts.pl?__action=list_drafts&amp;to_date=[% end_date %]">[% text('There are [_1] unapproved transactions before the end date of this report.',check.unapproved_transactions)
 %]</a></div>
 [% END; IF check.unapproved_reports
-%]<div class="warning"><a href="recon.pl?action=get_results&amp;to_date=[% end_date %]&amp;approved=0">[% text('There are [_1] unapproved reconciliations before the end date of this report.',check.unapproved_reports) %]</a></div>
+%]<div class="warning"><a href="recon.pl?__action=get_results&amp;to_date=[% end_date %]&amp;approved=0">[% text('There are [_1] unapproved reconciliations before the end date of this report.',check.unapproved_reports) %]</a></div>
 [% END %]
 [% IF ! defined(b_cleared_table);
     b_cleared_table = 'checked';
@@ -79,14 +79,26 @@ END %]
 </table>
 
 [% IF ! approved and !submitted%]
-    <div id="csv-file">
-        <label for="file_upload">[% text('Bank (CSV/OFX/CAMT.053) transaction file:') %]</label>
-        [% PROCESS input element_data = {
-                    type="file"
-                    name="csv_file"
-                    id="file_upload"
-        } %]
-    </div>
+<fieldset id="csv-file">
+  <div>
+    <label for="file_upload">[% text('Bank transactions upload:') %]</label>
+    [% PROCESS input element_data = {
+    type="file"
+    name="csv_file"
+    id="file_upload"
+    } %]
+  </div>
+  <div>
+    <label for="trx_format">[% text('Upload file format') %]</label>
+        [% PROCESS select element_data = {
+                    name="trx_format"
+                    options=upload_formats
+                    text_attr="name"
+                    value_attr="name"
+                    default_blank=1
+    } %]
+  </div>
+</fieldset>
 [% END %]
 
 
@@ -346,8 +358,7 @@ IF have_outstanding ;
             name = "cleared_$row.id"
             value = row.id
             checked = row.cleared
-            "data-dojo-type" = "lsmb/PublishCheckBox"
-                        "data-dojo-props" = "topic:'ui/reconciliation/report/cleared_" _ row.id _ "'"
+            topic = 'ui/reconciliation/report/cleared_' _ row.id
             };
                     END %]
                 </td>
@@ -382,6 +393,11 @@ IF have_outstanding ;
     type = "hidden",
     value = report_id,
 } %]
+[% INCLUDE input element_data = {
+    name = "workflow_id",
+    type = "hidden",
+    value = workflow_id,
+} %]
 [% IF NOT submitted %]
 [% INCLUDE select element_data = {
     name = "line_order",
@@ -393,25 +409,27 @@ IF have_outstanding ;
     class = 'sort'
 } %]
 [% INCLUDE button element_data = {
-    name = "action",
+    name = "__action",
     text = text('Update'),
     value = 'update_recon_set',
     class = "submit"
 } %]
 [% INCLUDE button element_data = {
-        name = "action"
+        name = "__action"
         text = text('Select All') #'
        value = 'select_all_recons'
        class = 'submit'
 } %]
 [% INCLUDE button element_data = {
-    name = "action",
+    name = "__action",
     text = text('Save'),
     value = 'save_recon_set',
     class = "submit"
+'data-lsmb-doing' = text('Saving...')
+'data-lsmb-done' = text('Saved')
 } %]
 [% INCLUDE button element_data = {
-    name = "action",
+    name = "__action",
     text = text('Submit'),
     value = 'submit_recon_set',
     disabled = submit_enabled && !check.unapproved_reports ? 'false' : 'true',
@@ -420,26 +438,32 @@ IF have_outstanding ;
 [% END %]
 [% IF submitted AND NOT approved AND can_approve %]
 [% INCLUDE button element_data = {
-    name = "action",
+    name = "__action",
     text = text('Approve'),
     value = 'approve',
     disabled = submit_enabled ? 'false' : 'true',
     class = "submit"
+'data-lsmb-doing' = text('Approving...')
+'data-lsmb-done' = text('Approved')
 };
 INCLUDE button element_data = {
-    name = "action",
+    name = "__action",
     text = text('Reject'),
     value = 'reject',
     class = "submit"
+'data-lsmb-doing' = text('Rejecting...')
+'data-lsmb-done' = text('Rejected')
 } %]
 [% END %]
 [% IF NOT approved %]
 [% INCLUDE button element_data = {
-        name = "action"
+        name = "__action"
         text = text('Delete')
        value = 'delete_report'
         type = 'submit'
        class = 'submit'
+'data-lsmb-doing' = text('Deleting...')
+'data-lsmb-done' = text('Deleted')
 } %]
 [% END %]
 </form>
@@ -449,7 +473,7 @@ INCLUDE button element_data = {
      file_class=9
      files=files
      file_links=file_links
-     callback='recon.pl?action=display_report&report_id=' _ report_id
+     callback='recon.pl?__action=display_report&report_id=' _ report_id
 };
 -%]
 </div>

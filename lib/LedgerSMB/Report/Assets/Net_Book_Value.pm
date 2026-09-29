@@ -9,7 +9,7 @@ Report
 =head1 SYNPOSIS
 
  my $report = LedgerSMB::Report::Assets::Net_Book_Value->new(%$request);
- $report->render($request);
+ $report->render();
 
 =head1 DESCRIPTION
 
@@ -71,7 +71,7 @@ sub columns {
 
           {type => 'href',
          col_id => 'tag',
-      href_base => 'asset.pl?action=asset_edit&id=',
+      href_base => 'asset.pl?__action=asset_edit&id=',
            name =>  $self->Text('Tag'),},
 
           {type => 'text',

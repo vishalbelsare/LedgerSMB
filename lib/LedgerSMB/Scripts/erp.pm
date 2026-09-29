@@ -18,21 +18,20 @@ This script contains the request handlers for returning the SPA.
 use strict;
 use warnings;
 
-use LedgerSMB::Template::UI;
 
-=item root
+=item __default
 
 Displays the root document.
 
 =cut
 
-sub root {
+sub __default {
     my ($request) = @_;
 
     $request->{title} = "LedgerSMB $request->{version} -- ".
     "$request->{login} -- $request->{company}";
 
-    my $template = LedgerSMB::Template::UI->new_UI;
+    my $template = $request->{_wire}->get('ui');
     return $template->render($request, 'main', $request);
 }
 

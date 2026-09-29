@@ -48,13 +48,11 @@
 package lsmb_legacy;
 use LedgerSMB::GL;
 use LedgerSMB::PE;
-use LedgerSMB::Template::UI;
 use LedgerSMB::Setting::Sequence;
 use LedgerSMB::Legacy_Util;
-use LedgerSMB::DBObject::Draft;
-use LedgerSMB::DBObject::TransTemplate;
+use LedgerSMB::Num2text;
 
-require "old/bin/arap.pl";
+require "old/bin/arap.pl"; # for: Schedule action
 
 # end of main
 
@@ -89,15 +87,39 @@ require "old/bin/arap.pl";
 
 sub edit_and_save {
     check_balanced($form);
-    my $draft = LedgerSMB::DBObject::Draft->new(%$form);
-    $draft->delete();
+    $form->call_procedure(funcname=>'draft_delete', args => [ $form->{id} ]);
     GL->post_transaction( \%myconfig, \%$form, $locale);
+    if ($form->{workflow_id}) {
+        my $wf = $form->{_conn}->workflows->fetch(
+            'GL', $form->{workflow_id}
+            );
+        $wf->context->param( transdate => $form->{transdate} );
+        $wf->execute_action( $form->{__action} );
+    }
+    edit();
+}
+
+sub save_info {
+    GL->save_notes( \%myconfig, \%$form, $locale);
+    if ($form->{workflow_id}) {
+        my $wf = $form->{_conn}->workflows->fetch(
+            'GL', $form->{workflow_id}
+            );
+        $wf->context->param( transdate => $form->{transdate} );
+        $wf->execute_action( $form->{__action} );
+    }
     edit();
 }
 
 sub approve {
-    my $draft = LedgerSMB::DBObject::Draft->new(%$form);
-    $draft->approve();
+    my $wf = $form->{_conn}->workflows->fetch(
+        'GL', $form->{workflow_id}
+        );
+    die q|No workflow found to approve| unless $wf;
+
+    $wf->context->param( transdate => $form->{transdate} );
+    $wf->execute_action( $form->{__action} );
+
     if ($form->{callback}){
         print "Location: $form->{callback}\n";
         print "Status: 302 Found\n\n";
@@ -107,29 +129,40 @@ sub approve {
                 . qq|here</a>.</body></html>|;
 
     } else {
-        $form->info($locale->text('Draft Posted'));
+        new();
     }
 }
 
-
 sub new {
-     for my $row (0 .. $form->{rowcount}){
-         for my $fld(qw(accno projectnumber acc debit credit source memo)){
+    for my $row (0 .. $form->{rowcount}){
+        for my $fld (
+            qw(accno projectnumber acc debit credit source memo )
+            ) {
             delete $form->{"${fld}_${row}"};
-         }
-     }
-     delete $form->{description};
-     delete $form->{reference};
-     delete $form->{rowcount};
-     delete $form->{id};
-     add();
+        }
+    }
+    for my $fld (
+        qw(description reference rowcount id workflow_id
+           notes reversing reversing_reference )
+        ) {
+        delete $form->{$fld};
+    }
+    add();
 }
 
 sub copy_to_new {
-     delete $form->{reference};
-     delete $form->{id};
-     delete $form->{approved};
-     update();
+    if ($form->{workflow_id}) {
+        my $wf = $form->{_conn}->workflows->fetch(
+            'GL', $form->{workflow_id}
+            );
+        $wf->context->param( transdate => $form->{transdate} );
+        $wf->execute_action( $form->{__action} );
+    }
+    delete $form->{reference};
+    delete $form->{id};
+    delete $form->{approved};
+    delete $form->{workflow_id};
+    update();
 }
 
 sub add {
@@ -138,7 +171,7 @@ sub add {
 
     my $transfer
         = ($form->{transfer}) ? "&transfer=$form->{transfer}" : '';
-    $form->{callback} = "$form->{script}?action=add$transfer"
+    $form->{callback} = "$form->{script}?__action=add$transfer"
       unless $form->{callback};
 
     if (!$form->{rowcount}){
@@ -151,6 +184,126 @@ sub add {
 
 }
 
+
+sub _reverse_amounts {
+    # swap debits and credits
+    for my $rownum (0 .. $form->{rowcount}) {
+        my $credit = $form->{"credit_$rownum"};
+        my $credit_fx = $form->{"credit_fx_$rownum"};
+        $form->{"credit_$rownum"} = $form->{"debit_$rownum"};
+        $form->{"credit_fx_$rownum"} = $form->{"debit_fx_$rownum"};
+        $form->{"debit_$rownum"} = $credit;
+        $form->{"debit_fx_$rownum"} = $credit_fx;
+    }
+}
+
+sub reverse {
+    $form->{title}     = "Reverse";
+    if ($form->{workflow_id}) {
+        my $wf = $form->{_conn}->workflows->fetch(
+            'GL', $form->{workflow_id}
+            );
+        $wf->context->param( transdate => $form->{transdate} );
+        $wf->execute_action( $form->{__action} );
+    }
+
+    &create_links; # runs GL->transaction()
+    _reverse_amounts();
+
+    $form->{reversing} = delete $form->{id};
+    $form->{reversing_reference} = $form->{reference};
+    delete $form->{approved};
+    delete $form->{workflow_id};
+
+    display_form();
+}
+
+
+sub post_reversing {
+    # we should save only the reference, sequence, transdate, description and notes.
+
+    $form->error(
+        $locale->text('Cannot post transaction for a closed period!') )
+        if ( $transdate and $form->is_closed( $transdate ) );
+    if (not $form->{id}) {
+        do {
+            local $form->{id} = $form->{reversing};
+
+            # save data we want to use from the posted form,
+            # not from the reversed transaction.
+            local $form->{reversing};
+            local $form->{notes};
+            local $form->{description};
+            local $form->{reference};
+            local $form->{reversing_reference} = $form->{reference};
+            local $form->{approved};
+            local $form->{workflow_id};
+
+            &create_links; # create_links overwrites 'reversing'
+        };
+        my $wf = $form->{_conn}->workflows->create(
+            'GL',
+            {
+                'transdate' => $form->{transdate},
+                'batch-id' => $form->{batch_id},
+                'table_name' => 'gl',
+                'reversing' => $form->{reversing}
+            });
+        $form->{workflow_id} = $wf->id;
+        $wf->execute_action( $form->{__action} );
+
+        # Why do I not need _reverse_amounts here???
+        # _reverse_amounts();
+        GL->post_transaction( \%myconfig, \%$form, $locale);
+        $form->call_procedure( funcname=>'draft_approve',
+                               args => [ $form->{id} ]);
+        $form->{approved} = 1;
+
+        my $query = q{UPDATE transactions SET reversing = ? WHERE id = ?};
+        $form->{dbh}->do(
+            $query,
+            {},
+            $form->{reversing},
+            $form->{id})
+            or $form->dberror($query);
+    }
+    else {
+        my $query = <<~'QUERY';
+        UPDATE gl
+           SET reference = ?,
+               transdate = ?,
+               notes = ?
+         WHERE id = ?
+        QUERY
+
+        $form->{dbh}->do(
+            $query,
+            {},
+            $form->{reference},
+            $form->{description},
+            $form->{transdate},
+            $form->{notes},
+
+            $form->{id})
+            or $form->dberror($query);
+
+        $query = <<~'QUERY';
+        UPDATE transactions
+           SET description = ?
+         WHERE id = ?
+        QUERY
+
+        $form->{dbh}->do(
+            $query,
+            {},
+            $form->{description},
+
+            $form->{id})
+            or $form->dberror($query);
+    }
+
+    display_form();
+}
 
 sub display_form
 {
@@ -166,12 +319,6 @@ sub display_form
     $form->open_form;
     my ($init) = @_;
     # Form header part begins -------------------------------------------
-    if ($form->{all_department}){
-        unshift @{ $form->{all_department} }, {};
-    }
-    if ($form->{all_project}){
-       unshift @{ $form->{all_project} }, {};
-    }
     $title = $locale->maketext($form->{title});
     if ( $form->{transfer} ) {
         $form->{title} = $locale->text("[_1] Cash Transfer Transaction", $title);
@@ -196,10 +343,22 @@ sub display_form
                $form->{colrownotes}=0;
     }
 
-    if (!defined $form->{approved}){
-        $form->{approved} = '1';
+    my $wf;
+    if($form->{workflow_id}) {
+        $wf = $form->{_conn}->workflows->fetch( 'GL', $form->{workflow_id} );
     }
-
+    else {
+        $wf = $form->{_conn}->workflows->create(
+            'GL',
+            {
+                'batch-id' => $form->{batch_id},
+                'table_name' => 'gl',
+                'reversing' => $form->{reversing}
+            });
+        $form->{workflow_id} = $wf->id;
+    }
+    $wf->context->param( transdate => $form->{transdate} );
+    $form->{status} = $wf->state;
     $focus = ( $form->{focus} ) ? $form->{focus} : "debit_$form->{rowcount}";
     our %hiddens = (
         'direction' => $form->{direction},
@@ -214,6 +373,9 @@ sub display_form
         'callback' => $form->{callback},
         'form_id' => $form->{form_id},
         'separate_duties' => $form->{separate_duties},
+        'reversing' => $form->{reversing},
+        'reversing_reference' => $form->{reversing_reference},
+        'workflow_id' => $form->{workflow_id}
     );
 
 
@@ -224,84 +386,54 @@ sub display_form
 
     #Form footer  Begins------------------------------------------
 
-  for (qw(totaldebit totalcredit)) {
-      $form->{$_} =
-    $form->format_amount( \%myconfig, $form->{$_}, LedgerSMB::Setting->new(%$form)->get('decimal_places'), "0" );
-  }
+    $form->{_setting_decimal_places} //= $form->get_setting('decimal_places');
+    for (qw(totaldebit totalcredit)) {
+        $form->{$_} =
+            $form->format_amount( \%myconfig, $form->{$_},
+                                  $form->{_setting_decimal_places}, "0" );
+    }
 
   $transdate = $form->datetonum( \%myconfig, $form->{transdate} );
   my @buttons;
-  if ( !$form->{readonly} ) {
-      my $i;
+    %button_types = (
+        print => 'lsmb/PrintButton'
+        );
+    for my $action_name ( $wf->get_current_actions ) {
+        my $action = $wf->get_action( $action_name );
 
-      $i=1;
-      @buttons = (
-          { action => 'update', key => 'U', value => $locale->text('Update') },
-          { action => 'post', key => 'O', value =>
-                ($form->{separate_duties}
-                 ? $locale->text('Save') : $locale->text('Post')),
-            class => 'post' },
-          { action => 'approve', key => 'S', value => $locale->text('Post'),
-            class => 'post' },
-          { action => 'edit_and_save', key => 'V',
-            value => $locale->text('Save Draft') },
-          { action => 'save_temp', key   => 'T',
-            value => $locale->text('Save Template') },
-          { action => 'save_as_new',
-            key => 'N', value => $locale->text('Save as new') },
-          { action => 'schedule',
-            key => 'H', value => $locale->text('Schedule') },
-          { action => 'new',
-            key => 'N', value => $locale->text('New') },
-          { action => 'copy_to_new',
-            key => 'C', value => $locale->text('Copy to New') },
-          );
+        next if ($action->ui // '') eq 'none';
+        push @buttons, {
+            ndx   => $action->order,
+            name  => $action->name,
+            text => $locale->maketext($action->text),
+            doing => ($action->doing ? $locale->maketext($action->doing) : ''),
+            done  => ($action->done ? $locale->maketext($action->done) : ''),
+            type  => $button_types{$action->ui},
+            tooltip => ($action->short_help ? $locale->maketext($action->short_help) : '')
+        };
+    }
 
-      %a = ();
-      $a{'save_temp'} = 1;
-
-      if ( $form->{id}) {
-          for ( 'new', 'save_as_new', 'schedule', 'copy_to_new' ) {
-              $a{$_} = 1;
-          }
-          if (!$form->{approved} && !$form->{batch_id}) {
-            #   Need to check for draft_modify and draft_post
-            if ($form->is_allowed_role(['draft_post'])) {
-                $a{approve} = 1;
-            }
-            if ($form->is_allowed_role(['draft_modify'])) {
-                $a{edit_and_save} = 1;
-            }
-              $a{update} = 1;
-          }
-      } else {
-          $a{'update'} = 1;
-          if ( not $form->is_closed( $transdate ) ) {
-              for ( 'post', 'schedule' ) { $a{$_} = 1 }
-          }
-      }
-
-      $i=1;
-      @buttons = map {
-          {
-              name => 'action',
-              value => $_->{action},
-              text => $_->{value},
-              type => 'submit',
-              class => $_->{class} // 'submit',
-              accesskey => $_->{key},
-              order => $i++
-          }
-      }
-      grep { $a{$_->{action}} } @buttons;
-  }
+    @buttons = map {
+        {
+            name => '__action',
+            value => $_->{name},
+            text => $_->{text},
+            type => 'submit',
+            class => $_->{class} // 'submit',
+            order => $_->{ndx},
+            'data-lsmb-doing' => $_->{doing},
+            'data-lsmb-done' => $_->{done},
+            'data-dojo-type' => $_->{type} // 'dijit/form/Button',
+            'data-dojo-props' => $_->{type} ? 'minimalGET: false' : '',
+        }
+    } sort { $a->{ndx} <=> $b->{ndx} } @buttons;
 
   $form->{recurringset}=0;
   if ( $form->{recurring} ) {
       $form->{recurringset}=1;
   }
 
-    my $template = LedgerSMB::Template::UI->new_UI;
+    my $template = $form->{_wire}->get('ui');
     LedgerSMB::Legacy_Util::render_psgi(
         $form,
         $template->render($form, 'journal/journal_entry',
@@ -314,20 +446,16 @@ sub display_form
 }
 
 
-sub save_temp {
-    my ($department_name, $department_id) = split/--/, $form->{department};
+sub save_as_template {
 
-    my $data = {
-        dbh => $form->{dbh},
-        department_id => $department_id,
-        reference => $form->{reference},
-        description => $form->{description},
-        department_id => $department_id,
-        post_date => $form->{transdate},
-        type => 'gl',
-        journal_lines => [],
-    };
-
+    if ($form->{workflow_id}) {
+        my $wf = $form->{_conn}->workflows->fetch(
+            'GL', $form->{workflow_id}
+            );
+        $wf->context->param( transdate => $form->{transdate} );
+        $wf->execute_action( $form->{__action} );
+    }
+    my @lines;
     for my $iter (0 .. $form->{rowcount}){
         if ($form->{"accno_$iter"} and
             (($form->{"credit_$iter"} != 0) or
@@ -339,18 +467,43 @@ sub save_temp {
                  ( $form->{"debit_$iter"} * -1 );
              my $amount_fx = $form->{"credit_fx_$iter"} ||
                  ( $form->{"debit_fx_$iter"} * -1 );
-             push @{$data->{journal_lines}},
-                  {accno => $acc_id,
-                   amount => $amount,
-                   amount_fx => $amount_fx,
-                   curr => $form->{"curr_$iter"},
-                   cleared => 'false',
-                  };
+             push @lines, {
+                 accno => $acc_id,
+                 amount => $form->parse_amount( \%my_config, $amount),
+                 amount_fx => $form->parse_amount( \%my_config, $amount_fx),
+                 curr => $form->{"curr_$iter"},
+             };
         }
     }
 
-    $template = LedgerSMB::DBObject::TransTemplate->new(%$data);
-    $template->save;
+    my ($journal) = $form->call_procedure(
+        funcname => 'journal__add',
+        args     => [
+            $form->{reference},
+            $form->{description},
+            1, # GJ journal
+            $form->{transdate},
+            0,
+            1,
+            $form->{curr_0} ###BUG: Sets a currency that doesn't exist on the GL screen!
+        ]);
+    for my $line (@lines) {
+        my ($acc) = $form->call_procedure(
+            funcname => 'account__get_from_accno',
+            args     => [ $line->{accno} ]);
+        $form->call_procedure(
+            funcname => 'journal__add_line',
+            args     => [
+                $acc->{id},
+                $journal->{id},
+                $line->{amount},
+                $line->{amount_fx},
+                $line->{curr},
+                'false',
+                undef, ###BUG: discards the 'memo' text!
+                undef ###BUG: discards selected reporting units!
+            ]);
+    }
     $form->redirect( $locale->text('Template Saved!') );
 }
 
@@ -360,6 +513,7 @@ sub display_row {
   $form->{totaldebit}  = 0;
   $form->{totalcredit} = 0;
 
+    $form->{_setting_decimal_places} //= $form->get_setting('decimal_places');
     for my $i ( 0 .. $form->{rowcount} ) {
 
         my $temphash1;
@@ -372,21 +526,20 @@ sub display_row {
         $temphash1->{fx_transactionset} = 1;
         if (!defined $form->{"accno_$i"} || ! $form->{"accno_$i"}) {
                   $temphash1->{accnoset}=0;   #use  @{ $form->{all_accno} }
-                  $temphash1->{projectset}=0; #use  @{ $form->{all_project} }
                   $temphash1->{fx_transactionset}=0;    #use checkbox and value=1 if transfer=1
 
         }
         else {
             $form->{"debit_$i"} =
-                LedgerSMB::PGNumber->from_input($form->{"debit_$i"});
+                $form->parse_amount( \%myconfig,$form->{"debit_$i"});
             $form->{"credit_$i"} =
-                LedgerSMB::PGNumber->from_input($form->{"credit_$i"});
+                $form->parse_amount( \%myconfig,$form->{"credit_$i"});
             $form->{totaldebit}  += ($form->{"debit_$i"} // 0);
             $form->{totalcredit} += ($form->{"credit_$i"} // 0);
 
             for (qw(debit debit_fx credit credit_fx)) {
                 $form->{"${_}_$i"} = ($form->{"${_}_$i"})
-                    ? $form->format_amount( \%myconfig, $form->{"${_}_$i"}, LedgerSMB::Setting->new(%$form)->get('decimal_places') )
+                    ? $form->format_amount( \%myconfig, $form->{"${_}_$i"}, $form->{_setting_decimal_places} )
                     : "";
                 $temphash1->{$_} = $form->{"${_}_$i"};
             }
@@ -426,16 +579,7 @@ sub edit {
 
     $form->all_business_units($form->{transdate}, undef, 'GL');
 
-    # readonly
-    if ( !$form->{readonly} ) {
-        $form->{readonly} = 1
-            if ($myconfig{acs}
-                and $myconfig{acs} =~ /General Ledger--Add Transaction/);
-    }
     $form->{title} = "Edit";
-    if ($form->{department_id}) {
-         $form->{department}=$form->{departmentdesc}."--".$form->{department_id};
-    }
 
     my $i = 0;
     my $minusOne = LedgerSMB::PGNumber->new(-1); #HV make sure BigFloat stays BigFloat
@@ -478,62 +622,15 @@ sub create_links {
 
 }
 
-sub gl_subtotal_tt {
-
-    my %column_data;
-    $subtotaldebit =
-      $form->format_amount( \%myconfig, $subtotaldebit, LedgerSMB::Setting->new(%$form)->get('decimal_places'), " " );
-    $subtotalcredit =
-      $form->format_amount( \%myconfig, $subtotalcredit, LedgerSMB::Setting->new(%$form)->get('decimal_places'), " " );
-
-    for (@column_index) { $column_data{$_} = " " }
-    $column_data{class} = 'subtotal';
-
-    $column_data{debit} = $subtotaldebit;
-    $column_data{credit} = $subtotalcredit;
-
-    $subtotaldebit  = 0;
-    $subtotalcredit = 0;
-
-    $sameitem = $ref->{ $form->{sort} };
-
-    return \%column_data;
-}
-
-sub gl_subtotal {
-    $subtotaldebit =
-      $form->format_amount( \%myconfig, $subtotaldebit, LedgerSMB::Setting->new(%$form)->get('decimal_places'), "&nbsp;" );
-    $subtotalcredit =
-      $form->format_amount( \%myconfig, $subtotalcredit, LedgerSMB::Setting->new(%$form)->get('decimal_places'), "&nbsp;" );
-
-    for (@column_index) { $column_data{$_} = "<td>&nbsp;</td>" }
-
-    $column_data{debit} =
-      "<th align=right class=listsubtotal>$subtotaldebit</td>";
-    $column_data{credit} =
-      "<th align=right class=listsubtotal>$subtotalcredit</td>";
-
-    print "<tr class=listsubtotal>";
-    for (@column_index) { print "$column_data{$_}\n" }
-    print "</tr>";
-
-    $subtotaldebit  = 0;
-    $subtotalcredit = 0;
-
-    $sameitem = $ref->{ $form->{sort} };
-
-}
-
-
 sub update {
     &create_links;
-     my $min_lines = $form->get_setting('min_empty');
-     $form->open_form unless $form->check_form;
+    my $min_lines = $form->get_setting('min_empty');
+    $form->open_form unless $form->check_form;
 
-     $form->{transdate} = LedgerSMB::PGDate->from_input($form->{transdate})->to_output();
-     if ( $form->{transdate} ne $form->{oldtransdate} ) {
-         $form->{oldtransdate} = $form->{transdate};
-     }
+    $form->{transdate} = $form->parse_date( \%myconfig, $form->{transdate} )->to_output();
+    if ( $form->{transdate} ne $form->{oldtransdate} ) {
+        $form->{oldtransdate} = $form->{transdate};
+    }
 
     $form->all_business_units($form->{transdate}, undef, 'GL');
     GL->get_all_acc_dep_pro( \%myconfig, \%$form );
@@ -603,7 +700,10 @@ sub update {
 }
 
 
-
+sub post_and_approve {
+    post();
+    $form->call_procedure(funcname=>'draft_approve', args => [ $form->{id} ]);
+}
 
 sub post {
     if ($form->{id}){
@@ -614,6 +714,13 @@ sub post {
         $form->finalize_request();
     };
     $form->isblank( "transdate", $locale->text('Transaction Date missing!') );
+    if ($form->{workflow_id}) {
+        my $wf = $form->{_conn}->workflows->fetch(
+            'GL', $form->{workflow_id}
+            );
+        $wf->context->param( transdate => $form->{transdate} );
+        $wf->execute_action( $form->{__action} );
+    }
 
     $transdate = $form->datetonum( \%myconfig, $form->{transdate} );
 
@@ -634,14 +741,17 @@ sub post {
 
 }
 
-sub delete {
-    $form->error($locale->text('Cannot delete posted transaction'))
-       if ($form->{approved});
-    my $draft = LedgerSMB::DBObject::Draft->new(%$form);
-    $draft->delete();
+sub del {
+    my $wf = $form->{_conn}->workflows->fetch(
+        'GL', $form->{workflow_id}
+        );
+    die 'No workflow to mark deleted' unless $wf;
+    $wf->context->param( transdate => $form->{transdate} );
+    $wf->execute_action( $form->{__action} );
+
     delete $form->{id};
     delete $form->{reference};
-    add();
+    new();
 }
 
 
@@ -671,9 +781,95 @@ sub check_balanced {
 }
 
 sub save_as_new {
-    for (qw(id printed emailed)) { delete $form->{$_} }
-    $form->{approved} = 0;
+    for (qw(id)) { delete $form->{$_} }
+    if ($form->{workflow_id}) {
+        my $wf = $form->{_conn}->workflows->fetch(
+            'GL', $form->{workflow_id}
+            );
+        $wf->context->param( transdate => $form->{transdate} );
+        $wf->execute_action( $form->{__action} );
+    }
+    delete $form->{approved};
     &post;
+}
+
+sub print {
+    # Get all the business units required to render
+    $form->all_business_units($form->{transdate}, undef, 'GL');
+    # Get the actual je transaction
+    &display_row(@_);
+
+    my $templateName = "print_journal_entry";
+    my $filename = "Journal_Entry_" . $form->{id} . ".html";
+    $form->{print_title} = "Journal Entry Transaction";
+
+    if($form->{transfer}) {
+        $templateName = "print_cash_transfer";
+        $filename = "Cash_Transfer_" . $form->{id} . ".html";
+        $form->{print_title} = "Transfer Voucher";
+
+        my $amount = $form->{"debit_0"} eq "" ? $form->{"credit_0"} : $form->{"debit_0"};
+        my $amount_fx = $form->{"debit_fx_0"} eq "" ? $form->{"credit_fx_0"} : $form->{"debit_fx_0"};
+
+        $form->{exchange_rate} = $form->parse_amount( \%myconfig,$amount) / $form->parse_amount( \%myconfig,$amount_fx);
+        $form->{exchange_rate} = $form->format_amount( \%myconfig, $form->{exchange_rate},
+                                                       $form->get_setting('decimal_places') );
+
+        $form->{curr} = $form->{"curr_0"};;
+
+        $form->{amount} = $form->{totaldebit};
+        $form->{text_amount} =
+            LedgerSMB::Num2text::cardinal(
+                $form->{_locale},
+                $form->parse_amount( \%myconfig,$form->{amount}));
+    } else {
+        # render the code--description for all business unit instead of id
+        for my $drow (@displayrows) {
+            for my $cls (@{$form->{bu_class}}) {
+                if(scalar @{$form->{b_units}->{$cls->{id}}}) {
+                    for my $bu (@{$form->{b_units}->{"$cls->{id}"}}) {
+                        if ($drow->{"b_unit_$cls->{id}"} eq $bu->{id}) {
+                            $drow->{"b_unit_$cls->{id}"} = $bu->{control_code} . '--' . $bu->{description};
+                            last;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    my %copy_settings = (
+        email => 'company_email',
+        company => 'company_name',
+        businessnumber => 'businessnumber',
+        address => 'company_address',
+        tel => 'company_phone',
+        fax => 'company_fax',
+    );
+    while (my ($key, $setting) = each %copy_settings ) {
+        $form->{$key} = $form->get_setting($setting);
+    }
+
+    my %output_options = (
+        filename => $filename
+    );
+    my $template = LedgerSMB::Template->new(
+        user => \%myconfig,
+        template => $templateName,
+        dbh => $form->{dbh},
+        path => 'DB',
+        locale => $locale,
+        output_options => \%output_options,
+        formatter_options => $form->formatter_options,
+        format_plugin => $form->{_wire}->get( 'output_formatter' )->get( 'HTML' ),
+    );
+    $template->render(
+        {
+            form => $form,
+            displayrows => \@displayrows
+        }
+    );
+    LedgerSMB::Legacy_Util::output_template($template, $form);
 }
 
 1;

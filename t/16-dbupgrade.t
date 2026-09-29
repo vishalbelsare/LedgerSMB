@@ -8,17 +8,13 @@ LedgerSMB::Database::Upgrade
 
 use Test2::V0;
 use Test2::Tools::Compare qw{bag item end};
-use Carp::Always;
 use Log::Log4perl qw(:easy);
 Log::Log4perl->easy_init($OFF);
 
 use LedgerSMB::Database::Upgrade;
-use LedgerSMB::Sysconfig;
 
 use DBI;
 use DBD::Mock::Session;
-
-LedgerSMB::Sysconfig->initialize();
 
 package LedgerSMB::Test::Database {
     use Carp;

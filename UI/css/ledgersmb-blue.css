@@ -1,8 +1,9 @@
 /* stylesheet for ledger-smb, blue theme */
 
-@import url("ledgersmb-common.css");
+@import url("system/ledgersmb-common.css");
 
 /* CSS3 Variables */
+
 :root {
     /* Backgrounds */
     --a-hover-bg-clr: initial;
@@ -10,7 +11,6 @@
     --body-admin-bg-clr: #fbffe7;
     --body-app-login-bg: initial;
     --body-login-bg: #5a7d9b;
-    --body-menu-bg: #f0f0f0;
     --body-menu-bg: #f0f0f0;
     --body-menu-ul-bg-clr: initial;
     --cornerlogo-bg: initial;
@@ -64,7 +64,6 @@
     --body-admin-bg-clr: #fbffe7;
     --body-app-login-bg: initial;
     --body-login-bg: #5a7d9b;
-    --body-menu-bg: #f0f0f0;
     --body-menu-ul-bg-clr: initial;
     --cornerlogo-bg: initial;
     --div-autocomplete-bg-clr: initial;
@@ -74,12 +73,14 @@
     --input-remove--before-bg: initial;
     --input-remove-checked--before-bg: initial;
     --listheading-bg-clr: #6495ed;
+    --listheading-clr: white;
     --listrow0-bg-clr: #f5f5f5;
     --listrow0-hover-bg-clr: #e8e8e8;
     --listrow1-bg-clr: #dedede;
     --listrow1-hover-bg-clr: #e8e8e8;
     --listsubtotal-bg-clr: #366;
     --listtop-bg-clr: black;
+    --listtop-clr: white;
     --listtotal-bg-clr: black;
     --menuOut-bg-clr: initial;
     --menuOut-a-bg-clr: initial;
@@ -101,6 +102,7 @@
     --td-cleared-past-bg: initial;
     --textarea-bg-clr: initial;
     --top_menu-bg: initial;
+    --textBox-ReadOnly-color: initial;
     --tr-active-bg-clr: initial;
     --tr-record-bg-clr: initial;
     --tr-suspect-bg-clr: initial;

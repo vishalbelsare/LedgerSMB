@@ -3,6 +3,7 @@
 %]
 <body class="lsmb [% dojo_theme %]">
 <div id="email">
+<a href="[% callback %]">&lt;&lt; [% text('Return') %]</a>
 <div class="listtop">[% text('Compose e-mail') %]</div>
 <form data-dojo-type="lsmb/Form"
       name="email"
@@ -77,11 +78,12 @@
 [%
 
 FOR action IN actions ;
+NEXT IF action.value == 'attach';
 PROCESS button element_data = {
 name = 'wf_action'
-text = maketext(action)
-value = action
-id = 'wf-action-' _ action
+text = maketext(action.text)
+value = action.value
+id = 'wf-action-' _ action.value
 };
 END
 
@@ -97,7 +99,7 @@ IF attachments.size > 0 ;
 FOR att IN attachments ;
 %]
    <tr><td><a
-        href="file.pl?action=get&amp;file_class=8&amp;id=[% att.id %]"
+        href="file.pl?__action=get&amp;file_class=8&amp;id=[% att.id %]"
         target="_blank"
         download="[% att.file_name %]">[% att.file_name %]</a></td><td>[% att.description %]</td></tr>
 [%
@@ -105,14 +107,26 @@ END ; # FOR
 '</table>';
 END ; # IF
 
-IF actions.grep('^Attach$').size > 0 ;
+
+have_attach = 0;
+FOR action IN actions ;
+  have_attach = have_attach OR action.value == 'attach';
+END ;
+
+IF have_attach ;
 %]
 
-<div style="margin-top:2em">
+<div style="margin-top:1em">
   <input type="file"
          name="attachment_content"
-         id="attachment-content"
-         >
+         id="attachment-content">
+  <button
+    id="wf-action-attach"
+    name="wf-action"
+    value="attach"
+    data-dojo-type="dijit/form/Button">
+    [% text('Attach') %]
+  </button>
 </div>
 
 [%
@@ -151,7 +165,7 @@ END ; # IF
 
   <input type="hidden" name="callback" value="[% callback %]">
   <input type="hidden" name="id" value="[% id %]">
-  <input type="hidden" name="action" value="render">
+  <input type="hidden" name="__action" value="render">
 </form>
 </div>
 </body>

@@ -73,7 +73,7 @@ sub columns {
    {  col_id => 'label',
         name =>  $self->Text('Label'),
         type => 'href',
-   href_base => 'asset.pl?action=edit_asset_class&id=', },
+   href_base => 'asset.pl?__action=edit_asset_class&id=', },
   {   col_id => 'method',
         name => $self->Text('Depreciation Method'),
         type => 'text' },
@@ -95,10 +95,10 @@ Label and method
 sub header_lines {
     my ($self) = @_;
     return [
-       {name => 'label',
-        text => $self->Text('Label') },
-       {name => 'method',
-        text => $self->Text('Depreciation Method') },
+       {value => $self->label,
+        text  => $self->Text('Label') },
+       {value => $self->method,
+        text  => $self->Text('Depreciation Method') },
     ];
 }
 

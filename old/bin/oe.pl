@@ -43,15 +43,14 @@ package lsmb_legacy;
 
 use List::Util qw(max min);
 use LedgerSMB::OE;
+use LedgerSMB::IIAA;
 use LedgerSMB::IR;
 use LedgerSMB::IS;
+use LedgerSMB::Magic qw(OEC_SALES_ORDER OEC_PURCHASE_ORDER);
 use LedgerSMB::PE;
-use LedgerSMB::Setting;
 use LedgerSMB::Tax;
-use LedgerSMB::Template::UI;
 use LedgerSMB::Legacy_Util;
 
-use Workflow::Factory qw(FACTORY);
 
 require "old/bin/arap.pl";
 require "old/bin/io.pl";
@@ -77,7 +76,7 @@ sub add {
         $form->{vc}    = 'customer';
     }
 
-    $form->{callback} = "$form->{script}?action=add&type=$form->{type}&vc=$form->{vc}"
+    $form->{callback} = "$form->{script}?__action=add&type=$form->{type}&vc=$form->{vc}"
       unless $form->{callback};
 
     $form->{rowcount} = 0;
@@ -90,7 +89,7 @@ sub add {
 
 sub edit {
     if (not $form->{id} and $form->{workflow_id}) {
-        my $wf = FACTORY()->fetch_workflow( 'Order/Quote', $form->{workflow_id} );
+        my $wf = $form->{_conn}->workflows->fetch( 'Order/Quote', $form->{workflow_id} );
         $form->{id} = $wf->context->param( '_extra' )->{id};
         delete $form->{workflow_id};
     }
@@ -125,11 +124,17 @@ sub order_links {
 
 
     # create links
-    $form->create_links( module => "OE", # effectively 'none'
-             myconfig => \%myconfig,
-             vc => $form->{vc},
-             billing => 0,
-             job => 1 );
+    # $form->create_links( module => "OE", # effectively 'none'
+    #          myconfig => \%myconfig,
+    #          vc => $form->{vc},
+    #          billing => 0,
+    #          job => 1 );
+    $form->get_regular_metadata(
+        \%myconfig,
+        $form->{vc},
+        $form->{transdate},
+        1,
+    );
 
     # retrieve order/quotation
     OE->retrieve( \%myconfig, \%$form );
@@ -166,21 +171,22 @@ sub order_links {
 }
 
 sub prepare_order {
-
-    $form->{format}   = "postscript" if $myconfig{printer};
-    $form->{media}    = $myconfig{printer};
-    $form->{formname} = $form->{type};
+    my %args          = @_;
+    $form->{format}   //= "postscript" if $myconfig{printer};
+    $form->{media}    //= $myconfig{printer};
+    $form->{formname} //= $form->{type};
     $form->{sortby} ||= "runningnumber";
     $form->{currency} =~ s/ //g;
     $form->{oldcurrency} = $form->{currency};
 
     if ( $form->{id} ) {
 
-        for(
-          qw(ordnumber quonumber shippingpoint shipvia notes intnotes shiptoname shiptoaddress1 shiptoaddress2 shiptocity shiptostate shiptozipcode shiptocountry shiptocontact)
-          )
-        {
-            $form->{$_} = $form->quote( $form->{$_} );
+        unless ($args{unquoted}) {
+            for(qw(ordnumber quonumber shippingpoint shipvia notes intnotes
+                   shiptoname shiptoaddress1 shiptoaddress2 shiptocity
+                   shiptostate shiptozipcode shiptocountry shiptocontact)) {
+                $form->{$_} = $form->quote( $form->{$_} );
+            }
         }
 
         my $i;
@@ -221,8 +227,10 @@ sub prepare_order {
               $form->format_amount( \%myconfig, $form->{"qty_$i"} );
             $form->{"oldqty_$i"} = $form->{"qty_$i"};
 
-            for (qw(partnumber sku description unit)) {
-                $form->{"${_}_$i"} = $form->quote( $form->{"${_}_$i"} );
+            unless ($args{unquoted}) {
+                for (qw(partnumber sku description unit)) {
+                    $form->{"${_}_$i"} = $form->quote( $form->{"${_}_$i"} );
+                }
             }
             $form->{rowcount} = $i;
         }
@@ -231,29 +239,16 @@ sub prepare_order {
     $form->{oldtransdate} = $form->{transdate};
 
     if ( $form->{type} eq 'sales_quotation' ) {
-        if ( !$form->{readonly} ) {
-            $form->{readonly} = 1 if $myconfig{acs} =~ /Quotations--Quotation/;
-        }
-
         $form->{selectformname} =
           qq|<option value="sales_quotation">| . $locale->text('Quotation');
     }
 
     if ( $form->{type} eq 'request_quotation' ) {
-        if ( !$form->{readonly} ) {
-            $form->{readonly} = 1 if $myconfig{acs} =~ /Quotations--RFQ/;
-        }
-
         $form->{selectformname} =
           qq|<option value="request_quotation">| . $locale->text('RFQ');
     }
 
     if ( $form->{type} eq 'sales_order' ) {
-        if ( !$form->{readonly} ) {
-            $form->{readonly} = 1
-              if $myconfig{acs} =~ /Order Entry--Sales Order/;
-        }
-
         $form->{selectformname} =
           qq|<option value="sales_order">|
           . $locale->text('Sales Order') . qq|
@@ -263,11 +258,6 @@ sub prepare_order {
     }
 
     if ( $form->{type} eq 'purchase_order' ) {
-        if ( !$form->{readonly} ) {
-            $form->{readonly} = 1
-              if $myconfig{acs} =~ /Order Entry--Purchase Order/;
-        }
-
         $form->{selectformname} =
           qq|<option value="purchase_order">|
           . $locale->text('Purchase Order') . qq|
@@ -294,6 +284,45 @@ sub form_header {
     my $numberfld;
     my $status_div_id = $form->{type};
     $status_div_id =~ s/_/-/g;
+    my $wf;
+    my $class_id;
+    $form->{vc} = ( $form->{vc} eq 'customer' ) ? 'customer' : 'vendor';
+    if ( $form->{type} =~ /_order$/ ) {
+        $quotation = "0";
+        $ordnumber = "ordnumber";
+        if ($form->{vc} eq 'customer'){
+            $numberfld = "sonumber";
+            $class_id = 1;
+        } else {
+            $numberfld = "ponumber";
+            $class_id = 2;
+        }
+    }
+    else {
+        $quotation = "1";
+        $ordnumber = "quonumber";
+        if ( $form->{vc} eq 'customer' ) {
+            $numberfld = "sqnumber";
+            $class_id = OEC_QUOTATION;
+        } else {
+            $numberfld = "rfqnumber";
+            $class_id = OEC_RFQ;
+        }
+    }
+    if($form->{workflow_id}) {
+        $wf = $form->{_conn}->workflows->fetch( 'Order/Quote', $form->{workflow_id} );
+    }
+    else {
+        $wf = $form->{_conn}->workflows->create(
+            'Order/Quote',
+            {
+                'batch-id' => $form->{batch_id},
+                '_extra' => {
+                    oe_class_id => $class_id
+                }
+            });
+        $form->{workflow_id} = $wf->id;
+    }
     if ( $form->{type} =~ /_order$/ ) {
         $quotation = "0";
         $ordnumber = "ordnumber";
@@ -348,8 +377,8 @@ sub form_header {
             $exchangerate .=
                 qq|<th align=right>|
               . $locale->text('Exchange Rate')
-              . qq|</th><td>$form->{exchangerate}</td>
-      <input type=hidden name=exchangerate value=$form->{exchangerate}>
+              . qq|</th><td>$form->{exchangerate}
+      <input type=hidden name=exchangerate value=$form->{exchangerate}></td>
 |;
         }
         else {
@@ -392,16 +421,17 @@ sub form_header {
     }
 
     if ( $form->{type} !~ /_quotation$/ ) {
+        $form->{transdate} ||= 'today';
         $ordnumber = qq|
           <tr class="ordnumber-row">
         <th width=70% align=right nowrap>| . $locale->text('Order Number') . qq|</th>
                 <td><input data-dojo-type="dijit/form/TextBox" id=ordnumber name=ordnumber size=20 value="$form->{ordnumber}">
-                     $sequences</td>
-        <input type=hidden name=quonumber value="$form->{quonumber}">
+                     $sequences
+        <input type=hidden name=quonumber value="$form->{quonumber}"></td>
           </tr>
           <tr class="transdate-row">
         <th align=right nowrap>| . $locale->text('Order Date') . qq|</th>
-        <td><input class="date" data-dojo-type="lsmb/DateTextBox"name=transdate size=11 title="$myconfig{dateformat}" value="$form->{transdate}" id="transdate" data-dojo-props="defaultIsToday:true"></td>
+        <td><lsmb-date name=transdate size=11 title="$myconfig{dateformat}" value="$form->{transdate}" id="transdate"></lsmb-date></td>
           </tr>
           <tr class="reqdate-row">
         <th align=right nowrap=true>| . $locale->text('Required by') . qq|</th>
@@ -416,7 +446,7 @@ sub form_header {
 
         $n = ( $form->{creditremaining} < 0 ) ? "0" : "1";
 
-        if (LedgerSMB::Setting->new(%$form)->get('show_creditlimit')){
+        if ($form->get_setting('show_creditlimit')){
         $creditremaining = qq|
           <tr>
         <td></td>
@@ -471,8 +501,8 @@ sub form_header {
               . $locale->text('Quotation Number')
               . qq|</th>
         <td><input data-dojo-type="dijit/form/TextBox" id=quonumber name=quonumber size=20 value="$form->{quonumber}">
-                    $sequences</td>
-        <input type=hidden name=ordnumber value="$form->{ordnumber}">
+                    $sequences
+        <input type=hidden name=ordnumber value="$form->{ordnumber}"></td>
           </tr>
 |;
         }
@@ -481,8 +511,8 @@ sub form_header {
           <tr class="rfqnumber-row">
         <th width=70% align=right nowrap>| . $locale->text('RFQ Number') . qq|</th>
         <td><input data-dojo-type="dijit/form/TextBox" id=quonumber name=quonumber size=20 value="$form->{quonumber}">
-                    $sequences</td>
-        <input type=hidden name=ordnumber value="$form->{ordnumber}">
+                    $sequences
+        <input type=hidden name=ordnumber value="$form->{ordnumber}"></td>
           </tr>
 |;
 
@@ -516,17 +546,9 @@ sub form_header {
         }
         $vc = qq|<input data-dojo-type="dijit/form/TextBox" id=$form->{vc} name=$form->{vc} value="$form->{$form->{vc}}" size=35>
              <a id="new-contact" target="_blank"
-                 href="erp.pl?action=root#contact.pl?action=add&entity_class=$eclass">
+                 href="#contact.pl?__action=add&entity_class=$eclass">
                  [| . $locale->text('New') . qq|]</a>|;
     }
-
-    $department = qq|
-              <tr class="department-row">
-            <th align="right" nowrap>| . $locale->text('Department') . qq|</th>
-        <td colspan=3><select data-dojo-type="dijit/form/Select" name=department id=department>$form->{selectdepartment}</select>
-        </td>
-          </tr>
-| if $form->{selectdepartment};
 
     $employee = qq|
               <input type=hidden name=employee value="$form->{employee}">
@@ -554,16 +576,17 @@ sub form_header {
     }
 
     $i     = $form->{rowcount} + 1;
-    $focus = "partnumber_$i";
+    $focus = $form->{barcode} ? "barcode" : "partnumber_$i";
 
     $form->header;
 
     print qq|
-<body class="lsmb $form->{dojo_theme}" onLoad="document.forms[0].${focus}.focus()" />
+<body>
 | . $form->open_status_div($status_div_id) . qq|
 <form method="post"
       id="invoice"
       data-dojo-type="lsmb/Invoice"
+      data-lsmb-focus="${focus}"
       action="$form->{script}" >
 |;
 
@@ -572,10 +595,11 @@ sub form_header {
     }
     $form->hide_form(qw(entity_control_code meta_number tax_id address city zipcode state country));
     $form->hide_form(
-        qw(id type printed emailed vc title discount creditlimit creditremaining tradediscount business recurring form_id nextsub
+        qw(id type vc title discount creditlimit creditremaining tradediscount business recurring form_id nextsub
    lock_description)
     );
 
+    $form->get_shipto( $form->{shiptolocationid} );
     print qq|
 <table width=100%>
   <tr class=listtop>
@@ -590,18 +614,33 @@ sub form_header {
         <table width=100%>
           <tr>
         <th align=right>$vclabel</th>
-        <td colspan=3>$vc</td>
+        <td colspan=3>$vc
         <input type=hidden name=$form->{vc}_id value=$form->{"$form->{vc}_id"}>
-        <input type=hidden name="old$form->{vc}" value="$form->{"old$form->{vc}"}">
+        <input type=hidden name="old$form->{vc}" value="$form->{"old$form->{vc}"}"></td>
           </tr>
           $creditremaining
           $business
-          $department
           $exchangerate
           <tr class="shippingpoint-row">
-        <th align=right>| . $locale->text('Shipping Point') . qq|</th>
+        <th align=right nowrap>| . $locale->text('Shipping Point') . qq|</th>
         <td colspan=3><input data-dojo-type="dijit/form/TextBox" id=shippingpoint name=shippingpoint size=35 value="$form->{shippingpoint}"></td>
+          </tr>|;
+    print qq|
+          <tr>
+            <th align=right nowrap>| . $locale->text('Shipping Attn') . qq|</th>
+            <td><input name=shiptoattn id=shiptoattn data-dojo-type="dijit/form/TextBox" value="$form->{shiptoattn}"></td>
           </tr>
+          <tr>
+            <th align=right nowrap>| . $locale->text('Shipping Address') . qq|</th>
+            <td>$form->{shiptoaddress1} <br/>
+                $form->{shiptoaddress2} <br/>
+                $form->{shiptocity}, $form->{shiptostate} <br/>
+                $form->{shiptozipcode} <br/>
+                $form->{shiptocountry}
+                </td>
+          </tr>|
+        if $form->{vc} eq 'customer';
+    print qq|
           <tr class="shipvia-row">
         <th align=right>| . $locale->text('Ship via') . qq|</th>
         <td colspan=3><textarea data-dojo-type="dijit/form/Textarea" id="shipvia" name="shipvia" cols="35"
@@ -626,7 +665,7 @@ sub form_header {
 |;
 
     $form->hide_form(
-        qw(shiptoname shiptoaddress1 shiptoaddress2 shiptocity shiptostate shiptozipcode shiptocountry shiptocontact shiptophone shiptofax shiptoemail message email subject cc bcc taxaccounts)
+        qw(shiptoname shiptoaddress1 shiptoaddress2 shiptocity shiptostate shiptozipcode shiptocountry shiptocontact shiptophone shiptofax shiptoemail message email subject cc bcc taxaccounts shiptolocationid)
     );
 
     for ( split / /, $form->{taxaccounts} ) {
@@ -635,121 +674,33 @@ sub form_header {
 <input type=hidden name="${_}_description" value="$form->{"${_}_description"}">
 |;
     }
-    if ( !$form->{readonly} ) {
-        %button = (
-            'update' =>
-              { ndx => 1, key => 'U', value => $locale->text('Update') },
-            'print' =>
-              { ndx => 2, key => 'P', value => $locale->text('Print'),
-                type => 'lsmb/PrintButton' },
-            'save' => { ndx => 3, key => 'S', value => $locale->text('Save') },
-            'ship_to' =>
-              { ndx => 4, key => 'T', value => $locale->text('Ship to') },
-            'e_mail' =>
-              { ndx => 5, key => 'E', value => $locale->text('E-mail') },
-            'print_and_save' => {
-                ndx   => 6,
-                key   => 'R',
-                value => $locale->text('Print and Save'),
-                type => 'lsmb/PrintButton'
-            },
-            'save_as_new' =>
-              { ndx => 7, key => 'N', value => $locale->text('Save as new') },
-            'print_and_save_as_new' => {
-                ndx   => 8,
-                key   => 'W',
-                value => $locale->text('Print and Save as new'),
-                type => 'lsmb/PrintButton'
-            },
-            'sales_invoice' =>
-              { ndx => 9, key => 'I', value => $locale->text('Sales Invoice') },
-            'sales_order' =>
-              { ndx => 10, key => 'O', value => $locale->text('Sales Order') },
-            'quotation' =>
-              { ndx => 11, key => 'Q', value => $locale->text('Quotation') },
-            'vendor_invoice' => {
-                ndx   => 12,
-                key   => 'I',
-                value => $locale->text('Vendor Invoice')
-            },
-            'purchase_order' => {
-                ndx   => 13,
-                key   => 'O',
-                value => $locale->text('Purchase Order')
-            },
-            'rfq' => { ndx => 14, key => 'Q', value => $locale->text('RFQ') },
-            # Commented out; see github isue #5295
-#            'schedule' =>
-#              { ndx => 15, key => 'H', value => $locale->text('Schedule') },
-            'delete' =>
-              { ndx => 16, key => 'D', value => $locale->text('Delete') },
+    print "<tr><td>";
+
+    %button_types = (
+        print => 'lsmb/PrintButton'
         );
+    %button = ();
+    for my $action_name ( $wf->get_current_actions( 'main') ) {
+        my $action = $wf->get_action( $action_name );
 
-        %a = ();
-        for ( "update", "ship_to", "save" ) { $a{$_} = 1 }
-        $a{'print_and_save'} =
-            LedgerSMB::Sysconfig::latex()
-            and LedgerSMB::Sysconfig::printer->%*;
-
-        if ( $form->{id} ) {
-
-            $a{'e_mail'}                = 1;
-            $a{'delete'}                = 1;
-            $a{'print'}                 = 1;
-            $a{'save_as_new'}           = 1;
-            $a{'print_and_save_as_new'} =
-                LedgerSMB::Sysconfig::latex()
-                and LedgerSMB::Sysconfig::printer->%*;
-
-            if ( $form->{type} =~ /sales_/ ) {
-                if ( $myconfig{acs} !~ /AR--Sales Invoice/ ) {
-                    $a{'sales_invoice'} = 1;
-                }
-            }
-            else {
-                if ( $myconfig{acs} !~ /AP--Vendor Invoice/ ) {
-                    $a{'vendor_invoice'} = 1;
-                }
-            }
-
-            if ( $form->{type} eq 'sales_order' ) {
-                if ( $myconfig{acs} !~ /Quotations--RFQ/ ) {
-                    $a{'quotation'} = 1;
-                }
-            }
-
-            if ( $form->{type} eq 'purchase_order' ) {
-                if ( $myconfig{acs} !~ /Quotations--RFQ/ ) {
-                    $a{'rfq'} = 1;
-                }
-            }
-
-            if ( $form->{type} eq 'sales_quotation' ) {
-                if ( $myconfig{acs} !~ /Order Entry--Sales Order/ ) {
-                    $a{'sales_order'} = 1;
-                }
-            }
-
-            if ( $myconfig{acs} !~ /Order Entry--Purchase Order/ ) {
-                if ( $form->{type} eq 'request_quotation' ) {
-                    $a{'purchase_order'} = 1;
-                }
-            }
-        }
-
-        # Commented out; see github isue #5295
-#        if ( $form->{type} =~ /_order/ ) {
-#            $a{'schedule'} = 1;
-#        }
-
+        next if ($action->ui // '') eq 'none';
+        $button{$action_name} = {
+            ndx   => $action->order,
+            value => $locale->maketext($action->text),
+            doing => ($action->doing ? $locale->maketext($action->doing) : ''),
+            done  => ($action->done ? $locale->maketext($action->done) : ''),
+            type  => $button_types{$action->ui},
+            tooltip => ($action->short_help ? $locale->maketext($action->short_help) : '')
+        };
     }
-    for ( keys %button ) { delete $button{$_} if !$a{$_} }
 
-    for ( sort { $button{$a}->{ndx} <=> $button{$b}->{ndx} } keys %button ) {
+    for ( sort { $button{$a}->{ndx} <=> $button{$b}->{ndx} }
+          keys %button ) {
         $form->print_button( \%button, $_ );
     }
-    print "</td></tr>";
+
     $form->hide_form(qw(defaultcurrency workflow_id));
+    print "</td></tr>";
 }
 
 sub form_footer {
@@ -783,6 +734,7 @@ qq|<textarea data-dojo-type="dijit/form/Textarea" id=intnotes name=intnotes rows
 |;
     }
 
+    $form->{_setting_decimal_places} = $form->get_setting('decimal_places');
     if ( !$form->{taxincluded} ) {
         foreach my $item (keys %{$form->{taxes}}) {
             my $taccno = $item;
@@ -790,7 +742,7 @@ qq|<textarea data-dojo-type="dijit/form/Textarea" id=intnotes name=intnotes rows
             $form->{"${taccno}_total"} = $form->format_amount(
                 \%myconfig,
                 $form->round_amount( $form->{taxes}{$item}, 2 ),
-                LedgerSMB::Setting->new(%$form)->get('decimal_places')
+                $form->{_setting_decimal_places}
             );
             next if !$form->{"${taccno}_total"};
             $tax .= qq|
@@ -801,7 +753,7 @@ qq|<textarea data-dojo-type="dijit/form/Textarea" id=intnotes name=intnotes rows
         }
 
         $form->{invsubtotal} =
-          $form->format_amount( \%myconfig, $form->{invsubtotal}, LedgerSMB::Setting->new(%$form)->get('decimal_places'), 0 );
+          $form->format_amount( \%myconfig, $form->{invsubtotal}, $form->{_setting_decimal_places}, 0 );
 
         $subtotal = qq|
           <tr>
@@ -813,9 +765,13 @@ qq|<textarea data-dojo-type="dijit/form/Textarea" id=intnotes name=intnotes rows
     }
     $form->{oldinvtotal} = $form->{invtotal};
     $form->{invtotal} =
-      $form->format_amount( \%myconfig, $form->{invtotal}, LedgerSMB::Setting->new(%$form)->get('decimal_places'), 0 );
+      $form->format_amount( \%myconfig, $form->{invtotal}, $form->{_setting_decimal_places}, 0 );
 
+    my $display_barcode = $form->get_setting('have_barcodes') ? "initial" : "none";
     print qq|
+  <tr style="display:$display_barcode">
+   <td colspan="5"><b><label for="barcode">Barcode</label></b>: <input data-dojo-type="dijit/form/TextBox" id=barcode name=barcode></td>
+  </tr>
   <tr>
     <td>
       <table width=100%>
@@ -845,85 +801,65 @@ qq|<textarea data-dojo-type="dijit/form/Textarea" id=intnotes name=intnotes rows
       </td>
     </tr>
       </table>
-    </td>
-  </tr>
 <input type=hidden name=oldinvtotal value=$form->{oldinvtotal}>
 <input type=hidden name=oldtotalpaid value=$totalpaid>
-  <tr>
-    <td>
-      <table width=100%>
-         <caption>History</caption>
-|;
-    # insert history items
-    my $wf = FACTORY()->fetch_workflow( 'Order/Quote', $form->{workflow_id} );
-    if ($wf) {
-        my @history = $wf->get_history;
-        for my $h (sort { $a->id <=> $b->{id} } @history) {
-            my ($desc, $addn) = split( /[|]/, $h->description, 2);
-            my $link = '';
-            if ($addn) {
-                my %items = split(/[|:]/, $addn);
-                my %links = (
-                    'AR/AP|customer' => 'is.pl?action=edit&amp;workflow_id=',
-                    'AR/AP|vendor'   => 'ir.pl?action=edit&amp;workflow_id=',
-                    'Order/Quote'    => 'oe.pl?action=edit&amp;workflow_id=',
-                    'Email'          => 'email.pl?action=render&amp;id=',
-                    );
-                my ($id, $workflow) = split(/,/, $items{spawned_workflow}, 2);
-                $link = ($links{$workflow}
-                         // $links{"$workflow|$form->{vc}"}) . $id;
-            }
-            if ($link) {
-                print qq|<tr><td><a href="$link">$desc</a></td></tr>|;
-            }
-            else {
-                print qq|<tr><td>$desc</td></tr>|;
-            }
-        }
-    }
-    print qq|
-      </table>
     </td>
-  </tr>
-  <tr>
-    <td><hr size=3 noshade></td>
   </tr>
   <tr>
     <td>
 |;
 
-    $printops = &print_options;
-    print_select($form, $printops->{formname});
-    print_select($form, $printops->{format});
-    print_select($form, $printops->{media});
-    print_select($form, $printops->{lang});
+    IIAA->print_wf_history_table($form, 'Order/Quote');
+
     print qq|
     </td>
+  </tr>
+  <tr>
+    <td><hr size=3 noshade></td>
   </tr>
 </table>
 
 <br>
 |;
 
-    # type=submit $locale->text('Update')
-    # type=submit $locale->text('Print')
-    # type=submit $locale->text('Schedule')
-    # type=submit $locale->text('Save')
-    # type=submit $locale->text('Print and Save')
-    # type=submit $locale->text('Ship to')
-    # type=submit $locale->text('Save as new')
-    # type=submit $locale->text('Print and Save as new')
-    # type=submit $locale->text('E-mail')
-    # type=submit $locale->text('Delete')
-    # type=submit $locale->text('Sales Invoice')
-    # type=submit $locale->text('Vendor Invoice')
-    # type=submit $locale->text('Quotation')
-    # type=submit $locale->text('RFQ')
-    # type=submit $locale->text('Sales Order')
-    # type=submit $locale->text('Purchase Order')
 
-    for ( sort { $button{$a}->{ndx} <=> $button{$b}->{ndx} } keys %button ) {
+    for ( sort { $button{$a}->{ndx} <=> $button{$b}->{ndx} } keys %button )
+    {
         $form->print_button( \%button, $_ );
+    }
+
+    my $wf = $form->{_conn}->workflows->fetch( 'Order/Quote', $form->{workflow_id} );
+    if ( $wf and grep { $_ eq 'print' } $wf->get_current_actions ) {
+        my $printops = &print_options;
+
+        print "<br /><br />";
+        print_select($form, $printops->{formname});
+        print_select($form, $printops->{lang});
+        print_select($form, $printops->{format});
+        print_select($form, $printops->{media});
+
+        %button_types = (
+            print => 'lsmb/PrintButton'
+            );
+        %button = ();
+        for my $action_name ( $wf->get_current_actions( 'output') ) {
+            my $action = $wf->get_action( $action_name );
+
+            next if ($action->ui // '') eq 'none';
+            $button{$action_name} = {
+                ndx   => $action->order,
+                value => $locale->maketext($action->text),
+                doing => ($action->doing ? $locale->maketext($action->doing) : ''),
+                done  => ($action->done ? $locale->maketext($action->done) : ''),
+                type  => $button_types{$action->ui},
+                tooltip => ($action->short_help ? $locale->maketext($action->short_help) : '')
+            };
+        }
+
+        for ( sort { $button{$a}->{ndx} <=> $button{$b}->{ndx} }
+              keys %button ) {
+            $form->print_button( \%button, $_ );
+        }
     }
     if ($form->{id}){
         OE->get_files($form, $locale);
@@ -940,7 +876,7 @@ qq|<textarea data-dojo-type="dijit/form/Textarea" id=intnotes name=intnotes rows
         foreach my $file (@{$form->{files}}){
               print qq|
 <tr>
-<td><a href="file.pl?action=get&file_class=2&ref_key=$form->{id}&id=$file->{id}&type=sales_quotation&additional=type"
+<td><a href="file.pl?__action=get&file_class=2&ref_key=$form->{id}&id=$file->{id}&type=sales_quotation&additional=type"
        target="_download">$file->{file_name}</a></td>
 <td>$file->{mime_type}</td>
 <td>|.$file->{uploaded_at}.qq|</td>
@@ -977,9 +913,9 @@ qq|<textarea data-dojo-type="dijit/form/Textarea" id=intnotes name=intnotes rows
        }
        print qq|
 </table>|;
-       $callback = $form->escape("oe.pl?action=edit&id=".$form->{id});
+       $callback = $form->escape("oe.pl?__action=edit&id=".$form->{id});
        print qq|
-<a href="file.pl?action=show_attachment_screen&ref_key=$form->{id}&file_class=2&callback=$callback"
+<a href="file.pl?__action=show_attachment_screen&ref_key=$form->{id}&file_class=2&callback=$callback"
    >[| . $locale->text('Attach') . qq|]</a>|;
     }
 
@@ -997,11 +933,11 @@ qq|<textarea data-dojo-type="dijit/form/Textarea" id=intnotes name=intnotes rows
 sub update {
     $form->{nextsub} = 'update';
 
-    $form->create_links( module => "OE", # effectively 'none'
-             myconfig => \%myconfig,
-             vc => $form->{vc},
-             billing => 0,
-             job => 1 );
+    # $form->create_links( module => "OE", # effectively 'none'
+    #          myconfig => \%myconfig,
+    #          vc => $form->{vc},
+    #          billing => 0,
+    #          job => 1 );
 
     $form->get_regular_metadata(
         \%myconfig,
@@ -1009,7 +945,7 @@ sub update {
         $form->{transdate},
         1,
     );
-    $form->{$_} = LedgerSMB::PGDate->from_input($form->{$_})->to_output()
+    $form->{$_} = $form->parse_date( \%myconfig, $form->{$_} )->to_output()
        for qw(transdate reqdate);
 
 
@@ -1082,6 +1018,10 @@ sub update {
                || ! ( ( $form->{"partnumber_$i"} eq "" )
                       && ( $form->{"description_$i"} eq "" )
                       && ( $form->{"partsgroup_$i"}  eq "" ) );
+    }
+    if ($form->{barcode}) {
+        $non_empty_rows++;
+        IIAA->process_form_barcode(\%myconfig, $form, $non_empty_rows, $form->{barcode});
     }
 
     my $current_empties = $form->{rowcount} - $non_empty_rows;
@@ -1210,25 +1150,6 @@ sub update {
                 }
 
             }
-            else {
-
-            # ok, so this is a new part
-            # ask if it is a part or service item
-
-                if (   $form->{"partsgroup_$i"}
-                    && ( $form->{"partsnumber_$i"} eq "" )
-                    && ( $form->{"description_$i"} eq "" ) )
-                {
-                    $form->{rowcount}--;
-                    &display_form;
-                }
-                else {
-
-                    $form->{"id_$i"}   = 0;
-                    $form->{"unit_$i"} = $locale->text('ea');
-                    &new_item;
-                }
-            }
         }
     }
     $form->all_vc(\%myconfig, $form->{vc}, $form->{transdate}, 1) if ! @{$form->{"all_$form->{vc}"}};
@@ -1313,7 +1234,7 @@ sub _save {
 
     if ( !$form->{repost}  && $form->{id}) {
         $form->{repost} = 1;
-        my $template = LedgerSMB::Template::UI->new_UI;
+        my $template = $form->{_wire}->get('ui');
         return LedgerSMB::Legacy_Util::render_psgi(
             $form,
             $template->render($form, 'oe-save-warn',
@@ -1333,13 +1254,13 @@ sub _save {
        # the old workflow is being saved-as. the new workflow has its id
        # set in workflow_id, because the form was saved already...
        my $id  = $form->{old_workflow_id} // $form->{workflow_id};
-       my $wf  = FACTORY()->fetch_workflow( 'Order/Quote', $id );
+       my $wf  = $form->{_conn}->workflows->fetch( 'Order/Quote', $id );
        my $ctx = $wf->context;
        $ctx->param( spawned_type => 'Order/Quote' );
        $ctx->param( spawned_id   => $form->{workflow_id} );
 
        # m/save_as/ matches both print_and_save_as_new as well as save_as_new
-       $wf->execute_action( ($form->{action} =~ m/save_as/
+       $wf->execute_action( ($form->{__action} =~ m/save_as/
                              ? 'save_as_new' : 'save') );
 
        delete $form->{old_workflow_id};
@@ -1354,7 +1275,7 @@ sub _save {
 
 sub print_and_save {
 
-    my $wf = FACTORY()->fetch_workflow( 'Order/Quote', $form->{workflow_id} );
+    my $wf = $form->{_conn}->workflows->fetch( 'Order/Quote', $form->{workflow_id} );
     $wf->execute_action( 'print_and_save' );
 
     &_print_and_save;
@@ -1372,7 +1293,7 @@ sub _print_and_save {
     $old_form->{rowcount}++;
 
     my $wf =
-        FACTORY()->fetch_workflow( 'Order/Quote', $form->{workflow_id} );
+        $form->{_conn}->workflows->fetch( 'Order/Quote', $form->{workflow_id} );
     $wf->execute_action( 'print' );
     &print_form($old_form);
 
@@ -1380,27 +1301,33 @@ sub _print_and_save {
 
 sub delete {
 
-    my $wf = FACTORY()->fetch_workflow( 'Order/Quote', $form->{workflow_id} );
-    $wf->execute_action( 'delete' );
-    $form->header;
+    # The actual deletion in executed in the "yes" function below;
+    # if we execute the "delete" action here, we'll land the order/quote
+    # in limbo if the "yes" action isn't performed on the UI side (the
+    # workflow has a DELETED state whereas the quote still exists...)
+    #
+    # my $wf = $form->{_conn}->workflows
+    #     ->fetch( 'Order/Quote', $form->{workflow_id} );
+    # $wf->execute_action( 'delete' );
+    # $form->header;
 
     if ( $form->{type} =~ /_order$/ ) {
-        $msg = $locale->text('Are you sure you want to delete Order Number');
+        $msg = $locale->text('Are you sure you want to delete Order Number?');
         $ordnumber = 'ordnumber';
     }
     else {
         $msg =
-          $locale->text('Are you sure you want to delete Quotation Number');
+          $locale->text('Are you sure you want to delete Quotation Number?');
         $ordnumber = 'quonumber';
     }
 
     print qq|
 <body class="lsmb">
 
-<form method="post" data-dojo-type="lsmb/Form" action=$form->{script}>
+<form method="post" data-dojo-type="lsmb/Form" action="$form->{script}">
 |;
 
-    $form->{action} = "yes";
+    $form->{__action} = "yes";
     $form->hide_form;
 
     print qq|
@@ -1408,7 +1335,7 @@ sub delete {
 
 <h4>$msg $form->{$ordnumber}</h4>
 <p>
-<button data-dojo-type="dijit/form/Button" id="action-yes" name="action" class="submit" type="submit" value="yes">|
+<button data-dojo-type="dijit/form/Button" id="action-yes" name="__action" class="submit" type="submit" value="yes">|
       . $locale->text('Yes')
       . qq|</button>
 </form>
@@ -1420,6 +1347,10 @@ sub delete {
 }
 
 sub yes {
+
+    my $wf = $form->{_conn}->workflows->fetch( 'Order/Quote', $form->{workflow_id} );
+    $wf->execute_action( 'delete' );
+    $form->header;
 
     if ( $form->{type} =~ /_order$/ ) {
         $msg = $locale->text('Order deleted!');
@@ -1480,7 +1411,7 @@ sub invoice {
     $form->{closed} = 1;
 
     OE->save( \%myconfig, \%$form );
-    my $wf = FACTORY()->fetch_workflow( 'Order/Quote', $form->{workflow_id} );
+    my $wf = $form->{_conn}->workflows->fetch( 'Order/Quote', $form->{workflow_id} );
     my $action;
 
     $form->{transdate} = '';
@@ -1519,7 +1450,7 @@ sub invoice {
     }
     my $lib = uc($script);
 
-    for (qw(id subject message printed emailed)) { delete $form->{$_} }
+    for (qw(id subject message)) { delete $form->{$_} }
     $form->{ $form->{vc} } =~ s/--.*//g;
     $form->{type} = "invoice";
 
@@ -1536,7 +1467,7 @@ sub invoice {
 
     for ( "$form->{vc}", "currency" ) { $form->{"select$_"} = "" }
     for (
-        qw(currency oldcurrency employee department intnotes notes taxincluded))
+        qw(currency oldcurrency employee intnotes notes taxincluded))
     {
         $temp{$_} = $form->{$_};
     }
@@ -1559,8 +1490,10 @@ sub invoice {
               $form->format_amount( \%myconfig, $form->{"${_}_$i"} );
         }
     }
+    $form->{duedate} = $form->current_date( \%myconfig, $form->{transdate},
+                                            $form->{terms} * 1 );
 
-    for (qw(id subject message printed emailed audittrail)) {
+    for (qw(id subject message audittrail)) {
         delete $form->{$_};
     }
 
@@ -1569,15 +1502,23 @@ sub invoice {
         local $form->{separate_duties} = 1;
         local $form->{approved} = undef;
 
+        my $wf = $form->{_conn}->workflows->create( 'AR/AP' );
+        $form->{workflow_id} = $wf->id;
+
+        $wf->execute_action( 'post' );
         # $lib contains either 'IS' or 'IR': the sales and purchase invoice libs
         $lib->post_invoice(\%myconfig, $form);
+        $lib->retrieve_invoice(\%myconfig, $form);
+        &prepare_invoice;
     }
     $wf->context->param( 'spawned_id'   => $form->{workflow_id} );
     $wf->context->param( 'spawned_type' => 'AR/AP' );
+    $wf->context->param( '_extra' => {
+        oe_class_id => ($action eq 'sales_invoice') ? OEC_SALES_ORDER() : OEC_PURCHASE_ORDER()
+                         } );
     $wf->execute_action( $action );
 
     &display_form;
-
 }
 
 sub backorder_exchangerate {
@@ -1588,11 +1529,11 @@ sub backorder_exchangerate {
     print qq|
 <body class="lsmb">
 
-<form method="post" data-dojo-type="lsmb/Form" action=$form->{script}>
+<form method="post" data-dojo-type="lsmb/Form" action="$form->{script}">
 |;
 
     # delete action variable
-    for (qw(action nextsub exchangerate)) { delete $form->{$_} }
+    for (qw(nextsub exchangerate)) { delete $form->{$_} }
 
     $form->hide_form;
 
@@ -1630,7 +1571,7 @@ sub backorder_exchangerate {
 
 <br>
 
-<button data-dojo-type="dijit/form/Button" id="action-continue" name="action" class="submit" type="submit" value="continue">|
+<button data-dojo-type="dijit/form/Button" id="action-continue" name="__action" class="submit" type="submit" value="continue">|
       . $locale->text('Continue')
       . qq|</button>
 
@@ -1687,7 +1628,7 @@ sub create_backorder {
     }
 
     @flds =
-      qw(partnumber description qty ship unit sellprice discount oldqty orderitems_id id bin weight listprice lastcost taxaccounts pricematrix sku onhand deliverydate reqdate projectnumber partsgroup assembly);
+      qw(partnumber description qty ship unit sellprice discount oldqty orderitems_id id bin weight listprice lastcost taxaccounts pricematrix sku onhand deliverydate reqdate projectnumber partsgroup assembly notes serialnumber);
 
     foreach my $i ( 1 .. $form->{rowcount} ) {
         for (qw(qty sellprice discount)) {
@@ -1700,7 +1641,7 @@ sub create_backorder {
     }
 
     # clear flags
-    for (qw(id subject message cc bcc printed emailed audittrail)) {
+    for (qw(id subject message cc bcc audittrail)) {
         delete $form->{$_};
     }
 
@@ -1734,7 +1675,7 @@ sub save_as_new {
     # orders don't have a quonumber
     # quotes don't have an ordnumber
     $form->{old_workflow_id} = $form->{workflow_id};
-    for (qw(closed id printed emailed ordnumber quonumber workflow_id)) {
+    for (qw(closed id ordnumber quonumber workflow_id)) {
         delete $form->{$_}
     }
     &_save;
@@ -1745,7 +1686,7 @@ sub print_and_save_as_new {
     # orders don't have a quonumber
     # quotes don't have an ordnumber
     $form->{old_workflow_id} = $form->{workflow_id};
-    for (qw(closed id printed emailed ordnumber quonumber workflow_id)) {
+    for (qw(closed id ordnumber quonumber workflow_id)) {
         delete $form->{$_}
     }
     &_print_and_save;
@@ -1839,12 +1780,12 @@ sub display_ship_receive {
     print qq|
 <body class="lsmb">
 
-<form method="post" data-dojo-type="lsmb/Form" action=$form->{script}>
+<form method="post" data-dojo-type="lsmb/Form" action="$form->{script}">
 
 <input type=hidden name=display_form value=display_ship_receive>
 |;
 
-    $form->hide_form(qw(id type media format printed emailed vc));
+    $form->hide_form(qw(id type media format vc));
 
     print qq|
 <input type=hidden name="old$form->{vc}" value="$form->{"old$form->{vc}"}">
@@ -1862,11 +1803,10 @@ sub display_ship_receive {
         <table width=100%>
           <tr>
         <th align=right>$vclabel</th>
-        <td colspan=3>$form->{$form->{vc}}</td>
+        <td colspan=3>$form->{$form->{vc}}
         <input type=hidden name=$form->{vc} value="$form->{$form->{vc}}">
-        <input type=hidden name="$form->{vc}_id" value=$form->{"$form->{vc}_id"}>
+        <input type=hidden name="$form->{vc}_id" value=$form->{"$form->{vc}_id"}></td>
           </tr>
-          $department
           <tr>
         <th align=right>| . $locale->text('Shipping Point') . qq|</th>
         <td colspan=3>
@@ -1885,19 +1825,19 @@ sub display_ship_receive {
           $employee
           <tr>
         <th align=right nowrap>| . $locale->text('Order Number') . qq|</th>
-        <td>$form->{ordnumber}</td>
-        <input type=hidden name=ordnumber value="$form->{ordnumber}">
+        <td>$form->{ordnumber}
+        <input type=hidden name=ordnumber value="$form->{ordnumber}"></td>
           </tr>
           <tr>
         <th align=right nowrap>| . $locale->text('Order Date') . qq|</th>
-        <td>$form->{transdate}</td>
-        <input type=hidden name=transdate value=$form->{transdate}>
+        <td>$form->{transdate}
+        <input type=hidden name=transdate value=$form->{transdate}></td>
           </tr>
           <tr>
         <th align=right nowrap>| . ($form->{type} =~ /purchase_/ ?
             $locale->text('SO Number') : $locale->text('PO Number')) . qq|</th>
-        <td>$form->{ponumber}</td>
-        <input type=hidden name=ponumber value="$form->{ponumber}">
+        <td>$form->{ponumber}
+        <input type=hidden name=ponumber value="$form->{ponumber}"></td>
           </tr>
           <tr>
         <th align=right nowrap>$shipped</th>
@@ -2002,11 +1942,13 @@ qq|<td><input data-dojo-type="dijit/form/TextBox" id="serialnumber_$i" name="ser
 
         for (@column_index) { print "\n$column_data{$_}" }
 
-        print qq|
-        </tr>
+        print q|
+        <td style="display:none">
 |;
         $form->hide_form( "orderitems_id_$i", "id_$i", "partsgroup_$i" );
-
+        print q|
+        </tr>
+|;
     }
 
     print qq|
@@ -2113,7 +2055,7 @@ sub search_transfer {
     print qq|
 <body class="lsmb">
 
-<form method="post" data-dojo-type="lsmb/Form" action=$form->{script}>
+<form method="post" data-dojo-type="lsmb/Form" action="$form->{script}">
 
 <table width=100%>
   <tr>
@@ -2154,7 +2096,7 @@ sub search_transfer {
 <br>
 <input type=hidden name=nextsub value=list_transfer>
 
-<button data-dojo-type="dijit/form/Button" class="submit" type="submit" id="action-continue" name="action" value="continue">|
+<button data-dojo-type="dijit/form/Button" class="submit" type="submit" id="action-continue" name="__action" value="continue">|
       . $locale->text('Continue')
       . qq|</button>|;
 
@@ -2179,7 +2121,7 @@ sub list_transfer {
     OE->get_inventory( \%myconfig, \%$form );
 
     # construct href
-    $href = "$form->{script}?action=list_transfer";
+    $href = "$form->{script}?__action=list_transfer";
     for (qw(direction oldsort path login sessionid)) {
         $href .= "&$_=$form->{$_}";
     }
@@ -2190,7 +2132,7 @@ sub list_transfer {
     $form->sort_order();
 
     # construct callback
-    $callback = "$form->{script}?action=list_transfer";
+    $callback = "$form->{script}?__action=list_transfer";
     for (qw(direction oldsort path login sessionid)) {
         $callback .= "&$_=$form->{$_}";
     }
@@ -2260,7 +2202,7 @@ sub list_transfer {
     print qq|
 <body class="lsmb">
 
-<form method="post" data-dojo-type="lsmb/Form" action=$form->{script}>
+<form method="post" data-dojo-type="lsmb/Form" action="$form->{script}">
 
 <input type=hidden name=warehouse_id value=$warehouse_id>
 
@@ -2335,11 +2277,11 @@ qq|<td><input type=hidden name="warehouse_id_$i" value="$ref->{warehouse_id}">$r
 <input type=hidden name=rowcount value=$i>
 |;
 
-    $form->{action} = "transfer";
-    $form->hide_form(qw(path login sessionid action));
+    $form->{__action} = "transfer";
+    $form->hide_form(qw(path login sessionid));
 
     print qq|
-<button data-dojo-type="dijit/form/Button" class="submit" type="submit" id="action-transfer" name="action" value="transfer">|
+<button data-dojo-type="dijit/form/Button" class="submit" type="submit" id="action-transfer" name="__action" value="transfer">|
       . $locale->text('Transfer')
       . qq|</button>|;
 
@@ -2388,6 +2330,7 @@ sub generate_purchase_orders {
 
     # flatten array
     $i = 0;
+    $form->{_setting_decimal_places} = $form->get_setting('decimal_places');
     foreach my $parts_id (
         sort {
             $form->{orderitems}{$a}{partnumber}
@@ -2410,7 +2353,7 @@ sub generate_purchase_orders {
 
         $form->{"lastcost_$i"} =
           $form->format_amount( \%myconfig,
-            $form->{orderitems}{$parts_id}{lastcost}, LedgerSMB::Setting->new(%$form)->get('decimal_places') );
+            $form->{orderitems}{$parts_id}{lastcost}, $form->{_setting_decimal_places} );
 
         $form->{"qty_$i"} = $required;
 
@@ -2443,8 +2386,8 @@ sub generate_purchase_orders {
                 $form->{"lastcost_$i"} = $form->format_amount(
                     \%myconfig,
                     $form->{orderitems}{$parts_id}{"parts$form->{vc}"}{$id}
-                      {lastcost},
-                    LedgerSMB::Setting->new(%$form)->get('decimal_places')
+                      {lastcost}, $form->{_setting_decimal_places}
+
                 );
                 $form->{"leadtime_$i"} = $form->format_amount( \%myconfig,
                     $form->{orderitems}{$parts_id}{"parts$form->{vc}"}{$id}
@@ -2455,8 +2398,8 @@ sub generate_purchase_orders {
                       {lastcost} * $form->{
                         $form->{orderitems}{$parts_id}{"parts$form->{vc}"}{$id}
                           {curr}
-                      },
-                    LedgerSMB::Setting->new(%$form)->get('decimal_places')
+                    },
+                    $form->{_setting_decimal_places}
                 );
 
                 $form->{"id_$i"} = $parts_id;
@@ -2509,7 +2452,7 @@ sub po_orderitems {
     print qq|
 <body class="lsmb">
 
-<form method="post" data-dojo-type="lsmb/Form" action=$form->{script}>
+<form method="post" data-dojo-type="lsmb/Form" action="$form->{script}">
 
 <table width=100%>
   <tr>
@@ -2592,16 +2535,16 @@ qq|<td><input name="ndx_$i" id="ndx_$i" class=checkbox type=checkbox data-dojo-t
 |;
 
     $form->hide_form(
-        qw(callback department ponumber path login sessionid employee_id vc nextsub rowcount type)
+        qw(callback ponumber path login sessionid employee_id vc nextsub rowcount type)
     );
 
     print qq|
-<button data-dojo-type="dijit/form/Button" class="submit" type="submit" id="action-generate-orders" name="action" value="generate_orders">|
+<button data-dojo-type="dijit/form/Button" class="submit" type="submit" id="action-generate-orders" name="__action" value="generate_orders">|
       . $locale->text('Generate Orders')
       . qq|</button>|;
 
     print qq|
-<button data-dojo-type="dijit/form/Button" class="submit" type="submit" id="action-select-vendor" name="action" value="select_vendor">|
+<button data-dojo-type="dijit/form/Button" class="submit" type="submit" id="action-select-vendor" name="__action" value="select_vendor">|
       . $locale->text('Select Vendor')
       . qq|</button>|;
 
@@ -2638,19 +2581,19 @@ sub select_vendor {
     print qq|
 <body class="lsmb $form->{dojo_theme}" onload="document.forms[0].vendor.focus()" />
 
-<form method="post" data-dojo-type="lsmb/Form" action=$form->{script}>
+<form method="post" data-dojo-type="lsmb/Form" action="$form->{script}">
 
 <b>| . $locale->text('Vendor') . qq|</b> <input data-dojo-type="dijit/form/TextBox" id=vendor name=vendor size=40>
 
 |;
 
     $form->{nextsub} = "vendor_selected";
-    $form->{action}  = "vendor_selected";
+    $form->{__action}  = "vendor_selected";
 
     $form->hide_form;
 
     print qq|
-<button data-dojo-type="dijit/form/Button" class="submit" type="submit" id="action-continue" name="action" value="continue">|
+<button data-dojo-type="dijit/form/Button" class="submit" type="submit" id="action-continue" name="__action" value="continue">|
       . $locale->text('Continue')
       . qq|</button>
 

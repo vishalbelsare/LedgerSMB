@@ -56,12 +56,10 @@ Exact search on salvage value
 has asset_class     => (is => 'ro', isa => 'Int', required => 0);
 has description     => (is => 'ro', isa => 'Str', required => 0);
 has tag             => (is => 'ro', isa => 'Str', required => 0);
-has purchase_date   => (is => 'ro', isa => 'LedgerSMB::Moose::Date',coerce=> 1);
-has purchase_value  => (is => 'ro', isa => 'LedgerSMB::Moose::Number',
-                       coerce => 1);
+has purchase_date   => (is => 'ro', isa => 'LedgerSMB::PGDate');
+has purchase_value  => (is => 'ro', isa => 'LedgerSMB::PGNumber');
 has usable_life     => (is => 'ro', isa => 'Int', required => 0);
-has salvage_value   => (is => 'ro', isa => 'LedgerSMB::Moose::Number',
-                       coerce => 1);
+has salvage_value   => (is => 'ro', isa => 'LedgerSMB::PGNumber');
 
 =head1 CONSTANT METHODS
 
@@ -89,7 +87,7 @@ sub columns {
      { col_id => 'tag',
          name => $self->Text('Tag'),
          type => 'href',
-    href_base => 'asset.pl?action=asset_edit&id=', },
+    href_base => 'asset.pl?__action=asset_edit&id=', },
     {  col_id => 'description',
          name => $self->Text('Description'),
          type => 'text', },
@@ -125,11 +123,10 @@ sub columns {
 sub header_lines {
     my ($self) = @_;
     return  [
-     { name => 'tag',         text => $self->Text('Tag') },
-     { name => 'description', text => $self->Text('Description') },
-     {name => 'purchase_date',text => $self->Text('Purchase Date')},
-     {name => 'purchase_value',
-        text => $self->Text('Purchase Value') },
+     { value => $self->tag,            text => $self->Text('Tag') },
+     { value => $self->description,    text => $self->Text('Description') },
+     { value => $self->purchase_date,  text => $self->Text('Purchase Date')},
+     { value => $self->purchase_value, text => $self->Text('Purchase Value') },
    ];
 }
 

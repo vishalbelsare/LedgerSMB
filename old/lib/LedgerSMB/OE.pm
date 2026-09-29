@@ -42,12 +42,9 @@ package OE;
 
 use LedgerSMB::Magic qw(OEC_QUOTATION OEC_RFQ);
 use LedgerSMB::Num2text;
-use LedgerSMB::Setting;
-use LedgerSMB::Sysconfig;
 use LedgerSMB::Tax;
 
 use Log::Any;
-use Workflow::Factory qw(FACTORY);
 
 my $logger = Log::Any->get_logger(category => 'OE');
 
@@ -110,7 +107,7 @@ sub save {
     _db_prepare_vars( $form,
         "quonumber", "transdate",     "vendor_id",     "entity_id",
         "reqdate",   "taxincluded",   "shippingpoint", "shipvia",
-        "currency",  "department_id", "employee_id",   "language_code",
+        "currency",  "employee_id",   "language_code",
         "ponumber",  "terms"
     );
 
@@ -182,10 +179,9 @@ sub save {
             $sth   = $dbh->prepare($query);
             $sth->execute( $form->{id} ) || $form->dberror($query);
 
-            $query = qq|DELETE FROM new_shipto WHERE oe_id = ?|;
+            $query = qq|DELETE FROM oe_tax WHERE oe_id = ?|;
             $sth   = $dbh->prepare($query);
             $sth->execute( $form->{id} ) || $form->dberror($query);
-
         }
         else {    # id is not in the database
             delete $form->{id};
@@ -195,7 +191,7 @@ sub save {
     my $did_insert = 0;
     if ( !$form->{id} ) {
         if (! $form->{workflow_id}) {
-            my $wf = FACTORY()->create_workflow( 'Order/Quote' );
+            my $wf = $form->{_conn}->workflows->create( 'Order/Quote' );
             $form->{workflow_id} = $wf->id;
         }
         $query = qq|SELECT nextval('oe_id_seq')|;
@@ -218,14 +214,14 @@ sub save {
         $query = qq|
             INSERT INTO oe
                 (id, ordnumber, quonumber, transdate,
-                reqdate, shippingpoint, shipvia,
+                reqdate, shippingpoint, shipvia, shipto_attn,
                 notes, intnotes, curr, closed,
                 person_id, language_code, ponumber, terms,
                 quotation, oe_class_id, entity_credit_account, workflow_id)
             VALUES
-                (?, ?, ?,
-                 ?, ?, ?,
-                 ?, ?, ?, ?, ?,
+                (?, ?, ?, ?,
+                 ?, ?, ?, ?,
+                 ?, ?, ?, ?,
                  ?, ?, ?, ?,
                  ?, ?, ?, ?)|;
         @queryargs = (
@@ -233,11 +229,13 @@ sub save {
             $form->{ordnumber},     $form->{quonumber},
             $form->{transdate},     $form->{reqdate},
             $form->{shippingpoint}, $form->{shipvia},
+            $form->{shiptoattn},
             $form->{notes},         $form->{intnotes},
             $form->{currency},      $form->{closed},
             $form->{person_id},
             $form->{language_code}, $form->{ponumber},
-            $form->{terms},         $quotation, $class_id, $form->{"$form->{vc}_id"},
+            $form->{terms},         $quotation,
+            $class_id,              $form->{"$form->{vc}_id"},
             $form->{workflow_id}
         );
         $sth = $dbh->prepare($query);
@@ -256,6 +254,7 @@ sub save {
     my @taxaccounts;
     my %taxaccounts;
     my $netamount = 0;
+    my @all_taxes;
 
     my $rowcount = $form->{rowcount};
     for my $i ( 1 .. $rowcount ) {
@@ -338,6 +337,7 @@ sub save {
                     $taxbase{ $item->account }     += $taxbase;
                 }
             }
+            push @all_taxes, @taxaccounts;
 
             $netamount += $form->{"sellprice_$i"} * $form->{"qty_$i"};
 
@@ -397,6 +397,28 @@ sub save {
     $amount = $form->round_amount( $netamount + $tax, 2 );
     $netamount = $form->round_amount( $netamount, 2 );
 
+    if (@all_taxes) {
+        my (%taxes, %bases, %rates);
+        my $query = q|
+INSERT INTO oe_tax (oe_id, tax_id, basis, rate, amount)
+VALUES (?, (select id from account where accno = ?), ?, ?, ?)
+|;
+        my $sth = $dbh->prepare($query)
+            or $form->dberror($query);
+        for my $tax (@all_taxes) {
+            $taxes{ $tax->account } //= 0;
+            $taxes{ $tax->account } += $tax->value;
+            $rates{ $tax->account } = $tax->rate;
+            $bases{ $tax->account } //= 0;
+            $bases{ $tax->account } += $tax->base;
+        }
+
+        for my $tax (keys %taxes) {
+            $sth->execute( $form->{id}, $tax,
+                           $bases{$tax}, $rates{$tax}, $taxes{$tax})
+                or $form->dberror($query);
+        }
+    }
     if ( $form->{currency} eq $form->{defaultcurrency} ) {
         $form->{exchangerate} = 1;
     }
@@ -409,9 +431,7 @@ sub save {
       ? $exchangerate
       : $form->parse_amount( $myconfig, $form->{exchangerate} );
 
-    ( $null, $form->{department_id} ) = split( /--/, $form->{department} );
-
-    for (qw(department_id terms)) { $form->{$_} *= 1 }
+    for (qw(terms)) { $form->{$_} *= 1 }
 
     if ($did_insert) {
         $query = qq|
@@ -444,7 +464,8 @@ sub save {
                 person_id = ?,
                 language_code = ?,
                 ponumber = ?,
-                terms = ?
+                terms = ?,
+                shipto = ?
             WHERE id = ?|;
 
         if ( !$form->{reqdate} ) {
@@ -461,7 +482,8 @@ sub save {
             $form->{closed},        $quotation,
             $form->{employee_id},
             $form->{language_code}, $form->{ponumber},
-            $form->{terms},         $form->{id}
+            $form->{terms},         $form->{shiptolocationid},
+            $form->{id}
         );
     }
     $sth = $dbh->prepare($query) || $form->dberror($query);
@@ -474,9 +496,6 @@ sub save {
     $form->{name} =~ s/--$form->{"$form->{vc}_id"}//;
 
     $form->add_shipto($form->{id}, 1);
-
-    # save printed, emailed
-    $form->save_status($dbh);
 
     if ( $form->{type} =~ /_order$/ ) {
 
@@ -519,23 +538,17 @@ sub delete {
     }
     $sth->finish;
 
-    # delete status entries
-    $query = qq|DELETE FROM status WHERE trans_id = ?|;
+    # delete individual entries
+    $query = qq|DELETE FROM orderitems WHERE trans_id = ?|;
+    $sth->finish;
+
+    $query = qq|DELETE FROM oe_tax WHERE oe_id = ?|;
     $sth   = $dbh->prepare($query);
     $sth->execute( $form->{id} ) || $form->dberror($query);
     $sth->finish;
 
     # delete OE record
     $query = qq|DELETE FROM oe WHERE id = ?|;
-    $sth   = $dbh->prepare($query);
-    $sth->execute( $form->{id} ) || $form->dberror($query);
-    $sth->finish;
-
-    # delete individual entries
-    $query = qq|DELETE FROM orderitems WHERE trans_id = ?|;
-    $sth->finish;
-
-    $query = qq|DELETE FROM new_shipto WHERE oe_id = ?|;
     $sth   = $dbh->prepare($query);
     $sth->execute( $form->{id} ) || $form->dberror($query);
     $sth->finish;
@@ -559,8 +572,7 @@ sub retrieve {
     my $var;
     my $ref;
 
-    @{$form->{currencies}} =
-        (LedgerSMB::Setting->new(%$form))->get_currencies;
+    $form->{currencies} = $form->currencies;
     $form->{defaultcurrency} = $form->{currencies}->[0];
     $form->{lock_description} = $form->get_setting( 'lock_description' );
 
@@ -578,12 +590,11 @@ sub retrieve {
                 o.amount_tc AS invtotal, o.closed, o.reqdate,
                 o.quonumber, o.language_code,
                 o.ponumber, cr.entity_class,
-                ns.location_id as locationid
+                shipto as shiptolocationid, shipto_attn as shiptoattn
             FROM oe o
             JOIN entity_credit_account cr ON (cr.id = o.entity_credit_account)
             JOIN entity vc ON (cr.entity_id = vc.id)
             LEFT JOIN person pe ON (o.person_id = pe.entity_id)
-                        LEFT JOIN new_shipto ns ON ns.oe_id = o.id
             WHERE o.id = ?|;
         $sth = $dbh->prepare($query);
         $sth->execute( $form->{id} ) || $form->dberror($query);
@@ -599,31 +610,6 @@ sub retrieve {
         $form->db_parse_numeric(sth=>$sth, hashref=>$ref);
         for ( keys %$ref ) { $form->{$_} = $ref->{$_} }
         $sth->finish;
-
-        $query = qq|SELECT * FROM new_shipto WHERE oe_id = ?|;
-        $sth   = $dbh->prepare($query);
-        $sth->execute( $form->{id} ) || $form->dberror($query);
-
-        $ref = $sth->fetchrow_hashref('NAME_lc');
-        for ( keys %$ref ) { $form->{$_} = $ref->{$_} unless ( $_ eq "id") }
-        $sth->finish;
-
-        # get printed, emailed
-        $query = qq|
-            SELECT s.printed, s.emailed, s.formname
-            FROM status s
-            WHERE s.trans_id = ?|;
-        $sth = $dbh->prepare($query);
-        $sth->execute( $form->{id} ) || $form->dberror($query);
-
-        while ( $ref = $sth->fetchrow_hashref(NAME_lc) ) {
-            $form->{printed} .= "$ref->{formname} "
-              if $ref->{printed};
-            $form->{emailed} .= "$ref->{formname} "
-              if $ref->{emailed};
-        }
-        $sth->finish;
-        for (qw(printed emailed)) { $form->{$_} =~ s/ +$//g }
 
         # retrieve individual items
         $query = qq|
@@ -646,7 +632,7 @@ sub retrieve {
             LEFT JOIN partsgroup pg ON (p.partsgroup_id = pg.id)
             LEFT JOIN partsvendor pv ON (pv.parts_id = p.id
                                            AND pv.credit_id = ?)
-            LEFT JOIN translation t
+            LEFT JOIN partsgroup_translation t
                 ON (t.trans_id = p.partsgroup_id
                     AND t.language_code = ?)
             WHERE o.trans_id = ?
@@ -680,7 +666,7 @@ sub retrieve {
 
             $form->db_parse_numeric(sth=>$sth, hashref=>$ref);
 
-            $bu_sth->execute($ref->{invoice_id});
+            $bu_sth->execute($ref->{orderitems_id});
             while ( $buref = $bu_sth->fetchrow_hashref(NAME_lc) ) {
                 $ref->{"b_unit_$buref->{class_id}"} = $buref->{bu_id};
             }
@@ -726,16 +712,8 @@ sub retrieve {
         $form->get_recurring;
     }
     else {
-
-        # get last name used
-        $form->lastname_used($form->{vc})
-          unless $form->{"$form->{vc}_id"};
-
         delete $form->{notes};
-
     }
-
-
 }
 
 sub exchangerate_defaults {
@@ -755,10 +733,6 @@ sub order_details {
     my $item;
     my $i;
     my @sortlist = ();
-    my $projectnumber;
-    my $projectdescription;
-    my $projectnumber_id;
-    my $translation;
     my @queryargs;
 
     my @taxaccounts;
@@ -766,15 +740,6 @@ sub order_details {
     my $tax;
     my $taxrate;
     my $taxamount;
-
-    my $language_code = $form->{dbh}->quote( $form->{language_code} );
-    $query = qq|
-        SELECT p.description, t.description
-        FROM project p
-        LEFT JOIN translation t ON (t.trans_id = p.id AND
-            t.language_code = $language_code)
-           WHERE id = ?|;
-    my $prh = $dbh->prepare($query) || $form->dberror($query);
 
     $query = qq|
         SELECT inventory_accno_id, income_accno_id,
@@ -795,13 +760,10 @@ sub order_details {
             for ( keys %$ref ) { $form->{"${_}_$i"} = $ref->{$_} }
             $pth->finish;
 
-            $projectnumber_id      = 0;
-            $projectnumber         = "";
             $form->{partsgroup}    = "";
             $form->{projectnumber} = "";
 
-            if (   $form->{groupprojectnumber}
-                || $form->{grouppartsgroup} )
+            if ( $form->{grouppartsgroup} )
             {
 
                 $inventory_accno_id =
@@ -809,50 +771,7 @@ sub order_details {
                   ? "1"
                   : "";
 
-                if ( $form->{groupprojectnumber} ) {
-                    ( $projectnumber, $projectnumber_id ) =
-                      split /--/, $form->{"projectnumber_$i"};
-                }
-                if ( $form->{grouppartsgroup} ) {
-                    ( $form->{partsgroup} ) = split /--/,
-                      $form->{"partsgroup_$i"};
-                }
-
-                if (   $projectnumber_id
-                    && $form->{groupprojectnumber} )
-                {
-                    if ( $translation{$projectnumber_id} ) {
-                        $form->{projectnumber} =
-                          $translation{$projectnumber_id};
-                    }
-                    else {
-
-                        # get project description
-                        $prh->execute($projectnumber_id);
-                        ( $projectdescription, $translation ) =
-                          $prh->fetchrow_array;
-                        $prh->finish;
-
-                        $form->{projectnumber} =
-                          ($translation)
-                          ? "$projectnumber, \n" . "$translation"
-                          : "$projectnumber, \n" . "$projectdescription";
-
-                        $translation{$projectnumber_id} =
-                          $form->{projectnumber};
-                    }
-                }
-
-                if (   $form->{grouppartsgroup}
-                    && $form->{partsgroup} )
-                {
-                    $form->{projectnumber} .= " / "
-                      if $projectnumber_id;
-                    $form->{projectnumber} .= $form->{partsgroup};
-                }
-
-                $form->format_string($form->{projectnumber});
-
+                ( $form->{partsgroup} ) = split /--/, $form->{"partsgroup_$i"};
             }
 
             $sortby = qq|$projectnumber$form->{partsgroup}|;
@@ -992,12 +911,12 @@ sub order_details {
                 @{ $form->{ship} },
                 $form->format_amount( $myconfig, $form->{"ship_$i"} )
             );
-            push( @{ $form->{unit} },         qq|$form->{"unit_$i"}| );
-            push( @{ $form->{bin} },          qq|$form->{"bin_$i"}| );
-            push( @{ $form->{serialnumber} }, qq|$form->{"serialnumber_$i"}| );
-            push( @{ $form->{requiredate} },  qq|$form->{"reqdate_$i"}| );
+            push( @{ $form->{unit} },         $form->{"unit_$i"} // '' );
+            push( @{ $form->{bin} },          $form->{"bin_$i"} // '' );
+            push( @{ $form->{serialnumber} }, $form->{"serialnumber_$i"} // '' );
+            push( @{ $form->{requiredate} },  $form->{"reqdate_$i"} // '' );
             push( @{ $form->{projectnumber} },
-                qq|$form->{"projectnumber_$i"}| );
+                  $form->{"projectnumber_$i"} );
 
             push( @{ $form->{sellprice} }, $form->{"sellprice_$i"} );
 
@@ -1264,7 +1183,7 @@ sub order_details {
             );
 
             push( @{ $form->{taxdescription} },
-                $form->{"${item}_description"} );
+                $form->{_accno_descriptions}->{$item} );
 
             $form->{"${item}_taxrate"} =
               $form->format_amount( $myconfig, $form->{"${item}_rate"} * 100 );
@@ -1310,19 +1229,17 @@ sub order_details {
       ? $form->{ordtotal}
       : $form->{ordtotal} + $tax;
 
-    my $c = LedgerSMB::Num2text->new(
-        LedgerSMB::Locale->get_handle(
-            ($form->{language_code} ne "")
-            ? $form->{language_code} : $myconfig->{countrycode}
-        ));
-    $c->init;
     my $whole;
     ( $whole, $form->{decimal} ) = split /\./, $form->{ordtotal};
     $form->{decimal} .= "00";
     $form->{decimal} = substr( $form->{decimal}, 0, 2 );
 
-    $form->{text_decimal}   = $c->num2text( $form->{decimal} * 1 );
-    $form->{text_amount}    = $c->num2text($whole);
+    $form->{text_decimal}   =
+        LedgerSMB::Num2text::cardinal( $form->{_locale},
+                                       $form->{decimal} * 1 );
+    $form->{text_amount}    =
+        LedgerSMB::Num2text::cardinal( $form->{_locale},
+                                       $whole );
     $form->{integer_amount} = $form->format_amount( $myconfig, $whole );
 
     # format amounts
@@ -2168,12 +2085,6 @@ sub generate_orders {
 
         my $null;
         my $employee_id;
-        my $department_id;
-
-        ( $null, $employee_id ) = $form->get_employee;
-        ( $null, $department_id ) = split /--/, $form->{department};
-        $department_id *= 1;
-
 
         $query = qq|
             UPDATE oe SET
@@ -2185,14 +2096,13 @@ sub generate_orders {
                 taxincluded = ?,
                 curr = ?,
                 person_id = ?,
-                department_id = ?,
                 ponumber = ?
             WHERE id = ?|;
         $sth = $dbh->prepare($query);
         $sth->execute(
             $ordnumber,   $vendor_id,     $amount,
             $netamount,   $taxincluded,   $curr,
-            $employee_id, $department_id, $form->{ponumber},
+            $employee_id, $form->{ponumber},
             $id
         ) || $form->dberror($query);
 

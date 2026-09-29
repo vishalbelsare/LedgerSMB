@@ -52,22 +52,16 @@ This set of actions operates on the following keys in the workflow context:
 
 use strict;
 use warnings;
-use parent qw( Workflow::Action );
-
-use Authen::SASL;
+use parent qw( LedgerSMB::Workflow::Action );
 
 use Email::MessageID;
 use Email::Sender::Simple;
 use Email::Stuffer;
 
 use Log::Any qw($log);
-use Workflow::Factory qw(FACTORY);
-
-use LedgerSMB::Mailer::TransportSMTP;
-use LedgerSMB::Sysconfig;
 
 
-my @PROPS = qw( action order );
+my @PROPS = qw( action );
 __PACKAGE__->mk_accessors(@PROPS);
 
 =head2 init($wf, $params)
@@ -81,7 +75,6 @@ sub init {
     $self->SUPER::init($wf, $params);
 
     $self->action( $params->{action} );
-    $self->order( $params->{order} );
 }
 
 =head2 execute($wf)
@@ -103,16 +96,10 @@ sub execute {
 
     $log->info('Action name: ', $self->action);
     if ($self->action eq 'send') {
-        $self->save($wf);
         $self->send($wf);
     }
     elsif ($self->action eq 'attach') {
-        $self->save($wf);
         $self->attach($wf);
-    }
-    elsif ($self->action eq 'save'
-           or $self->action eq 'queue') {
-        $self->save($wf);
     }
     elsif ($self->action eq 'expand') {
         $self->expand($wf);
@@ -144,11 +131,10 @@ keys:
 
 sub attach {
     my ($self, $wf) = @_;
-    my $persister   = FACTORY()->get_persister( $wf->type );
-    my $att         = $wf->context->param( 'attachment' );
+    my $ctx  = $wf->context;
+    my $atts = $ctx->param( '_attachments' );
 
-    $persister->attach( $wf, $att );
-    $persister->fetch_extra_workflow_data( $wf );
+    push $atts->@*, $ctx->delete_param( 'attachment' );
     return;
 }
 
@@ -167,10 +153,9 @@ sub expand {
     my $expansions = $wf->context->param( 'expansions' );
 
     if ( $body and $expansions ) {
-        $body =~ s/<%(.+?)%>/$expansions->{$1}/g;
+        $body =~ s/<%\s*(.+?)\s*%>/$expansions->{$1}/g;
 
         $wf->context->param( 'body', $body );
-        $self->save($wf)
     }
 
     return;
@@ -184,20 +169,12 @@ from the database.
 
 This step requires valid content for at least C<from>, C<to>, C<subject>.
 
-Uses global e-mail transfer configuration from L<LedgerSMB::Sysconfig>.
+Uses e-mail transfer configuration from the context.
 
 =cut
 
 sub send {
     my ($self, $wf) = @_;
-
-    my $dbh = $self->_factory->
-        get_persister_for_workflow_type($wf->type)->handle;
-    $dbh->do(q{UPDATE email SET sent_date = NOW() WHERE workflow_id = ?},
-             {}, $wf->id)
-        or $log->error($dbh->errstr);
-
-
     my $ctx  = $wf->context;
     my $mail = Email::Stuffer
         ->from(      $ctx->param( 'from' ) )
@@ -214,8 +191,8 @@ sub send {
         $mail->header( 'Disposition-Notification-To' => $ctx->param( 'from' ) );
     }
 
-    for my $att ( ($ctx->param( 'attachments' ) // [])->@* ) {
-        $mail->attach($att->{content}->(disable_cache => 1),
+    for my $att ( ($ctx->param( '_attachments' ) // [])->@* ) {
+        $mail->attach($att->{content},
                       content_type => $att->{mime_type},
                       disposition  => 'attachment',
                       filename     => $att->{file_name});
@@ -231,89 +208,27 @@ sub send {
                 $mail->email,
                 {
                     to => [ keys %bcc ],
-                    _configure_smtp(),
+                    transport => $wf->app->wire->get( 'mail' )->{transport},
                 });
         }
         Email::Sender::Simple->send(
             $mail->email,
             {
-                _configure_smtp(),
+                transport => $wf->app->wire->get( 'mail' )->{transport},
             });
     };
     die "Could not send email: $@.  Please check your configuration." if $@;
 
+    $ctx->param( 'sent', 1 );
     return;
 }
 
-=head2 save($wf)
-
-Stores the e-mail data from the workflow context, except C<attachments>.
-To create attachments, use the C<attach> workflow item.
-
-All fields in the e-mail are optional for this step.
-
-=cut
-
-sub save {
-    my ($self, $wf) = @_;
-    # Saving is built into the persister and happens automatically
-    # after each successful action; no additional code required
-}
-
-
-sub _configure_smtp {
-
-    return unless LedgerSMB::Sysconfig::smtphost();
-
-    my @options = (host => LedgerSMB::Sysconfig::smtphost() );
-
-    if (LedgerSMB::Sysconfig::smtpport()) {
-        push @options,
-            port => LedgerSMB::Sysconfig::smtpport();
-    }
-
-    if (LedgerSMB::Sysconfig::smtpuser()) {
-        push @options,
-            # the SMTP transport checks that 'sasl_password' be
-            # defined; however, its implementation (Net::SMTP) allows
-            # the 'sasl_username' to be an Authen::SASL instance which
-            # means the password is already embedded in sasl_username.
-            sasl_username => Authen::SASL->new(
-                mechanism => LedgerSMB::Sysconfig::smtpauthmech(),
-                callback => {
-                    user => LedgerSMB::Sysconfig::smtpuser(),
-                    pass => LedgerSMB::Sysconfig::smtppass(),
-                }),
-            sasl_password => '';
-    }
-
-    if (LedgerSMB::Sysconfig::smtptimeout()) {
-        push @options, timeout => LedgerSMB::Sysconfig::smtptimeout();
-    }
-
-    my $tls = LedgerSMB::Sysconfig::smtptls();
-    if ($tls and $tls ne 'no') {
-        if ($tls eq 'yes') {
-            push @options, ssl => 'starttls';
-        }
-        elsif ($tls eq 'tls') {
-            push @options, ssl => 'ssl';
-        }
-    }
-
-    if (LedgerSMB::Sysconfig::smtpsender_hostname()) {
-        push @options,
-            helo => LedgerSMB::Sysconfig::smtpsender_hostname();
-    }
-
-    return ( transport => LedgerSMB::Mailer::TransportSMTP->new(@options) );
-}
 
 1;
 
 =head1 LICENSE AND COPYRIGHT
 
-Copyright (C) 2020 The LedgerSMB Core Team
+Copyright (C) 2020-2024 The LedgerSMB Core Team
 
 This file is licensed under the GNU General Public License version 2, or at your
 option any later version.  A copy of the license should have been included with

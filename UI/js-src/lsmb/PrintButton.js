@@ -25,13 +25,16 @@ define([
             if (f.media.value === "screen") {
                 var data;
 
+                event.stop(evt);
                 if (this.minimalGET) {
                     data = {
-                        action: this.get("value"),
+                        __action: this.get("value"),
                         type: f.type.value,
                         id: f.id.value,
+                        // eslint-disable-next-line camelcase
                         workflow_id: f.workflow_id ? f.workflow_id.value : "",
                         formname: f.formname.value,
+                        // eslint-disable-next-line camelcase
                         language_code: f.language_code.value,
                         media: "screen",
                         format: f.format.value
@@ -47,23 +50,26 @@ define([
                     data[this.get("name")] = this.get("value");
                 }
 
-                var client = new XMLHttpRequest();
-                client.open("POST", domattr.get(f, "action"));
-                client.responseType = "blob";
-                client.onreadystatechange = function () {
-                    if (client.readyState === XMLHttpRequest.DONE) {
-                        var status = client.status;
-                        if (status === 0 || (status >= 200 && status < 400)) {
-                            var disp = client.getResponseHeader(
-                                "Content-Disposition"
-                            );
-                            var cd = contentDisposition.parse(disp);
-                            if (cd.parameters.filename === undefined) {
-                                cd.parameters.filename = "unknown";
-                            }
-                            if (cd.type && cd.type === "attachment") {
+                let base = window.location.pathname.replace(/[^/]*$/, "");
+                fetch(base + domattr.get(f, "action"), {
+                    method: "POST",
+                    body: dojo.objectToQuery(data),
+                    headers: {
+                        "X-Requested-With": "XMLHttpRequest",
+                        "Content-Type": "application/x-www-form-urlencoded"
+                    }
+                }).then((r) => {
+                    if (r.ok) {
+                        let rh = r.headers;
+                        var disp = rh.get("Content-Disposition");
+                        var cd = contentDisposition.parse(disp);
+                        if (cd.parameters.filename === undefined) {
+                            cd.parameters.filename = "unknown";
+                        }
+                        if (cd.type && cd.type === "attachment") {
+                            r.blob().then((c) => {
                                 var a = document.createElement("a");
-                                var h = URL.createObjectURL(client.response);
+                                var h = URL.createObjectURL(c);
 
                                 a.download = cd.parameters.filename;
                                 a.href = h;
@@ -71,34 +77,22 @@ define([
 
                                 a.remove();
                                 URL.revokeObjectURL(h);
-                            } else {
-                                var d = registry.byId("errorDialog");
-                                d.set(
-                                    "content",
-                                    "Server sent unexpected response."
-                                );
-                                d.show();
-                            }
+                            });
                         } else {
-                            var err = {
-                                response: {
-                                    data: client.response
-                                }
-                            };
-                            registry.byId("maindiv").report_request_error(err);
+                            var d = registry.byId("errorDialog");
+                            d.set(
+                                "content",
+                                "Server sent unexpected response."
+                            );
+                            d.show();
                         }
+                    } else {
+                        window.__lsmbReportError(r);
                     }
-                };
-                client.setRequestHeader(
-                    "Content-Type",
-                    "application/x-www-form-urlencoded"
-                );
-                client.send(dojo.objectToQuery(data));
-                event.stop(evt);
-                return;
+                });
+            } else {
+                this.inherited(arguments);
             }
-
-            this.inherited(arguments);
         }
     });
 });

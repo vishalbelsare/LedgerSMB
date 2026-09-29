@@ -1,4 +1,6 @@
 
+use v5.38;
+
 package LedgerSMB::PGNumber;
 
 =head1 NAME
@@ -15,19 +17,15 @@ Math::BigFloat and can be used in this way.
 
 =cut
 
-use strict;
-use warnings;
-use base qw(PGObject::Type::BigFloat);
+use parent qw(PGObject::Type::BigFloat);
 
 # try using the GMP library for Math::BigFloat for speed
+use Carp;
 use Math::BigFloat try => 'GMP';
 use Memoize;
 use Number::Format;
 use PGObject::Type::BigFloat;
 
-use LedgerSMB::App_State;
-use LedgerSMB::Company_Config;
-use LedgerSMB::Setting;
 use LedgerSMB::Magic qw( DEFAULT_NUM_PREC );
 
 __PACKAGE__->register(registry => 'default',
@@ -40,6 +38,9 @@ our ($accuracy, $precision, $round_mode, $div_scale);
 $accuracy = $precision = undef;
 $round_mode = 'even';
 $div_scale = 40;
+
+# Prevent downgrading to Math::BigInt
+$Math::BigFloat::downgrade = undef;
 
 =head1 INHERITS
 
@@ -65,9 +66,7 @@ use overload 'bool' => '_bool';
 
 # function to return boolean value based on the numerical value
 # of the BigFloat (zero being false)
-sub _bool {
-    my ($self) = @_;
-
+sub _bool($self, $, $) {
     return !($self == 0);
 }
 
@@ -149,10 +148,19 @@ Constructor to prevent BigFloat downgrades to BigInt
 
 =cut
 
-sub new {
-    my $class = shift;
+sub _formatter(@args) {
+    return Number::Format->new(@args);
+}
+
+# Together with the memoization in PGNumber,
+# this workaround shaved off 25% rendering time off a 10k acc_trans
+# table (being GL>Search-ed without restrictions)
+memoize('_formatter');
+
+
+sub new($class, @args) {
     local $Math::BigFloat::downgrade = undef;
-    return $class->SUPER::new(@_);
+    return $class->SUPER::new(@args);
 }
 
 =item from_input(string $input, hashref %args);
@@ -161,43 +169,27 @@ The input is formatted.
 
 =cut
 
-sub from_input {
-    my $self = shift;
-    my $string = shift;
-
-    local $@ = undef;
-    return $string if eval { $string->isa(__PACKAGE__) };
-
-    #tshvr4 avoid 'Use of uninitialized value $string in string eq'
+sub from_input($self, $string, @args) {
+    return $string if $string isa __PACKAGE__;
     if (!defined $string || $string eq '') {
         return undef;
     }
-    my %args   = (ref($_[0]) eq 'HASH') ? %{$_[0]} : @_;
-    my $format = ($args{format}) ? $args{format}
-                                 : LedgerSMB::App_State::User()->{numberformat};
-    die 'LedgerSMB::PGNumber No Format Set' if !$format;
-    #return undef if !defined $string;
+    my %args   = (ref($args[0]) eq 'HASH') ? %{$args[0]} : @args;
+    my $format = $args{format} // $args{numberformat};
+    croak 'LedgerSMB::PGNumber No Format Set' if !$format;
+
     my $negate;
     my $pgnum;
     my $newval;
     $negate = 1 if $string =~ /(^\(|DR$)/;
 
-    if (UNIVERSAL::isa($string, 'LedgerSMB::PGNumber')) {
-        return $string;
-    }
-
-    if (UNIVERSAL::isa($string, 'LedgerSMB::PGNumber')) {
-        $pgnum = $string;
-    }
-    else {
-        my $formatter = Number::Format->new(
-            -thousands_sep => $lsmb_formats->{$format}->{thousands_sep},
-            -decimal_point => $lsmb_formats->{$format}->{decimal_sep},
+    my $formatter = _formatter(
+        -thousands_sep => $lsmb_formats->{$format}->{thousands_sep},
+        -decimal_point => $lsmb_formats->{$format}->{decimal_sep},
         );
-        $newval = $formatter->unformat_number($string);
-        $pgnum = LedgerSMB::PGNumber->new($newval);
-        $self->round_mode('+inf');
-    }
+    $newval = $formatter->unformat_number($string);
+    $pgnum = LedgerSMB::PGNumber->new($newval);
+    $self->round_mode('+inf');
 
     bless $pgnum, $self;
     $pgnum->bmul(-1) if $negate;
@@ -219,6 +211,10 @@ Override user's default output format with specified format for this number.
 
 Specifies the number of places to round
 
+=item money_places
+
+Specifies the number of decimal places for for money
+
 =item money
 
 Specifies to round to configured number format for money
@@ -227,34 +223,20 @@ Specifies to round to configured number format for money
 
 Specifies the negative format
 
-=item locale
-
 =back
 
 =cut
 
-sub _formatter {
-    return Number::Format->new(@_);
-}
 
-# Together with the memoization in PGNumber,
-# this workaround shaved off 25% rendering time off a 10k acc_trans
-# table (being GL>Search-ed without restrictions)
-memoize('_formatter');
-
-
-sub to_output {
-    my $self = shift @_;
-    my %args  = (ref($_[0]) eq 'HASH')? %{$_[0]}: @_;
+sub to_output($self, @args) {
+    my %args  = (ref($args[0]) eq 'HASH')? %{$args[0]}: @args;
     my $is_neg = $self->is_neg;
 
-    my $format = ($args{format}) ? $args{format}
-                              : LedgerSMB::App_State::User()->{numberformat};
-    die 'LedgerSMB::PGNumber No Format Set, check numberformat in user_preference' if !$format;
+    my $format = $args{format} // $args{numberformat};
+    croak 'LedgerSMB::PGNumber No Format Set, check numberformat in user_preference' if !$format;
 
     my $places = undef;
-    $places = $LedgerSMB::Company_Config::settings->{decimal_places}
-       if $args{money};
+    $places = $args{money_places} if $args{money};
     $places = ($args{places}) ? $args{places} : $places;
     my $str = $self->bstr;
     my $dplaces = $places;
@@ -283,8 +265,8 @@ Returns the value for sorting purposes
 
 =cut
 
-sub to_sort {
-    return $_[0]->bstr;
+sub to_sort($self) {
+    return $self->bstr;
 }
 
 =back
@@ -299,5 +281,3 @@ your software.
 
 =cut
 
-
-1;

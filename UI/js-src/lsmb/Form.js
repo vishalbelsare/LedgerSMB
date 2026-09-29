@@ -4,39 +4,33 @@ define([
     "dijit/form/Form",
     "dojo/_base/declare",
     "dojo/_base/event",
-    "dojo/on",
     "dojo/dom-attr",
     "dojo/dom-form",
-    "dojo/query",
     "dijit/registry"
-], function (Form, declare, event, on, domattr, domform, query, registry) {
+], function (Form, declare, event, domattr, domform, registry) {
     var c = 0;
     return declare("lsmb/Form", [Form], {
         clickedAction: null,
-        startup: function () {
-            var self = this;
-            this.inherited(arguments);
-
-            // <button> tags get rewritten to <input type="submit" tags...
-            query('input[type="submit"]', this.domNode).forEach(function (b) {
-                on(b, "click", function () {
-                    self.clickedAction = b;
-                });
-            });
-        },
         onSubmit: function (evt) {
             event.stop(evt);
+            this.clickedAction =
+                evt.submitter; /* ought to be the same as this.domNode.__action */
             this.submit();
         },
         submit: function () {
-            if (!this.validate()) {
+            const widget = registry.getEnclosingWidget(this.clickedAction);
+            if (!this.validate() || widget === null) {
                 return;
             }
 
-            var method =
+            const options = { handleAs: "text" };
+            const method =
                 typeof this.method === "undefined" ? "GET" : this.method;
-            var url = this.action;
-            var options = { handleAs: "text" };
+            let url =
+                this.action; /* relative; this.domNode.action is absolute */
+
+            options.doing = widget["data-lsmb-doing"];
+            options.done = widget["data-lsmb-done"];
             if (method.toLowerCase() === "get") {
                 if (!url) {
                     /* eslint no-alert:0 */
@@ -44,7 +38,7 @@ define([
                     return;
                 }
                 c++;
-                var qobj = domform.toQuery(this.domNode);
+                let qobj = domform.toQuery(this.domNode);
                 qobj =
                     domattr.get(this.clickedAction, "name") +
                     "=" +
@@ -52,7 +46,7 @@ define([
                     "&" +
                     qobj;
                 url = url + "?" + qobj + "#" + c.toString(16);
-                registry.byId("maindiv").load_link(url); // add GET forms to the back button history
+                window.__lsmbLoadLink(url); // add GET forms to the back button history
             } else {
                 options.method = method;
                 if (this.domNode.enctype === "multipart/form-data") {
@@ -74,7 +68,7 @@ define([
                         "&" +
                         domform.toQuery(this.domNode);
                 }
-                registry.byId("maindiv").load_form(url, options);
+                window.__lsmbSubmitForm({ url, options });
             }
         }
     });

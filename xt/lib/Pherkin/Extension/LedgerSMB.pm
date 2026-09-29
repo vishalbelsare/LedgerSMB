@@ -15,20 +15,29 @@ use strict;
 use warnings;
 
 use LedgerSMB::Company;
+use LedgerSMB::Company::Configuration;
 use LedgerSMB::Database;
 use LedgerSMB::PGDate;
 use LedgerSMB::Entity::Person::Employee;
-use LedgerSMB::Entity::User;
-use LedgerSMB::Sysconfig;
-use Test::BDD::Cucumber::Extension;
+
+use Beam::Wire;
 use List::Util qw(any);
 use Log::Log4perl qw(:easy);
+use YAML::PP;
+
+use Test::BDD::Cucumber::Extension;
+
+my $yp = YAML::PP->new( header => 0 );
+open my $fh, '<', 'ledgersmb.yaml'
+    or die "Unable to open 'ledgersmb.yaml': $!";
+my $config = $yp->load_string( do { local $/ = undef; <$fh> } );
+close $fh or warn "Unable to close config file: $!";
+
+my $wire = Beam::Wire->new( config => $config );
 
 use Moose;
 use namespace::autoclean;
 extends 'Test::BDD::Cucumber::Extension';
-
-LedgerSMB::Sysconfig->initialize;
 
 has db_name => (is => 'rw', default => $ENV{PGDATABASE});
 has username => (is => 'rw', default => $ENV{PGUSER});
@@ -37,6 +46,7 @@ has host => (is => 'rw', default => $ENV{PGHOST} // 'localhost');
 has template_db_name => (is => 'rw', default => 'std-template');
 has admin_user_name => (is => 'rw', default => 'test-user-admin');
 has admin_user_password => (is => 'rw', default => 'password');
+has wire => (is => 'ro', default => sub { $wire });
 
 has db => (is => 'rw');
 has super_dbh => (is => 'rw',
@@ -46,6 +56,9 @@ has admin_dbh => (is => 'rw', lazy => 1,
                   clearer => '_clear_admin_dbh',
                   predicate => '_has_admin_dbh',
     );
+has admin_conn => (is => 'rw', lazy => 1,
+                   builder => '_build_admin_conn');
+
 has template_created => (is => 'rw', default => 0);
 has last_scenario_stash => (is => 'rw');
 has last_feature_stash => (is => 'rw');
@@ -72,6 +85,17 @@ sub _build_admin_dbh {
 
     return $dbh;
 }
+
+sub _build_admin_conn {
+    my $self = shift;
+
+    return LedgerSMB::Company->new(
+        dbh      => $self->admin_dbh,
+        username => $self->admin_user_name,
+        wire     => undef,
+        );
+}
+
 
 sub step_directories {
     return [ 'ledgersmb_steps/' ];
@@ -166,7 +190,7 @@ sub pre_scenario {
     $stash->{"the admin password"} = $self->admin_user_password;
 
     if ($self->last_feature_stash->{"the company"}
-        && any { $_ eq 'one-db' } @{$scenario->tags}) {
+        && any { $_ eq '@one-db' } @{$scenario->tags}) {
         $stash->{"the company"} = $self->last_feature_stash->{"the company"};
     }
 }
@@ -188,11 +212,10 @@ sub create_employee {
     my $dbh = $args{dbh} // $self->admin_dbh;
     my $employeenumber = 'E-' . ($emp_counter++);
 
-    local $LedgerSMB::App_State::User = {};
     my $emp = LedgerSMB::Entity::Person::Employee->new(
         employeenumber => $employeenumber,
         control_code => $employeenumber,
-        dob => LedgerSMB::PGDate->from_input('2006-09-01'),
+        dob => LedgerSMB::PGDate->from_input('2006-09-01', dateformat => 'YYYY-MM-DD' ),
         salutation_id => 1,
         first_name => 'First',
         last_name => 'Last'.$emp_counter,
@@ -210,20 +233,20 @@ my $user_counter = 0;
 
 sub create_user {
     my $self = shift;
+    my $app = shift;
     my %args = @_;
 
-    my $dbh = $args{dbh} // $self->admin_dbh;
     my $username = $args{username} //
         $self->db_name . '_user' . ($user_counter++);
 
-    $self->super_dbh->do(qq(DROP ROLE IF EXISTS "$username"));
-    my $user = LedgerSMB::Entity::User->new(
-        entity_id => $args{entity_id},
-        username => $username,
-        _dbh => $dbh,
-        );
-    $user->create($args{password} // 'password');
-    $dbh->do(qq(ALTER USER "$username" VALID UNTIL 'infinity'));
+    my $user = $app->users->create( $username,
+                                    entity_id => $args{entity_id},
+                                    passwd    => $args{password} // 'password',
+                                    force     => 1);
+    my $query =
+        sprintf q{ALTER ROLE %s VALID UNTIL 'infinity'}, $app->dbh->quote_identifier( $username );
+    $app->dbh->do( $query )
+        or die 'Password expiration failed to extend: ' . $app->dbh->errstr;
 
     return $user;
 }
@@ -247,27 +270,35 @@ sub create_template {
         schema   => 'xyz');
 
     $db->create_and_load;
-    my $c = LedgerSMB::Company->new(
+    my $app = LedgerSMB::Company->new(
         dbh => $db->connect(),
-        )->configuration;
+        username => $self->username,
+        wire     => undef
+        );
      my $fn = './locale/coa/us/General.xml';
-    open my $fh, '<:encoding(UTF-8)', $fn
+    open my $fh, '<:raw', $fn
         or die "Failed to open $fn: $!";
-    $c->from_xml($fh);
-    $c->dbh->commit;
-    $c->dbh->disconnect;
+    $app->configuration->from_xml($fh);
     close $fh
         or warn "Error closing $fn: $!";
 
+    open $fh, '<:raw', './locale/menu.xml'
+        or die "Failed to open menu definition: $!";
+    $app->menu->from_xml( $fh );
+    close $fh
+        or warn "Error closing menu.xml: $!";
+
+    $app->dbh->commit;
+
     # NOTE: $db is connected with the template, *not* with the
     #  test database (which means we can't use $self->super_dbh!)
-    my $dbh = $db->connect({ PrintError => 0,
-                             RaiseError => 1,
-                             AutoCommit => 0 });
+    my $dbh = $app->dbh;
     $dbh->do(q{set client_min_messages = 'warning'});
 
+    # Disable the toaster for more immediate page interaction
+    $dbh->do(q|insert into defaults values ('__disableToaster', 'yes')|);
     # Set up sequence randomization
-$dbh->do(q|
+    $dbh->do(q|
 do
 $$
 declare
@@ -283,7 +314,7 @@ begin
   end loop;
 end;
 $$;
-|);
+             |);
 
     $dbh->do(q|
 UPDATE business_unit_class SET active = true WHERE id = 2; -- project
@@ -292,13 +323,13 @@ INSERT INTO business_unit (class_id, control_code, description)
              |);
 
     my $emp = $self->create_employee(dbh => $dbh);
-    my $user = $self->create_user(dbh => $dbh,
-        entity_id => $emp->entity_id,
+    my $user = $self->create_user($app,
+                                  entity_id => $emp->entity_id,
                                   username => $admin);
 
-    my $roles;
-    @$roles = map { $_->{rolname} } @{$user->list_roles};
-    $user->save_roles($roles);
+    for my $role ($app->roles->list->@*) {
+        $role->assign( $user );
+    }
 
     $dbh->do("INSERT INTO defaults
                      VALUES ('role_prefix', 'lsmb_${template}__')");
@@ -353,8 +384,8 @@ sub assert_closed_posting_date {
     sleep 1; # wait for any handling to finish
     my $sth = $self->admin_dbh->prepare(
         qq|
-   INSERT INTO gl (transdate, person_id)
-        VALUES (?, (SELECT entity_id FROM users WHERE username = ?))
+   INSERT INTO transactions (transdate, trans_type_code, approved)
+        VALUES (?, 'gl', true)
      RETURNING id
 |);
 
@@ -395,14 +426,20 @@ SELECT id
         $line->{account_id} = $account_id;
     }
 
+    $self->admin_dbh->do(
+        q|INSERT INTO transactions (transdate, trans_type_code, approved)
+          VALUES (?, 'gl', true)|,
+        {},
+        $posting_date)
+        or die $self->admin_dbh->errstr;
+
     my $trans_sth = $self->admin_dbh->prepare(
         qq|
-INSERT INTO gl(transdate, person_id)
-     VALUES (?, (SELECT entity_id FROM users WHERE username = ?))
+INSERT INTO gl(id)
+     VALUES (currval('transactions_id_seq'))
   RETURNING id
 |);
-    $trans_sth->execute($posting_date,
-                        $self->last_scenario_stash->{"the admin user"})
+    $trans_sth->execute()
         or die "Failed to create 'gl' table row: " . $trans_sth->errstr;
     my ($trans_id) = $trans_sth->fetchrow_array();
 
@@ -427,9 +464,8 @@ sub create_part {
     my ($self, $props) = @_;
 
     local $LedgerSMB::App_State::DBH = $self->admin_dbh;
-    my $account = LedgerSMB::DBObject::Account->new();
-    $account->set_dbh($self->admin_dbh);
-    my @accounts = $account->list();
+    my $cfg = LedgerSMB::Company::Configuration->new(dbh => $self->admin_dbh);
+    my @accounts = $cfg->coa_nodes->get(filter => q{not is_heading});
     my %accno_ids = map { $_->{accno} => $_->{id} } @accounts;
 
     $props->{partnumber} //= 'P-' . ($part_count++);
@@ -438,7 +474,7 @@ sub create_part {
     my @values;
     my @placeholders;
 
-    $props->{$_} = $accno_ids{$props->{$_}}
+    $props->{$_} = ($accno_ids{$props->{$_}} =~ s/^A-//r)
        for grep { m/accno/ } keys %$props;
 
     for my $key (keys %$props) {
@@ -458,27 +494,48 @@ sub create_part {
     return $props->{partnumber};
 }
 
+
+sub country_id_from_name {
+    my ($self, $country_name) = @_;
+    my $sql = $self->admin_dbh->prepare(
+        'SELECT id FROM country WHERE name = ?'
+    );
+    $sql->execute($country_name)
+        or die "failed to query country";
+    my $country = $sql->fetchrow_hashref;
+
+    unless ($country && $country->{id}) {
+        die "failed to find country id for '$country_name'";
+    }
+
+    return $country->{id};
+}
+
+
 my $vc_counter = 0;
 
 sub create_vc {
-    my ($self, $vc, $vc_name) = @_;
+    my ($self, $vc, $vc_name, $country) = @_;
+    $country ||= 'United States';
     my $control_code = uc(substr($vc,0,1)) . '-' . ($vc_counter++);
     my $admin_dbh = $self->admin_dbh;
+    my $country_id = $self->country_id_from_name($country);
     my $company = LedgerSMB::Entity::Company->new(
-        country_id   => 1,
+        country_id   => $country_id,
         control_code => $control_code,
         legal_name   => $vc_name,
         name         => $vc_name,
         entity_class => ($vc eq 'vendor' ? 1 : 2),
         _dbh         => $admin_dbh,
-        );
+    );
     $company = $company->save;
 
     local $LedgerSMB::App_State::DBH = $admin_dbh;
-    my $account = LedgerSMB::DBObject::Account->new();
-    $account->set_dbh($admin_dbh);
-    my @accounts = $account->list();
-    my %accno_ids = map { $_->{accno} => $_->{id} } @accounts;
+    my $cfg = LedgerSMB::Company::Configuration->new(dbh => $self->admin_dbh, wire => undef);
+    my @accounts = $cfg->coa_nodes->get(filter => q{not is_heading});
+    my %accno_ids = map {
+        $_->{accno} => ($_->{id} =~ s/^A-//r)
+    } @accounts;
 
     LedgerSMB::Entity::Credit_Account->new(
         entity_id        => $company->entity_id,
@@ -487,12 +544,11 @@ sub create_vc {
         ar_ap_account_id => $accno_ids{($vc eq 'vendor' ? '2100' : '1200')},
         meta_number      => $vc_name,
         curr             => 'USD',
-        )->save;
+    )->save;
 
     my $vc_key = ($vc eq 'vendor') ? 'the vendor' : 'the customer';
     return {
         $vc_key       => $vc_name,
-#        'the company' => $control_code,
     };
 }
 

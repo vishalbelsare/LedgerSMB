@@ -8,7 +8,7 @@ LedgerSMB::Report::Orders - Search for Orders and Quotations in LedgerSMB
 =head1 SYNPOSIS
 
  my $report = LedgerSMB::Report::Orders->new(%$request);
- $report->render($request);
+ $report->render();
 
 =cut
 
@@ -207,7 +207,7 @@ sub columns {
        {col_id => 'ordnumber',
           name => $ORDNUMBER,
           type => 'href',
-     href_base => "oe.pl?action=$HREF_ACTION&id=", },
+     href_base => "oe.pl?__action=$HREF_ACTION&id=", },
 
        {col_id => 'reqdate',
           name => $self->Text('Required Date'),

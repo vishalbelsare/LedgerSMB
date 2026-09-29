@@ -40,7 +40,6 @@ LedgerSMB:GL - General Ledger backend code
 package GL;
 
 use LedgerSMB::File;
-use LedgerSMB::Setting;
 
 =over
 
@@ -73,7 +72,6 @@ sub post_transaction {
       if $form->should_update_defaults('reference');
     my $null;
     my $project_id;
-    my $department_id;
     my $i;
 
     my $dbh = $form->{dbh};
@@ -81,79 +79,71 @@ sub post_transaction {
     my $query;
     my $sth;
 
-    my $id = $dbh->quote( $form->{id} );
-    if ($form->{separate_duties}){
-        $form->{approved} = '0';
-    }
+    $form->{approved} = '0';
     if ( $form->{id} ) {
 
-        $query = qq|SELECT id FROM gl WHERE id = $id|;
-        ( $form->{id} ) = $dbh->selectrow_array($query);
+        $query = q|SELECT id FROM gl WHERE id = ?|;
+        ( $form->{id} ) = $dbh->selectrow_array($query, {}, $form->{id});
+        die $dbh->errstr if $dbh->err;
 
         if ( $form->{id} ) {
 
-            # delete individual transactions
-            $query = qq|
-            DELETE FROM acc_trans WHERE trans_id = $id|;
-
-            $dbh->do($query) || $form->dberror($query);
-            $query = qq|
-            DELETE FROM voucher WHERE trans_id = $id
-                                            and batch_class = 5|;
-
-            $dbh->do($query) || $form->dberror($query);
+            # delete journal lines
+            $query = q|DELETE FROM acc_trans WHERE trans_id = ?|;
+            $dbh->do($query, {}, $form->{id}) || $form->dberror($query);
         }
     }
 
     if ( !$form->{id} ) {
 
+        $query = q|
+              INSERT INTO transactions (transdate, trans_type_code, approved, reference, notes, batch_id)
+              VALUES (?, 'gl', true, ?, ?, ?)
+              |;
+        $dbh->do($query, {},
+                 $form->{transdate}, $form->{reference},
+                 $form->{notes}, $form->{batch_id})
+            or $form->dberror($query);
+
         $query = qq|
-      INSERT INTO gl (reference, description, notes, transdate)
-           VALUES (?, ?, ?, ?)
+      INSERT INTO gl (id)
+           VALUES (currval('transactions_id_seq'))
       RETURNING id|;
 
-        $sth = $dbh->prepare($query);
-        $sth->execute($form->{reference}, $form->{description},
-                      $form->{notes}, $form->{transdate})
+        $sth = $dbh->prepare($query) || $form->dberror($query);
+        $sth->execute()
             || $form->dberror($query);
 
         ( $form->{id} ) = $sth->fetchrow_array();
-    }
-
-    ( $null, $department_id ) =
-        split( /--/, $form->{department}) if $form->{department};
-    ($department_id //= 0) *= 1;
-
-    if (! $form->{reference} ) {
-        $form->{reference} = $form->{id};
-        $dbh->do(qq|
-UPDATE gl
-   SET reference = ?
- WHERE id = ?|, {}, $form->{reference}, $form->{id})
-            or $form->dberror($dbh->errstr);
+        $query = q|
+             UPDATE transactions
+                SET workflow_id = ?,
+                    reversing = ?,
+                    description = ?,
+                    reference = ?,
+                    notes = ?
+              WHERE id = ?
+                    AND workflow_id IS NULL|;
+        $sth   = $dbh->prepare($query);
+        $form->{reversing} ||= undef; # convert empty string to NULL
+        $sth->execute( $form->{workflow_id}, $form->{reversing}, $form->{description}, $form->{reference}, $form->{notes}, $form->{id} )
+            || $form->dberror($query);
     }
 
     if (defined $form->{approved}) {
-        my $query = qq| UPDATE gl SET approved = ? WHERE id = ?|;
+        my $query = qq| UPDATE transactions SET approved = ? WHERE id = ?|;
         $dbh->prepare($query)->execute($form->{approved}, $form->{id})
              || $form->dberror($query);
         if (!$form->{approved} and $form->{batch_id}){
-           if (not defined $form->{batch_id}){
-               $form->error($locale->text('Batch ID Missing'));
-           }
-           my $vqh = $dbh->prepare('SELECT * FROM batch__lock_for_update(?)');
-           $vqh->execute($form->{batch_id});
+           my $vqh =
+               $dbh->prepare('SELECT * FROM batch__lock_for_update(?)')
+               or die $dbh->errstr;
+           $vqh->execute($form->{batch_id})
+               or die $vqh->errstr;
            my $bref = $vqh->fetchrow_hashref('NAME_lc');
            # Change the below to die with localization in 1.4
            $form->error('Approved Batch') if $bref->{approved_by};
            $form->error('Locked Batch') if $bref->{locked_by};
-           my $query = qq|
-         INSERT INTO voucher (batch_id, trans_id, batch_class)
-         VALUES (?, ?, (select id FROM batch_class
-                                 WHERE class = ?))|;
-           my $sth2 = $dbh->prepare($query);
-           $sth2->execute($form->{batch_id}, $form->{id}, 'gl') ||
-                $form->dberror($query);
        }
     }
 
@@ -223,7 +213,7 @@ UPDATE gl
             my ($count) = $s_sth->fetchrow_array()
                 or $form->dberror($s_sth->errstr);
             if ($count == 0){
-                 $form->error($locale->text('Account [_1] not found',
+                 $form->error($locale->text(q(Account '[_1]' not found),
                                             $accno));
             }
 
@@ -251,6 +241,14 @@ UPDATE gl
     return 1;
 }
 
+sub save_notes {
+    my ( $self, $myconfig, $form ) = @_;
+
+    my $query = 'UPDATE gl SET notes = ? where id = ?';
+    $form->{dbh}->do( $query, {}, $form->{notes}, $form->{id} );
+    $form->dberror( $query ) if $form->{dbh}->err;
+}
+
 sub transaction {
 
     my ( $self, $myconfig, $form ) = @_;
@@ -261,11 +259,10 @@ sub transaction {
 
     if ( $form->{id} ) {
 
-        @{$form->{currencies}} =
-            (LedgerSMB::Setting->new(%$form))->get_currencies;
+        $form->{currencies} = $form->currencies;
 
-        $query = qq|SELECT g.*
-                 FROM gl g
+        $query = qq|SELECT g.*, t.description, t.workflow_id, t.reversing, t.reversing_reference, t.reversed_by, t.reversed_by_reference
+                 FROM gl g JOIN transactions_reversal t on g.id = t.id
                 WHERE g.id = ?|;
 
         $sth = $dbh->prepare($query) || $form->dberror($dbh->errstr);
@@ -282,16 +279,17 @@ sub transaction {
                      WHERE ac.trans_id = ?
                   ORDER BY ac.entry_id|;
 
-        $sth = $dbh->prepare($query);
+        $sth = $dbh->prepare($query) || $form->dberror($query);
         $sth->execute( $form->{id} ) || $form->dberror($query);
 
         my $bu_sth = $dbh->prepare(
             qq|SELECT * FROM business_unit_ac
                 WHERE entry_id = ?  |
-        );
+        ) || die $dbh->errstr;
 
         while ( $ref = $sth->fetchrow_hashref(NAME_lc) ) {
-            $bu_sth->execute($ref->{entry_id});
+            $bu_sth->execute($ref->{entry_id})
+                or die $bu_sth->errstr;
             while ($buref = $bu_sth->fetchrow_hashref(NAME_lc) ) {
                  $ref->{"b_unit_$buref->{class_id}"} = $buref->{bu_id};
             }
@@ -304,8 +302,7 @@ sub transaction {
 
     }
     else {
-        @{$form->{currencies}} =
-            (LedgerSMB::Setting->new(%$form))->get_currencies;
+        $form->{currencies} = $form->currencies;
     }
 
     # get chart of accounts
@@ -313,7 +310,7 @@ sub transaction {
               FROM account
            ORDER BY accno|;
 
-    $sth = $dbh->prepare($query);
+    $sth = $dbh->prepare($query) || $form->dberror($query);
     $sth->execute || $form->dberror($query);
 
     while ( $ref = $sth->fetchrow_hashref(NAME_lc) ) {
@@ -342,7 +339,7 @@ sub get_all_acc_dep_pro
               FROM account
            ORDER BY accno|;
 
-    $sth = $dbh->prepare($query);
+    $sth = $dbh->prepare($query) || $form->dberror($query);
     $sth->execute || $form->dberror($query);
 
     while ( $ref = $sth->fetchrow_hashref(NAME_lc) ) {

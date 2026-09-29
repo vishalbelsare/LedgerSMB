@@ -98,9 +98,8 @@ END # BLOCK -%]
 [% END # BLOCK -%]
 [%- BLOCK _date_block %]
     [% INCLUDE input element_data = {
-           type = "text"
+           type = "date"
           label = label
-          class = "date"
            name = name _ SUFFIX
              id = name _ SUFFIX
            size = 11
@@ -134,6 +133,7 @@ END # BLOCK -%]
    <th align="right">[% text('Period') %]</th>
 
     <td colspan="5">
+        <label for="from_month[% SUFFIX %]" hidden>From Month</label>
         [%
         PROCESS select element_data = {
                name = "from_month" _ SUFFIX
@@ -141,7 +141,9 @@ END # BLOCK -%]
                options = all_months
                default_blank = 1
         };
-
+        %]
+        <label for="from_year[% SUFFIX %]" hidden>From Year</label>
+        [%
         PROCESS select element_data = {
                name="from_year" _ SUFFIX
                id="from_year" _ SUFFIX
@@ -150,43 +152,36 @@ END # BLOCK -%]
                value_attr = "date_get_all_years"
                default_blank = 1
         };
+        label_pos=1;
         PROCESS input element_data = {
                name="interval" _ SUFFIX
                id="interval" _ SUFFIX _ "current"
+               label=text('Current')
                class="radio"
                type="radio"
                value="none"
-               checked="checked" } %]&nbsp;[% text('Current');
-        PROCESS input element_data = {
-               name="interval"  _ SUFFIX
-               id="interval" _ SUFFIX _ "day"
-               class="radio"
-               type="radio"
-               value="month" } %]&nbsp;[% text('Day');
-        PROCESS input element_data = {
-               name="interval"  _ SUFFIX
-               id="interval" _ SUFFIX _ "week"
-               class="radio"
-               type="radio"
-               value="month" } %]&nbsp;[% text('Week');
+               checked="checked" } %]&nbsp;[%
         PROCESS input element_data = {
                name="interval"  _ SUFFIX
                id="interval" _ SUFFIX _ "month"
+               label=text('Month')
                class="radio"
                type="radio"
-               value="month" } %]&nbsp;[% text('Month');
+               value="month" } %]&nbsp;[%
         PROCESS input element_data = {
                name="interval" _ SUFFIX
                id="interval" _ SUFFIX _ "quarter"
+               label=text('Quarter')
                class="radio"
                type="radio"
-               value="quarter" } %]&nbsp;[% text('Quarter');
+               value="quarter" } %]&nbsp;[%
         PROCESS input element_data = {
                name="interval" _ SUFFIX
                id="interval" _ SUFFIX _ "year"
+               label=text('Year')
                class="radio"
                type="radio"
-               value="year" } %]&nbsp;[% text('Year') %]
+               value="year" } %]&nbsp;
 
         </td>
 [% END # BLOCK %]
@@ -205,7 +200,7 @@ END # BLOCK -%]
 [%- BLOCK date_from_date_div %]
     [%
         IF !label.defined();    label    = text('From');      END;
-        IF !name.defined();     name     = text('from_date'); END;
+        IF !name.defined();     name     = 'from_date'; END;
         IF !required.defined(); required = 'false';           END;
     %]
     <div class="input_group">
@@ -216,7 +211,7 @@ END # BLOCK -%]
 [% BLOCK date_to_date_div %]
     [%
         IF !label.defined();    label    = text('To');      END;
-        IF !name.defined();     name     = text('to_date'); END;
+        IF !name.defined();     name     = 'to_date'; END;
         IF !required.defined(); required = 'false';         END;
     %]
     <div class="input_group">

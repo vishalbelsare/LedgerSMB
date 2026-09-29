@@ -1,19 +1,30 @@
 /* stylesheet for ledger-smb */
+
 /* stylelint-disable no-descending-specificity, plugin/no-unsupported-browser-features */
-@import url(system/global.css);
+
+@import url("system/global.css");
 
 td.money {
     text-align: right;
 }
 
 /* general stuff */
-a:link { text-decoration: none; }
-a:visited { text-decoration: none; }
-a:active { text-decoration: underline; }
+
+a:link {
+    text-decoration-line: none;
+}
+
+a:visited {
+    text-decoration-line: none;
+}
+
+a:active {
+    text-decoration-line: underline;
+}
 
 a:hover {
     background-color: transparent;
-    text-decoration: underline;
+    text-decoration-line: underline;
 }
 
 body {
@@ -58,6 +69,7 @@ table.criteria td {
 }
 
 /* login and admin */
+
 .login {
     font-family: Verdana, Arial, Helvetica, sans-serif;
 }
@@ -146,9 +158,9 @@ body.menu a:visited {
 #top_menu {
     background-image: none;
     list-style: none;
-    margin: 10px 0 0 0;
+    margin: 10px 0 0;
     padding: 0;
-    -webkit-padding-start: 0;
+    padding-inline-start: 0;
 }
 
 #top_menu ul {
@@ -157,7 +169,7 @@ body.menu a:visited {
 }
 
 .menu_open {
-    background-image: url('../images/up.gif');
+    background-image: url("../images/up.gif");
     background-position: 0 0;
     background-repeat: no-repeat;
     font-size: 12px;
@@ -166,7 +178,7 @@ body.menu a:visited {
 }
 
 .menu_closed {
-    background-image: url('../images/down.gif');
+    background-image: url("../images/down.gif");
     background-position: 0 0;
     background-repeat: no-repeat;
     font-size: 12px;
@@ -176,13 +188,13 @@ body.menu a:visited {
 
 .submenu a {
     color: #004a80;
-    text-decoration: none;
+    text-decoration-line: none;
 }
 
 .submenu a:hover {
     background: #004a80;
     color: #eee;
-    text-decoration: none;
+    text-decoration-line: none;
 }
 
 .listtop {
@@ -204,7 +216,7 @@ thead th {
 thead a:link {
     color: white;
     font-weight: bold;
-    text-decoration: none;
+    text-decoration-line: none;
 }
 
 a.listheading:link,
@@ -212,7 +224,7 @@ a.listheading:active,
 a.listheading:visited {
     color: white;
     font-weight: bold;
-    text-decoration: none;
+    text-decoration-line: none;
 }
 
 .listrow1,
@@ -232,10 +244,14 @@ table.dynatable tr:nth-child(even) {
 }
 
 .listrow1,
-table.dynatable tbody tr:nth-child(odd):hover { background-color: #bbb; }
+table.dynatable tbody tr:nth-child(odd):hover {
+    background-color: #bbb;
+}
 
 .listrow0,
-table.dynatable tbody tr:nth-child(even):hover { background-color: #bbb; }
+table.dynatable tbody tr:nth-child(even):hover {
+    background-color: #bbb;
+}
 
 .listsubtotal,
 table.dynatable tr.sublisttotal {
@@ -285,7 +301,8 @@ select {
     font-size: 10pt;
 }
 
-.plus0 {    /* font color for negative numbers */
+.plus0 {
+    /* font color for negative numbers */
     color: red;
 }
 
@@ -340,45 +357,31 @@ tr.warning {
     background-color: yellow;
 }
 
-input[type=checkbox].remove::before {
+input[type="checkbox"].remove::before {
     background: white;
     color: white;
-    content: ' X ';
+    content: " X ";
     display: inline-block;
     text-align: center;
     width: 12px;
 }
 
-input[type=checkbox].remove:checked::before {
+input[type="checkbox"].remove:checked::before {
     background: red;
 }
-
-/* Theming controls based on transaction status */
-
-/* disabled for now to speed release
-#statusdiv.new input {
-}
-
-#statusdiv.posted input {
-       background-color: white;
-}
-
-#statusdiv.saved input {
-       background-color: #ccccff;
-}
-
-*/
 
 /* media stuff */
 
 @media screen {
-    .noscreen {   /* items with this class won't display */
+    .noscreen {
+        /* items with this class won't display */
         display: none;
     }
 }
 
 @media print {
-    .noprint {   /* items with this class won't print */
+    .noprint {
+        /* items with this class won't print */
         display: none;
     }
 }
@@ -399,7 +402,10 @@ div.autocomplete ul {
     margin: 0;
     padding: 0;
 }
-div.autocomplete ul li.selected { background-color: #ccc; }
+
+div.autocomplete ul li.selected {
+    background-color: #ccc;
+}
 
 div.autocomplete ul li {
     cursor: pointer;
@@ -454,5 +460,5 @@ span.indicator {
 .financial-statement a,
 .financial-statement a:visited {
     color: black;
-    text-decoration: none;
+    text-decoration-line: none;
 }

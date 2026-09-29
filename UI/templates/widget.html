@@ -25,6 +25,10 @@
                data-dojo-props="required:true,value:'[% template_name %]'"
                data-dojo-attach-point="templateName">
             <span value=""><span>[% text("--TEMPLATE--") %]</span></span>
+            <span value="print_journal_entry">
+              <span>[% text("GL transaction") %]</span></span>
+            <span value="print_cash_transfer">
+              <span>[% text("Cash Transfer transaction") %]</span></span>
             <span value="ap_transaction">
               <span>[% text("AP transaction") %]</span></span>
             <span value="ar_transaction">
@@ -135,7 +139,7 @@
                id="template-content"
                >
         <button id="upload-save"
-                name="action"
+                name="__action"
                 value="save"
                 type="submit"
                 data-dojo-type="dijit/form/Button"
@@ -148,14 +152,14 @@
       <div id="template-edit">
         <div id="template-edit-buttons">
           <button id="edit-save"
-                  name="action"
+                  name="__action"
                   value="save"
                   type="submit"
                   data-dojo-type="dijit/form/Button"
                   data-dojo-attach-point="editSaveButton"
                   >[% text("Save") %]</button>
           <button id="edit-cancel"
-                  name="action"
+                  name="__action"
                   value="edit_cancel"
                   data-dojo-type="dijit/form/Button"
                   data-dojo-attach-point="editCancelButton"

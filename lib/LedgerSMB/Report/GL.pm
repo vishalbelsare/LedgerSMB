@@ -8,8 +8,7 @@ LedgerSMB::Report::GL - GL Reports for LedgerSMB
 =head1 SYNPOSIS
 
   my $glreport = LedgerSMB::Report::GL->new(%$request);
-  $glreport->run;
-  $glreport->render($request, $format);
+  $glreport->render();
 
 =head1 DESCRIPTION
 
@@ -32,7 +31,9 @@ use LedgerSMB::Report;
 use Moose;
 use namespace::autoclean;
 extends 'LedgerSMB::Report';
-with 'LedgerSMB::Report::Dates', 'LedgerSMB::Report::Approval_Option';
+with 'LedgerSMB::Report::Dates',
+    'LedgerSMB::Report::Approval_Option',
+    'LedgerSMB::Report::Voided_Option';
 
 =head1 PROPERTIES
 
@@ -62,6 +63,12 @@ Read-only accessor, returns a list of columns.
 
 =item credits
 
+=item curr
+
+=item fx_debits
+
+=item fx_credits
+
 =item entry_id
 
 =item cleared
@@ -69,6 +76,8 @@ Read-only accessor, returns a list of columns.
 =item chart_id
 
 =item accno
+
+=item accname
 
 =item gifi_accno
 
@@ -100,7 +109,7 @@ sub columns {
      pwidth => '3', },
 
     {col_id => 'eca_name',
-       name => $self->Text('Vendor/Customer'),
+       name => $self->Text('Vendor Customer'),
        type => 'text',
      pwidth => '3', },
 
@@ -126,6 +135,22 @@ sub columns {
       money => 1,
      pwidth => '2', },
 
+    {col_id => 'fx_debits',
+       name => $self->Text('FX Debits'),
+       type => 'text',
+      money => 1,
+     pwidth => '2', },
+
+    {col_id => 'fx_credits',
+       name => $self->Text('FX Credits'),
+       type => 'text',
+      money => 1,
+     pwidth => '2', },
+
+    {col_id => 'curr',
+       name => $self->Text('Curr'),
+       type => 'text' },
+
     {col_id => 'source',
        name => $self->Text('Source'),
        type => 'text',
@@ -140,11 +165,6 @@ sub columns {
        name => $self->Text('Cleared'),
        type => 'text',
      pwidth => '3', },
-
-    {col_id => 'till',
-       name => $self->Text('Till'),
-       type => 'text',
-     pwidth => '1', },
 
     {col_id => 'chart_id',
        name => $self->Text('Chart ID'),
@@ -211,15 +231,15 @@ Returns the inputs to display on header.
 
 sub header_lines {
     my ($self) = @_;
-    return [{name => 'from_date',
+    return [{value => $self->from_date,
              text => $self->Text('Start Date')},
-            {name => 'to_date',
+            {value => $self->to_date,
              text => $self->Text('End Date')},
-            {name => 'accno',
+            {value => $self->accno,
              text => $self->Text('Account Number')},
-            {name => 'reference',
+            {value => $self->reference,
              text => $self->Text('Reference')},
-            {name => 'source',
+            {value => $self->source,
              text => $self->Text('Source')}];
 }
 
@@ -293,10 +313,8 @@ The highest value that can match, amount-wise for the line item.
 
 =cut
 
-has 'from_amount' => (is => 'rw', coerce => 1,
-                     isa => 'LedgerSMB::Moose::Number');
-has 'to_amount' => (is => 'rw', coerce => 1,
-                   isa => 'LedgerSMB::Moose::Number');
+has 'from_amount' => (is => 'rw', isa => 'LedgerSMB::PGNumber');
+has 'to_amount' => (is => 'rw', isa => 'LedgerSMB::PGNumber');
 
 =item business_units
 
@@ -322,6 +340,11 @@ sub _exclude_from_totals {
     return {running_balance => 1};
 }
 
+sub _exclude_row_from_totals {
+    my ($self, $row) = @_;
+    return (not defined $row or not defined $row->{id});
+}
+
 sub run_report{
     my ($self) = @_;
     my $accno = $self->accno;
@@ -337,22 +360,29 @@ sub run_report{
             $ref->{credits} = $ref->{amount};
             $ref->{debits} = 0;
         }
+        if ($ref->{amount_tc} < 0){
+            $ref->{fx_debits} = $ref->{amount_tc} * -1;
+            $ref->{fx_credits} = 0;
+        } else {
+            $ref->{fx_credits} = $ref->{amount_tc};
+            $ref->{fx_debits} = 0;
+        }
         if ($ref->{type} eq 'gl'){
-           $ref->{reference_href_suffix} = "gl.pl?action=edit&id=$ref->{id}";
+           $ref->{reference_href_suffix} = "gl.pl?__action=edit&id=$ref->{id}";
         } elsif ($ref->{type} eq 'ar'){
            if ($ref->{invoice}){
                 $ref->{reference_href_suffix} = 'is.pl';
            } else {
                 $ref->{reference_href_suffix} = 'ar.pl';
            }
-           $ref->{reference_href_suffix} .= "?action=edit&id=$ref->{id}";
+           $ref->{reference_href_suffix} .= "?__action=edit&id=$ref->{id}";
         } elsif ($ref->{type} eq 'ap'){
            if ($ref->{invoice}){
                 $ref->{reference_href_suffix} = 'ir.pl';
            } else {
                 $ref->{reference_href_suffix} = 'ap.pl';
            }
-           $ref->{reference_href_suffix} .= "?action=edit&id=$ref->{id}";
+           $ref->{reference_href_suffix} .= "?__action=edit&id=$ref->{id}";
         }
         if ($ref->{cleared}){
             $ref->{cleared} = 'X';
@@ -365,16 +395,101 @@ sub run_report{
     # firstly, check whether user filtered report by account number or not
     # and check there is data rows
     if (defined $self->accno && @rows){
-       my $first_row = $rows[0];
-       my $last_row = $rows[$#rows];
-       unshift(@rows, {
-          description => 'Starting Balance',
-          running_balance => $first_row->{running_balance} - $first_row->{amount}
-       });
-       push(@rows, {
-          description => 'Ending Balance',
-          running_balance => $last_row->{running_balance}
-       });
+
+        my $first_row = $rows[0];
+        if ($self->selected_columns->{curr}) {
+            my @opening_rows = $self->call_procedure(
+                funcname => 'account__obtain_balance_by_currency',
+                args => [ $first_row->{transdate}, $first_row->{chart_id} ]
+                );
+            for my $opening_row (sort { lc $b->{curr} cmp lc $a->{curr} } @opening_rows) {
+                my @opening_debcred;
+                if ($opening_row->{amount_bc} < 0) {
+                    @opening_debcred = (
+                        debits    => -$opening_row->{amount_bc},
+                        fx_debits => -$opening_row->{amount_tc}
+                        );
+                }
+                elsif ($opening_row->{amount_bc} > 0) {
+                    @opening_debcred = (
+                        credits    => $opening_row->{amount_bc},
+                        fx_credits => $opening_row->{amount_tc}
+                        );
+                }
+                unshift @rows, {
+                    html_class => 'listsubtotal',
+                    NOINPUT => 1,
+                    curr        => $opening_row->{curr},
+                    description => $self->Text('Opening Balance ([_1])', $opening_row->{curr}),
+                    @opening_debcred
+                };
+            }
+        }
+        my $opening_balance = $first_row->{running_balance};
+        my @opening_debcred;
+        if ($opening_balance < 0) {
+            @opening_debcred = (debits => -$opening_balance);
+        }
+        elsif ($opening_balance > 0) {
+            @opening_debcred = (credits => $opening_balance);
+        }
+        unshift @rows, {
+            html_class => 'listsubtotal',
+            NOINPUT => 1,
+            description => ($self->selected_columns->{curr}
+                            ? $self->Text('Opening Balance (Total)')
+                            : $self->Text('Opening Balance')),
+            running_balance => $first_row->{running_balance},
+            @opening_debcred
+        };
+
+        my $last_row = $rows[$#rows];
+        if ($self->selected_columns->{curr}) {
+            my @closing_rows = $self->call_procedure(
+                funcname => 'account__obtain_balance_by_currency',
+                args => [ $last_row->{transdate}, $last_row->{chart_id} ]
+                );
+
+            for my $closing_row (sort { lc $a->{curr} cmp lc $b->{curr} } @closing_rows) {
+                my @closing_debcred;
+                if ($closing_row->{amount_bc} < 0) {
+                    @closing_debcred = (
+                        debits    => -$closing_row->{amount_bc},
+                        fx_debits => -$closing_row->{amount_tc}
+                        );
+                }
+                elsif ($closing_row->{amount_bc} > 0) {
+                    @closing_debcred = (
+                        credits    => $closing_row->{amount_bc},
+                        fx_credits => $closing_row->{amount_tc}
+                        );
+                }
+                push @rows, {
+                    html_class => 'listsubtotal',
+                    NOINPUT => 1,
+                    curr        => $closing_row->{curr},
+                    description => $self->Text('Closing Balance ([_1])', $closing_row->{curr}),
+                    @closing_debcred
+                };
+            }
+        }
+        my $ending_balance = $last_row->{running_balance};
+        my @ending_debcred;
+        if ($ending_balance < 0) {
+            @ending_debcred = (debits => -$ending_balance);
+        }
+        elsif ($ending_balance > 0) {
+            @ending_debcred = (credits => $ending_balance);
+        }
+        push @rows, {
+            html_class => 'listsubtotal',
+            NOINPUT => 1,
+            description => ($self->selected_columns->{curr}
+                            ? $self->Text('Closing Balance (Total)')
+                            : $self->Text('Closing Balance')),
+            running_balance => $last_row->{running_balance},
+            @ending_debcred
+        };
     }
     return $self->rows(\@rows);
 }
@@ -383,7 +498,7 @@ sub run_report{
 
 =head1 LICENSE AND COPYRIGHT
 
-Copyright (C) 2012 The LedgerSMB Core Team
+Copyright (C) 2012-2023 The LedgerSMB Core Team
 
 This file is licensed under the GNU General Public License version 2, or at your
 option any later version.  A copy of the license should have been included with

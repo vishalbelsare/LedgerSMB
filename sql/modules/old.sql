@@ -21,7 +21,7 @@ BEGIN
 
   SELECT INTO v_cost, v_qty SUM(i.sellprice * i.qty), SUM(i.qty)
   FROM invoice i
-  JOIN ap a ON (a.id = i.trans_id)
+  JOIN ap a ON (a.trans_id = i.trans_id)
   WHERE i.parts_id = v_parts_id;
 
   IF v_cost IS NULL THEN
@@ -43,28 +43,30 @@ END;
 --
 
 
-CREATE OR REPLACE FUNCTION lastcost(int) RETURNS FLOAT AS '
+CREATE OR REPLACE FUNCTION lastcost(int) RETURNS FLOAT AS
+$sql$
+  DECLARE
 
-DECLARE
-
-v_cost float;
-v_parts_id alias for $1;
+  v_cost float;
+  v_parts_id alias for $1;
 
 BEGIN
 
-  SELECT INTO v_cost sellprice FROM invoice i
-  JOIN ap a ON (a.id = i.trans_id)
-  WHERE i.parts_id = v_parts_id
-  ORDER BY a.transdate desc, a.id desc
-  LIMIT 1;
+  SELECT INTO v_cost sellprice
+    FROM invoice i
+           JOIN ap a ON (a.trans_id = i.trans_id)
+           JOIN transactions txn ON a.trans_id = txn.id
+   WHERE i.parts_id = v_parts_id
+   ORDER BY txn.transdate desc, a.trans_id desc
+   LIMIT 1;
 
   IF v_cost IS NULL THEN
     v_cost := 0;
   END IF;
 
-RETURN v_cost;
+  RETURN v_cost;
 END;
-' language plpgsql;
+$sql$ language plpgsql;
 -- end function
 --
 

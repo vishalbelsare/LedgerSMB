@@ -1,4 +1,7 @@
 
+use v5.38;
+use experimental 'try';
+
 package LedgerSMB::Admin::Command::backup;
 
 =head1 NAME
@@ -7,21 +10,20 @@ LedgerSMB::Admin::Command::backup - ledgersmb-admin 'backup' command
 
 =cut
 
-use strict;
-use warnings;
-
 use LedgerSMB::Admin::Command;
 use LedgerSMB::Database;
 
 use Moose;
+use experimental 'try'; # Work around Moose re-enabling experimenal warnings
 extends 'LedgerSMB::Admin::Command';
 use namespace::autoclean;
 
-use Feature::Compat::Try;
 
+sub run($self, $dbname, $filename) {
 
-sub run {
-    my ($self, $dbname, $filename) = @_;
+    return $self->help('backup')
+        if !$dbname || $dbname eq 'help';
+
     my $logger = $self->logger;
     my $connect_data = {
         $self->config->get('connect_data')->%*,
@@ -46,8 +48,6 @@ sub run {
 }
 
 __PACKAGE__->meta->make_immutable;
-
-1;
 
 __END__
 

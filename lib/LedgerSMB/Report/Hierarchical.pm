@@ -20,6 +20,7 @@ use namespace::autoclean;
 extends 'LedgerSMB::Report';
 
 use Scalar::Util 'blessed';
+use List::Util 'max';
 
 use LedgerSMB::Report::Axis;
 
@@ -229,6 +230,37 @@ before '_render' => sub {
 
     $self->sorted_row_ids($self->rheads->sort);
     $self->sorted_col_ids($self->cheads->sort);
+    $self->cheads->classify_leaves($self->cheads);
+
+    $_->{path_depth} = scalar($_->{path}->@*) for values  $self->rheads->ids->%*;
+    $_->{path_depth} = scalar($_->{path}->@*) for values  $self->cheads->ids->%*;
+    my $row_max_depth =
+        $self->rheads->{max_path_depth} =
+        max map { $_->{path_depth} } values $self->rheads->ids->%*;
+    my $col_max_depth =
+        $self->cheads->{max_path_depth} =
+        max map { $_->{path_depth} } values $self->cheads->ids->%*;
+
+    $_->{path_prefix_len} = $_->{path_depth} - 1
+        for values  $self->rheads->ids->%*;
+    $_->{path_prefix_len} = $_->{path_depth} - 1
+        for values  $self->cheads->ids->%*;
+    $_->{path_suffix_len} = $row_max_depth - $_->{path_prefix_len}
+        for values  $self->rheads->ids->%*;
+    $_->{path_suffix_len} = $col_max_depth - $_->{path_prefix_len}
+        for values  $self->cheads->ids->%*;
+
+    for (map { $_->{props} } values $self->rheads->ids->%*) {
+        if ($_->{section_for}) {
+            $_->{heading_props} = $self->rheads->ids->{$_->{section_for}}->{props};
+            $_->{row_description} = $_->{heading_props}->{account_description};
+        }
+        else {
+            $_->{row_description} = ($self->incl_accnos && $_->{account_number})
+                ? "$_->{account_number} - $_->{account_description}"
+                : $_->{account_description};
+        }
+    }
 
     for my $row_id (@{$self->sorted_row_ids}) {
         next if $self->rheads->id_props($row_id)->{section_for};
@@ -239,7 +271,7 @@ before '_render' => sub {
             my $val = $self->cell_value($row_id, $col_id);
             if (blessed $val and $val->can('to_output')) {
                 $self->cell_value($row_id, $col_id,
-                    $val->to_output(money => 1));
+                    $val->to_output(money => 1, $self->formatter_options->%*));
             }
         }
     }

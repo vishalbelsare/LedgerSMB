@@ -1,14 +1,15 @@
-[% INCLUDE "ui-header.html"
+[% WRAPPER "ui-header.html"
 stylesheet="ledgersmb.css"
-include_stylesheet=["setup.css"] %]
+include_stylesheet=["system/setup.css"] %]
 [% PROCESS elements.html %]
 <body id="setup-begin-backup" class="lsmb [% dojo_theme %]">
-<div class="setupconsole" data-dojo-type="lsmb/main">
+<div><div class="setupconsole">
 <h2>[% text('Database Management Console') %]</h2>
 <div class="listtop">[% text('Where shall we send the backup?') %]</div>
 [% # notice, message, and operation are all localized. %]
 <div id="notice">[% notice %]</div>
 <form data-dojo-type="lsmb/SimpleForm" action="setup.pl" method="POST" name="confirm_operation">
+  <input type="hidden" name="csrf_token" value="[% csrf_token %]" />
 [% INCLUDE input element_data = {
     name = 'database'
     type = 'hidden'
@@ -63,7 +64,7 @@ disabled = "disabled"
 </div>
 <div class="inputrow">
 [% INCLUDE button element_data = {
-    name = 'action'
+    name = '__action'
    value = 'run_backup'
     type = 'submit'
    class = 'submit'
@@ -71,6 +72,6 @@ disabled = "disabled"
 } %]
 </div>
 </form>
-</div>
+</div></div>
 </body>
-[% end_html %]
+[% END %]

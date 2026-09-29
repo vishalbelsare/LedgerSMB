@@ -1,4 +1,6 @@
 
+use v5.38;
+
 package LedgerSMB::Scripts::configuration;
 
 =head1 NAME
@@ -12,7 +14,7 @@ System > Defaults and System > Sequences.
 
 =head1 SYNPOPSIS
 
-LedgerSMB::Scripts::configuration->can('action')->($request);
+LedgerSMB::Scripts::configuration->can('__action')->($request);
 
 =head1 METHODS
 
@@ -20,15 +22,10 @@ This module does not specify any methods.
 
 =cut
 
-use strict;
-use warnings;
-
 use LedgerSMB::I18N;
 use LedgerSMB::Setting::Sequence;
-use LedgerSMB::Template::UI;
 
-sub _default_settings {
-    my ($request) = @_;
+sub _default_settings($request) {
     my $locale = $request->{_locale};
 
     my @default_settings = (
@@ -57,15 +54,12 @@ sub _default_settings {
                 label => $locale->text('Base Currency'),
                 type => 'SELECT_ONE', },
               { name => 'weightunit', label => $locale->text('Weight Unit') },
-              { name => 'default_country',
-                label => $locale->text('Default Country'),
-                type => 'SELECT_ONE', },
-              { name => 'default_language',
-                label => $locale->text('Default Language'),
-                type => 'SELECT_ONE', },
               { name => 'format',
                 type => 'SELECT_ONE',
                 label => $locale->text('Default Format'), },
+              { name => 'papersize',
+                type => 'SELECT_ONE',
+                label => $locale->text('Default Paper Size'), },
               ] },
         { title => $locale->text('Security Settings'),
           items => [
@@ -76,7 +70,7 @@ sub _default_settings {
                 label => $locale->text('Password Duration (days)')
               },
               { name => 'session_timeout',
-        label => $locale->text('Session Timeout (e.g. "90 minutes")'), },
+                label => $locale->text('Session Timeout (e.g. "90 minutes")'), },
               { name => 'separate_duties',
                 label => $locale->text('Separate Duties'),
                 type => 'YES_NO', },
@@ -110,6 +104,7 @@ sub _default_settings {
               ] },
         { title => $locale->text('Next in Sequence'),
           items => [
+              { name => 'batch_cc', label => $locale->text('Batch Number') },
               { name => 'glnumber', label => $locale->text('GL Reference Number') },
               { name => 'sinumber',
                 label => $locale->text('Sales Invoice/AR Transaction Number'), },
@@ -120,15 +115,22 @@ sub _default_settings {
               { name => 'ponumber', label => $locale->text('Purchase Order Number') },
               { name => 'rfqnumber', label => $locale->text('RFQ Number') },
               { name => 'partnumber', label => $locale->text('Part Number') },
+              { name => 'lotnumber', label => $locale->text('Production Lot Number') },
               { name => 'projectnumber', label => $locale->text('Business Unit Number') },
               { name => 'employeenumber', label => $locale->text('Employee Number') },
+              { name => 'entity_control', label => $locale->text('Entity number') },
               { name => 'customernumber', label => $locale->text('Customer Number') },
               { name => 'vendornumber', label => $locale->text('Vendor Number') },
+              { name => 'paynumber', label => $locale->text('Payment Number') },
+              { name => 'openitemnumber', label => $locale->text('Open Item key') },
+              { name => 'asset_report_number', label => $locale->text('Asset Report Number') },
               ] },
         { title => $locale->text('Misc Settings'),
           items => [
               { name => 'show_creditlimit', type => 'YES_NO',
                 label => $locale->text('Show Credit Limit') },
+              { name => 'have_barcodes', type => 'YES_NO_AUTO',
+                label => $locale->text('Barcode entry on invoices') },
               { name => 'dojo_theme',
                 type => 'SELECT_ONE',
                 label => $locale->text('Widgit Themes') },
@@ -138,7 +140,7 @@ sub _default_settings {
                 label =>  $locale->text('Max Invoices per Check Stub') },
               { name => 'decimal_places',
                 label =>  $locale->text('Decimal Places for Money') },
-              { name => 'template_immages',
+              { name => 'template_images',
                 label => $locale->text('Images in Templates'),
                 type => 'YES_NO', },
               { name => 'min_empty',
@@ -169,8 +171,7 @@ Shows the defaults screen
 
 =cut
 
-sub defaults_screen {
-    my ($request) = @_;
+sub defaults_screen($request) {
 
     my @curr = map { { curr => $_ } } $request->setting->get_currencies();
     my @defaults;
@@ -184,9 +185,7 @@ sub defaults_screen {
         $request->{$skey} = $request->setting->get($skey);
     }
 
-    my @country_list =
-        LedgerSMB::I18N::location_list_country_localized($request,
-            $request->{_company_config}->{default_language});
+    my @country_list = $request->enabled_countries->@*;
     unshift @country_list, {}
         if ! defined $request->{default_country};
 
@@ -304,9 +303,19 @@ sub defaults_screen {
                 {text => 'Postscript', value => 'postscript'},
             ]
         },
+        'papersize' => {
+            name           => 'papersize',
+            text_attr      => 'text',
+            value_attr     => 'value',
+            default_values => [$request->{'papersize'}],
+            options        => [
+                {text => 'Letter', value => 'letter'},
+                {text => 'A4', value => 'a4'},
+            ]
+        },
     );
 
-    my $template = LedgerSMB::Template::UI->new_UI;
+    my $template = $request->{_wire}->get('ui');
     return $template->render($request, 'Configuration/settings', {
         form => $request,
         # hiddens => \%hiddens,
@@ -321,8 +330,7 @@ No inputs expected or used
 
 =cut
 
-sub sequence_screen {
-    my ($request) = @_;
+sub sequence_screen($request) {
     @{$request->{sequence_list}} = LedgerSMB::Setting::Sequence->list();
     my @default_settings = &_default_settings($request);
     my $locale = $request->{_locale};
@@ -330,14 +338,13 @@ sub sequence_screen {
         $request->{setting_keys} = $subset->{items}
              if $subset->{title} eq $locale->text('Next in Sequence');
     }
-    my $count = 0;
-    for my $item (@{$request->{setting_keys}}){
-        for my $blacklist (qw(customernumber vendornumber employeenumber)){
-            delete $request->{setting_keys}->[$count] if $item->{name} eq $blacklist;
-        }
-        ++$count;
-    }
-    return LedgerSMB::Template::UI->new_UI
+    $request->{setting_keys} = [
+        grep {
+            my $name = $_->{name};
+            not grep { $name eq $_ } qw(customernumber vendornumber employeenumber);
+        } $request->{setting_keys}->@*
+        ];
+    return $request->{_wire}->get('ui')
         ->render($request, 'Configuration/sequence', $request);
 }
 
@@ -347,8 +354,7 @@ Saves settings from the defaults screen
 
 =cut
 
-sub save_defaults {
-    my ($request) = @_;
+sub save_defaults($request) {
     if (!$request->is_allowed_role(
         {allowed_roles => ['system_settings_change'] })
     ){
@@ -374,8 +380,7 @@ Saves the items in the sequence screen
 
 =cut
 
-sub save_sequences {
-    my ($request) = @_;
+sub save_sequences($request) {
     for my $count (1 .. $request->{count}){
         if ($request->{"save_$count"} and $request->{"label_$count"}){
            LedgerSMB::Setting::Sequence->new(
@@ -399,4 +404,3 @@ your software.
 
 =cut
 
-1;

@@ -17,9 +17,8 @@ This module provides the workflow scripts for managing users and permissions.
 
 =cut
 
-use LedgerSMB::DBObject::Admin;
-use LedgerSMB::DBObject::User;
-use LedgerSMB::Template::UI;
+use LedgerSMB::Report::Listings::User;
+use LedgerSMB::Scripts::contact;
 
 
 use Log::Any;
@@ -33,6 +32,84 @@ use Log::Any;
 my $logger = Log::Any->get_logger(category => 'LedgerSMB::Scripts::admin');
 
 
+=item list_users
+
+=cut
+
+sub list_users {
+    my ($request) = @_;
+    my $report = LedgerSMB::Report::Listings::User->new(
+        %$request,
+        formatter_options => $request->formatter_options
+        );
+    return $request->render_report($report);
+}
+
+
+=item delete_user
+
+=cut
+
+sub delete_user {
+    my ($request) = @_;
+    my ($user) = $request->call_procedure(
+        funcname => 'admin__get_user',
+        args => [ $request->{id} ]
+        );
+    $request->call_procedure(
+        funcname => 'admin__delete_user',
+        args => [ $user->{username}, 1 ] # delete the role too
+        );
+
+    return list_users($request);
+}
+
+
+=item edit_user
+
+=cut
+
+sub edit_user {
+    my ($request) = @_;
+    my $user = $request->conn->users->get_by_id( $request->{id} );
+
+    my $template = $request->{_wire}->get('ui');
+    $request->open_form();
+    return $template->render($request, 'Contact/divs/user', {
+        stand_alone => 1,
+        user        => {
+            id  => $user->id,
+            entity_id => $user->entity_id,
+            pls_import => 0,
+            role_list => [
+                sort map { $_->name } $user->roles->list->@*
+                ]
+        },
+        entity_id   => $user->entity_id,
+        request     => $request,
+        roles       => [
+            sort { $a->{rolname} cmp $b->{rolname} }
+            map {
+                +{ rolname => $_->name, description => $_->pretty }
+            } $request->conn->roles->list->@*
+            ],
+        form_id     => $request->{form_id}
+    });
+}
+
+
+=item save_roles
+
+Saves the user's permissions
+
+=cut
+
+sub save_roles {
+    LedgerSMB::Scripts::contact::save_roles(@_);
+    return edit_user(@_);
+}
+
+
 =item list_sessions
 
 Displays a list of open sessions.  No inputs required or used.
@@ -41,8 +118,7 @@ Displays a list of open sessions.  No inputs required or used.
 
 sub list_sessions {
     my ($request) = @_;
-    my $admin = LedgerSMB::DBObject::Admin->new(%$request);
-    my @sessions = $admin->list_sessions();
+    my @sessions = $request->call_procedure(funcname => 'admin__list_sessions');
     my $column_names = {
         id => 'ID',
         username => 'Username',
@@ -55,7 +131,7 @@ sub list_sessions {
               col_id => $_,
               name => $column_names->{$_}
             }  } qw(id username last_used locks_active) ];
-    my $base_url = 'admin.pl?action=delete_session';
+    my $base_url = 'admin.pl?__action=delete_session';
     push @$columns,
         {
             type => 'href',
@@ -67,15 +143,11 @@ sub list_sessions {
         $s->{drop} = '[' . $request->{_locale}->text('delete') . ']';
         $s->{row_id} = $s->{id};
     }
-    my $template = LedgerSMB::Template::UI->new_UI;
+    my $template = $request->{_wire}->get('ui');
     return $template->render($request, 'Reports/display_report', {
         name    => $request->{_locale}->text('Active Sessions'),
-        script  => 'admin.pl',
-        form    => $admin,
         columns => $columns,
         rows    => \@sessions,
-        buttons => [],
-        hiddens => [],
     });
 }
 
@@ -87,8 +159,9 @@ Deletes the session specified by $request->{session_id}
 
 sub delete_session {
     my ($request) = @_;
-    my $admin = LedgerSMB::DBObject::Admin->new(%$request);
-    $admin->delete_session();
+    $request->call_procedure(
+        funcname => 'admin__drop_session',
+        args     => [ $request->{session_id} ]);
     return list_sessions($request);
 }
 

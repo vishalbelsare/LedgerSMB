@@ -22,7 +22,8 @@ if ($ENV{COVERAGE} && $ENV{CI}) {
 
 my @on_disk;
 sub collect {
-    return if $File::Find::dir  =~ m(^blib|xt/lib/|xt/66-cucumber/|LaTex|.local/);
+
+    return if $File::Find::dir  =~ m!^\./(blib|xt/lib/|xt/66-cucumber/|LaTex|node_modules|local/lib/perl5|\..+)!;
 
     my $module = $File::Find::name;
     return if $module !~ m(\.(pl|pm|t)$);
@@ -44,7 +45,7 @@ for my $file (@on_disk) {
             #clear PERL5OPTS; we don't want to inherit it from the testing environment
             system("echo \"$file\" | utils/devel/extract-perl >/dev/null");
         };
-        for my $err (split /\n/, $stderr) {
+        for my $err (grep { $_ !~ m/^Parsing: / } split /\n/, $stderr) {
 
             ok(0, $err);
             $errors++;

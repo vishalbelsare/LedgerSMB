@@ -45,15 +45,14 @@
 
 package lsmb_legacy;
 
-use List::Util qw(max min);
+use List::Util qw(max min uniq);
+
 use LedgerSMB::Form;
+use LedgerSMB::IIAA;
 use LedgerSMB::IS;
 use LedgerSMB::PE;
 use LedgerSMB::Tax;
-use LedgerSMB::Setting;
-use LedgerSMB::DBObject::Draft;
 
-use Workflow::Factory qw(FACTORY);
 
 require "old/bin/arap.pl";
 require "old/bin/io.pl";
@@ -64,6 +63,7 @@ sub on_update{}
 sub copy_to_new{
     delete $form->{id};
     delete $form->{invnumber};
+    delete $form->{workflow_id};
     $form->{crdate} = $form->current_date( \%myconfig );
     $form->{paidaccounts} = 1;
     if ($form->{paid_1}){
@@ -74,15 +74,17 @@ sub copy_to_new{
 
 sub edit_and_save {
     $form->{ARAP} = 'AR';
-    my $draft = LedgerSMB::DBObject::Draft->new(%$form);
-    $draft->delete();
-    delete $form->{id};
     IS->post_invoice( \%myconfig, \%$form );
+
+    if ($form->{workflow_id}) {
+        my $wf = $form->{_conn}->workflows->fetch( 'AR/AP', $form->{workflow_id} );
+        $wf->execute_action( $form->{__action} );
+    }
     edit();
 }
 
 sub new_screen {
-    my @reqprops = qw(ARAP vc dbh stylesheet type _locale);
+    my @reqprops = qw(ARAP vc dbh stylesheet batch_id script type _locale _wire);
     $oldform = $form;
     $form = {};
     bless $form, 'Form';
@@ -109,7 +111,7 @@ sub add {
         $form->{title} = $locale->text('Add Sales Invoice');
         $form->{reverse} = 0;
     }
-    $form->{callback} = "$form->{script}?action=add&type=$form->{type}"
+    $form->{callback} = "$form->{script}?__action=add&type=$form->{type}"
       unless $form->{callback};
 
     &invoice_links;
@@ -118,12 +120,18 @@ sub add {
 
 }
 
+sub del {
+    my $wf = $form->{_conn}->workflows->fetch( 'AR/AP', $form->{workflow_id} );
+    $wf->execute_action( 'del' );
+
+    $form->info($locale->text('Draft deleted'));
+}
+
 sub edit {
     $form->{ARAP} = 'AR';
     if (not $form->{id} and $form->{workflow_id}) {
-        my $wf = FACTORY->fetch_workflow( 'AR/AP', $form->{workflow_id} );
+        my $wf = $form->{_conn}->workflows->fetch( 'AR/AP', $form->{workflow_id} );
         $form->{id} = $wf->context->param( 'id' );
-        delete $form->{workflow_id};
     }
 
     &invoice_links;
@@ -138,8 +146,8 @@ sub edit {
     } else {
         $form->{title} = $locale->text('Edit Sales Invoice');
     }
-    &display_form;
 
+    &display_form;
 }
 
 sub invoice_links {
@@ -173,9 +181,15 @@ sub invoice_links {
     }
     ###TODO 20151108; end of merge region
 
-    AA->get_name( \%myconfig, \%$form );
     delete $form->{notes};
     IS->retrieve_invoice( \%myconfig, \%$form );
+    AA->get_name( \%myconfig, \%$form );
+    $form->{taxaccounts} =
+        join(' ',
+             uniq((split / /, $form->{taxaccounts}),
+                  # add transaction tax accounts, which may no longer be applicable to
+                  # the customer, but still are for the transaction
+                  IIAA->trans_taxaccounts($form) ));
 
     $form->{oldlanguage_code} = $form->{language_code};
 
@@ -199,7 +213,8 @@ sub invoice_links {
             $form->{"select$key"} .= qq|<option value="$value"$selected>$value</option>\n|;
         }
 
-        if ( $key eq "AR_paid" ) {
+        if ( $key eq "AR_paid"
+             or $key eq "AR_overpayment" ) {
 
             if ( $form->{acc_trans} and $form->{acc_trans}{$key} ) {
                 foreach my $i ( 1 .. scalar @{ $form->{acc_trans}{$key} } ) {
@@ -209,6 +224,8 @@ sub invoice_links {
                     # reverse paid
                     $form->{"paid_$i"} =
                         $form->{acc_trans}{$key}->[ $i - 1 ]->{amount} * -1;
+                    $form->{"paid_${i}_approved"} =
+                        $form->{acc_trans}{$key}->[ $i - 1 ]->{approved};
                     $form->{"datepaid_$i"} =
                         $form->{acc_trans}{$key}->[ $i - 1 ]->{transdate};
                     $form->{"forex_$i"} = $form->{"exchangerate_$i"} =
@@ -240,8 +257,8 @@ sub invoice_links {
 }
 
 sub prepare_invoice {
+    my %args = @_;
 
-    $form->{type}     = "invoice";
     $form->{formname} = "invoice";
     $form->{sortby} ||= "runningnumber";
     $form->{media} = $myconfig{printer};
@@ -256,60 +273,29 @@ sub prepare_invoice {
     $form->{currency} =~ s/ //g;
     $form->{oldcurrency} = $form->{currency};
 
-    if ( $form->{id} ) {
-
-        for (
-            qw(invnumber ordnumber ponumber quonumber shippingpoint shipvia notes intnotes)
-          )
-        {
-            $form->{$_} = $form->quote( $form->{$_} );
-        }
-
-        foreach my $ref ( @{ $form->{invoice_details} } ) {
-            $i++;
-            for ( keys %$ref ) { $form->{"${_}_$i"} = $ref->{$_} }
-
-            $form->{"projectnumber_$i"} =
-              qq|$ref->{projectnumber}--$ref->{project_id}|
-              if $ref->{project_id};
-            $form->{"partsgroup_$i"} =
-              qq|$ref->{partsgroup}--$ref->{partsgroup_id}|
-              if $ref->{partsgroup_id};
-
-            $form->{"discount_$i"} =
-              $form->format_amount( \%myconfig, $form->{"discount_$i"} * 100 );
-
-            my $moneyplaces = LedgerSMB::Setting->new(%$form)->get('decimal_places');
-            my ($dec) = ($form->{"sellprice_$i"} =~/\.(\d*)/);
-            $dec = length $dec;
-            $decimalplaces = ( $dec > $moneyplaces ) ? $dec : $moneyplaces;
-            $form->{"precision_$i"} = $decimalplaces;
-
-            $form->{"sellprice_$i"} =
-              $form->format_amount( \%myconfig, $form->{"sellprice_$i"},
-                $decimalplaces );
-            $form->{"qty_$i"} =
-              $form->format_amount( \%myconfig, $form->{"qty_$i"} );
-            $form->{"oldqty_$i"} = $form->{"qty_$i"};
-
-        $form->{"taxformcheck_$i"}=1 if(IS->get_taxcheck($form,$form->{"invoice_id_$i"},$form->{dbh}));
-
-
-        for (qw(partnumber sku description unit)) {
-                $form->{"${_}_$i"} = $form->quote( $form->{"${_}_$i"} );
-            }
-            $form->{rowcount} = $i;
-        }
-    }
-
+    IIAA->prepare_invoice( $form, \%myconfig, module => 'IS', %args );
 }
 
 sub form_header {
+    my $readonly =
+        ($form->{reversing} or $form->{approved}) ? 'readonly="readonly"' : '';
+    my $readonly_headers = $form->{approved} ? 'readonly="readonly"' : '';
     $form->{nextsub} = 'update';
     $form->{ARAP} = 'AR';
     $form->generate_selects(\%myconfig) unless $form->{selectAR};
 
+    my $wf;
+    if($form->{workflow_id}) {
+        $wf = $form->{_conn}->workflows->fetch( 'AR/AP', $form->{workflow_id} );
+    }
+    else {
+        $wf = $form->{_conn}->workflows->create(
+            'AR/AP',
+            { 'batch-id' => $form->{batch_id} });
+        $form->{workflow_id} = $wf->id;
+    }
     $transdate = $form->datetonum( \%myconfig, $form->{transdate} );
+    $wf->context->param( transdate => $transdate );
 
     $status_div_id = 'AR-invoice';
     $status_div_id .= '-reverse' if $form->{reverse};
@@ -321,39 +307,31 @@ sub form_header {
     $exchangerate = qq|<tr>|;
     $exchangerate .= qq|
         <th align=right nowrap>| . $locale->text('Currency') . qq|</th>
-        <td><select data-dojo-type="dijit/form/Select" id="currency" name="currency">$form->{selectcurrency}</select></td>
+        <td><select data-dojo-type="dijit/form/Select" id="currency" name="currency" $readonly>$form->{selectcurrency}</select>
 | if $form->{defaultcurrency};
 
     if (   $form->{defaultcurrency}
         && $form->{currency} ne $form->{defaultcurrency} )
     {
         $exchangerate .=
-                qq|<th align=right>|
+                qq|</td><th align=right>|
               . $locale->text('Exchange Rate')
-              . qq|</th><td><input data-dojo-type="dijit/form/TextBox" name="exchangerate" size="10" value="$form->{exchangerate}"></td>|;
+              . qq|</th><td><input data-dojo-type="dijit/form/TextBox" name="exchangerate" size="10" value="$form->{exchangerate}" $readonly>|;
     }
     $exchangerate .= qq|
-<input type=hidden name="forex" value="$form->{forex}">
+<input type=hidden name="forex" value="$form->{forex}"></td>
 </tr>
 |;
 
     if ( $form->{selectcustomer} ) {
-        $customer = qq|<select data-dojo-type="lsmb/FilteringSelect" id="customer" name="customer"><option></option>$form->{selectcustomer}</select>|;
+        $customer = qq|<select data-dojo-type="lsmb/FilteringSelect" id="customer" name="customer" $readonly><option></option>$form->{selectcustomer}</select>|;
     }
     else {
-        $customer = qq|<input data-dojo-type="dijit/form/TextBox" id="customer" name="customer" value="$form->{customer}" size="35">
+        $customer = qq|<input data-dojo-type="dijit/form/TextBox" id="customer" name="customer" value="$form->{customer}" size="35" $readonly>
      <a id="new-contact" target="_blank"
-        href="erp.pl?action=root#contact.pl?action=add&entity_class=2">[| .
+        href="#contact.pl?__action=add&entity_class=2">[| .
         $locale->text('New') . qq|]</a> |;
     }
-
-    $department = qq|
-              <tr>
-            <th align="right" nowrap>| . $locale->text('Department') . qq|</th>
-        <td colspan="3"><select data-dojo-type="dijit/form/Select" id="department" name="department">$form->{selectdepartment}</select>
-        </td>
-          </tr>
-| if $form->{selectdepartment};
 
     $n = ( defined $form->{creditremaining} and $form->{creditremaining} < 0 ) ? "0" : "1";
 
@@ -383,6 +361,7 @@ sub form_header {
 | if $form->{selectemployee};
 
     $i     = ($form->{rowcount} // 0) + 1;
+    $focus = $form->{barcode} ? "barcode" : "partnumber_$i";
 
     $form->header;
 
@@ -392,23 +371,24 @@ sub form_header {
 <form method="post"
       id="invoice"
       data-dojo-type="lsmb/Invoice"
+      data-lsmb-focus="${focus}"
       action="$form->{script}" >
 |;
 
     $form->hide_form(
-        qw(form_id id type printed emailed title vc terms discount
+        qw(form_id id type title vc terms discount
            creditlimit creditremaining tradediscount business
            shipped oldtransdate recurring reverse batch_id subtype tax_id
            meta_number separate_duties lock_description nextsub
            default_reportable address city zipcode state country
-           is_return cash_accno)
+           is_return cash_accno shiptolocationid)
     );
 
     if ($form->{notice}){
          print qq|<th>$form->{notice}</th>|;
     }
     my $manual_tax;
-    if ($form->{id}){
+    if ($form->{approved}){
         $manual_tax =
             qq|<input type="hidden" name="manual_tax" value="|
                . $form->{manual_tax} . qq|" />|;
@@ -417,11 +397,11 @@ sub form_header {
                     qq|<label for="manual-tax-0">|.
                        $locale->text("Automatic"). qq|</label>
                        <input type="radio" data-dojo-type="dijit/form/RadioButton" name="manual_tax" value="0"
-                              id="manual-tax-0">
+                              id="manual-tax-0" $readonly >
                         <label for="manual-tax-1">|.
                         $locale->text("Manual"). qq|</label>
                       <input type="radio" data-dojo-type="dijit/form/RadioButton" name="manual_tax" value="1"
-                              id="manual-tax-1">|;
+                              id="manual-tax-1" $readonly >|;
     }
     print qq|
 <table width=100%>
@@ -437,16 +417,17 @@ sub form_header {
         <table>
           <tr>
         <th align=right nowrap><label for="customer">| . $locale->text('Customer') . qq|</label></th>
-        <td colspan=3>$customer</td>
+        <td colspan=3>$customer
         <input type=hidden name="customer_id" value="$form->{customer_id}">
         <input type=hidden name="oldcustomer" value="$form->{oldcustomer}">
+</td>
           </tr>
           <tr>
         <td></td>
         <td colspan=3>
           <table>
             <tr> |;
-      if (LedgerSMB::Setting->new(%$form)->get('show_creditlimit')){
+      if ($form->get_setting('show_creditlimit')){
           print qq|
               <th align=right nowrap>| . $locale->text('Credit Limit') . qq|</th>
               <td>|
@@ -467,7 +448,7 @@ sub form_header {
             <tr>
         <th align="right" nowrap>| .
             $locale->text('Entity Code') . qq|</th>
-        <td colspan="2" nowrap><a href="erp.pl?action=root#contact.pl?action=get_by_cc&control_code=$form->{entity_control_code}" target="_blank"><b>$form->{entity_control_code}</b></a></td>
+        <td colspan="2" nowrap><a href="#contact.pl?__action=get_by_cc&control_code=$form->{entity_control_code}" target="_blank"><b>$form->{entity_control_code}</b></a></td>
         <th align="right" nowrap>| .
             $locale->text('Account') . qq|</th>
         <td colspan=3>$form->{meta_number}</td>
@@ -486,11 +467,12 @@ sub form_header {
        }
 
     $form->{$_} //= '' for (qw(description shippingpoint shipvia invnumber ordnumber
-                            quonumber ponumber crdate transdate duedate));
+                               quonumber ponumber duedate));
+    $form->{$_} //= 'today' for (qw(crdate transdate));
     $myconfig{dateformat} //= '';
     $business //= '';
-    $department //= '';
     $exchangerate //= '';
+    $form->get_shipto( $form->{shiptolocationid} );
     print qq|
             $business
           </table>
@@ -499,55 +481,75 @@ sub form_header {
 
           <tr>
         <th align="right" nowrap><label for="AR">| . $locale->text('Record in') . qq|</label></th>
-        <td colspan="3"><select data-dojo-type="dijit/form/Select" name="AR" id="AR">$form->{selectAR}</select></td>
+        <td colspan="3"><select data-dojo-type="dijit/form/Select" name="AR" id="AR" $readonly>$form->{selectAR}</select></td>
           </tr>
-          $department
           $exchangerate
             <tr>
                <th align="right" nowrap><label for="description">| . $locale->text('Description') . qq|</label>
                </th>
                <td><input data-dojo-type="dijit/form/TextBox" type="text" id="description" name="description" size="40"
-                   value="| . $form->{description} . qq|" /></td>
+                   value="| . $form->{description} . qq|" $readonly_headers /></td>
             </tr>
           <tr>
         <th align=right nowrap><label for="shippingpoint">| . $locale->text('Shipping Point') . qq|</label></th>
-        <td colspan=3><input data-dojo-type="dijit/form/TextBox" id="shippingpoint" name="shippingpoint" size="35" value="$form->{shippingpoint}"></td>
+        <td colspan=3><input data-dojo-type="dijit/form/TextBox" id="shippingpoint" name="shippingpoint" size="35" value="$form->{shippingpoint}" $readonly></td>
+          </tr>
+          <tr>
+            <th align=right nowrap>| . $locale->text('Shipping Attn') . qq|</th>
+            <td><input name=shiptoattn id=shiptoattn data-dojo-type="dijit/form/TextBox" value="$form->{shiptoattn}"></td>
+          </tr>
+          <tr>
+            <th align=right valign=top nowrap>| . $locale->text('Shipping Address') . qq|</th>
+            <td>$form->{shiptoaddress1} <br/>
+                $form->{shiptoaddress2} <br/>
+                $form->{shiptocity}, $form->{shiptostate} <br/>
+                $form->{shiptozipcode} <br/>
+                $form->{shiptocountry}
+                </td>
           </tr>
           <tr>
         <th align=right nowrap><label for="shipvia">| . $locale->text('Ship via') . qq|</label></th>
         <td colspan=3>
-                   <textarea data-dojo-type="dijit/form/Textarea" id="shipvia" name="shipvia" cols="35" rows="3"
+                   <textarea data-dojo-type="dijit/form/Textarea" id="shipvia" name="shipvia" cols="35" rows="3" $readonly
                        >$form->{shipvia}</textarea></td>
           </tr>
         </table>
       </td>
+      <td style="vertical-align:middle">| .
+        ($form->{reversing} ? qq|<a href="$form->{script}?__action=edit&amp;id=$form->{reversing}">|. ($form->{approved} ? $locale->text('This transaction reverses transaction [_1] with ID [_2]', $form->{reversing_reference}, $form->{reversing}) : $locale->text('This transaction will reverse transaction [_1] with ID [_2]', $form->{reversing_reference}, $form->{reversing})) . q|</a><br />| : '') .
+        ($form->{reversed_by} ? qq|<a href="$form->{script}?__action=edit&amp;id=$form->{reversed_by}"> | . $locale->text('This transaction is reversed by transaction [_1] with ID [_2]', $form->{reversed_by_reference}, $form->{reversed_by}) . q|</a>| : '') .
+      qq|</td>
       <td align=right>
         <table>
           $employee
           <tr>
         <th align=right nowrap><label for="invnumber">| . $locale->text('Invoice Number') . qq|</label></th>
-        <td><input data-dojo-type="dijit/form/TextBox" name="invnumber" id="invnumber" size="20" value="$form->{invnumber}">| .  $form->sequence_dropdown('sinumber') . qq|</td>
+        <td><input data-dojo-type="dijit/form/TextBox" name="invnumber" id="invnumber" size="20" value="$form->{invnumber}" $readonly_headers>| .  $form->sequence_dropdown('sinumber', $readonly_headers) . qq|</td>
           </tr>
           <tr>
         <th align=right nowrap><label for="ordnumber">| . $locale->text('Order Number') . qq|</label></th>
-        <td><input data-dojo-type="dijit/form/TextBox" name="ordnumber" id="ordnumber" size="20" value="$form->{ordnumber}"></td>
-<input type=hidden name="quonumber" value="$form->{quonumber}">
+        <td><input data-dojo-type="dijit/form/TextBox" name="ordnumber" id="ordnumber" size="20" value="$form->{ordnumber}" $readonly>
+<input type=hidden name="quonumber" value="$form->{quonumber}"></td>
           </tr>
           <tr class="crdate-row">
         <th align=right><label for="crdate">| . $locale->text('Invoice Created') . qq|</label></th>
-        <td><input class="date" data-dojo-type="lsmb/DateTextBox" name="crdate" size="11" title="$myconfig{dateformat}" value="$form->{crdate}" id="crdate" data-dojo-props="defaultIsToday:true"></td>
+        <td><lsmb-date name="crdate" size="11" title="$myconfig{dateformat}" value="$form->{crdate}" id="crdate" $readonly_headers></lsmb-date></td>
           </tr>
           <tr class="transdate-row">
         <th align=right><label for="transdate">| . $locale->text('Invoice Date') . qq|</label></th>
-        <td><input class="date" data-dojo-type="lsmb/DateTextBox" name="transdate" id="transdate" size="11" title="$myconfig{dateformat}" value="$form->{transdate}" data-dojo-props="defaultIsToday:true"></td>
+        <td><lsmb-date name="transdate" id="transdate" size="11" title="$myconfig{dateformat}" value="$form->{transdate}" $readonly_headers></lsmb-date></td>
           </tr>
           <tr>
         <th align=right><label for="duedate">| . $locale->text('Due Date') . qq|</label></th>
-        <td><input class="date" data-dojo-type="lsmb/DateTextBox" name="duedate" id="duedate" size="11" title="$myconfig{dateformat}" value="$form->{duedate}"></td>
+        <td><input class="date" data-dojo-type="lsmb/DateTextBox" name="duedate" id="duedate" size="11" title="$myconfig{dateformat}" value="$form->{duedate}" $readonly_headers ></td>
           </tr>
           <tr>
         <th align=right nowrap><label for="ponumber">| . $locale->text('PO Number') . qq|</label></th>
-        <td><input data-dojo-type="dijit/form/TextBox" name="ponumber" id="ponumber" size="20" value="$form->{ponumber}"></td>
+        <td><input data-dojo-type="dijit/form/TextBox" name="ponumber" id="ponumber" size="20" value="$form->{ponumber}" $readonly ></td>
+          </tr>
+          <tr>
+          <th align=right nowrap>| . $locale->text('State') . qq|</th>
+          <td>| . ( $wf ? $locale->maketext($wf->state) : '' ) . qq|</td>
           </tr>
         </table>
       </td>
@@ -557,8 +559,6 @@ sub form_header {
   </tr>
   <tr>
     <td>
-    </td>
-  </tr>
 |;
 
     $form->hide_form(
@@ -566,136 +566,49 @@ sub form_header {
     );
 
     foreach my $item ( split / /, $form->{taxaccounts} ) {
-        $form->hide_form( "${item}_rate", "${item}_description",
-            "${item}_taxnumber" );
+        $form->hide_form( "${item}_rate", "${item}_taxnumber" );
     }
-    if ( !$form->{readonly} ) {
-        print "<tr><td>";
 
-        # changes by Aurynn to add an On Hold button
-
-        if ($form->{on_hold}) {
-            $hold_button_text = $locale->text('Off Hold');
-        } else {
-            $hold_button_text = $locale->text('On Hold');
-        }
+    print q|
+    </td>
+  </tr>
+|;
 
 
-        %button = (
-            'update' =>
-              { ndx => 0, key => 'U', value => $locale->text('Update') },
-            'copy_to_new' => # Shares an index with copy because one or the other
-                             # must be deleted.  One can only either copy or
-                             # update, not both. --CT
-              { ndx => 1, key => 'C', value => $locale->text('Copy to New') },
-            'print' =>
-              { ndx => 2, key => 'P', value => $locale->text('Print'),
-                type => 'lsmb/PrintButton' },
-            'post' => { ndx => 3, key => 'O', value => $locale->text('Post') },
-            'ship_to' =>
-              { ndx => 4, key => 'T', value => $locale->text('Ship to') },
-            'e_mail' =>
-              { ndx => 5, key => 'E', value => $locale->text('E-mail') },
-            'sales_order' =>
-              { ndx => 9, key => 'L', value => $locale->text('Sales Order') },
-            'schedule' =>
-              { ndx => 10, key => 'H', value => $locale->text('Schedule') },
-            'on_hold' =>
-              { ndx => 12, key => 'O',  value => $hold_button_text },
-             'void'  =>
-                { ndx => 13, key => 'V', value => $locale->text('Void') },
-             'save_info'  =>
-                { ndx => 14, key => 'I', value => $locale->text('Save Info') },
-            'new_screen' => # Create a blank ar/ap invoice.
-             { ndx => 15, key=> 'N', value => $locale->text('New') }
+    print "<tr><td>";
 
+    %button_types = (
+        print => 'lsmb/PrintButton'
         );
+    %button = ();
+    for my $action_name ( $wf->get_current_actions( 'main') ) {
+        my $action = $wf->get_action( $action_name );
 
-
-        if ($form->{separate_duties} or $form->{batch_id}){
-           $button{'post'}->{value} = $locale->text('Save');
-        }
-        delete $button{void} if $form->{invnumber} =~ /-VOID/;
-
-        if ( $form->{id} ) {
-
-            for ( "post", "print_and_post", "delete" ) {
-                delete $button{$_};
-            }
-            my $is_draft = 0;
-            if (!$form->{approved} && !$form->{batch_id}){
-               if (!$form->{batch_id}){
-                   $is_draft = 1;
-                   if ($form->{transdate} and
-                       $form->is_allowed_role(['draft_post'])) {
-                       $button{approve} = {
-                           ndx   => 3,
-                           key   => 'O',
-                           value => $locale->text('Post') };
-                   }
-                   if ($form->is_allowed_role(['draft_modify'])){
-                       $button{edit_and_save} = {
-                           ndx   => 4,
-                           key   => 'E',
-                           value => $locale->text('Save') };
-                   }
-              }
-               delete $button{$_}
-                 for qw(post_as_new post e_mail sales_order void print on_hold);
-           }
-
-            unless (LedgerSMB::Sysconfig::latex()
-                    and LedgerSMB::Sysconfig::printer->%* ) {
-                for ( "print_and_post", "print_and_post_as_new" ) {
-                    delete $button{$_};
-                }
-            }
-
-        }
-        else {
-            if ( ! $form->is_closed( $transdate ) ) {
-                # Added on_hold, by Aurynn.
-                for ( "update", "ship_to", "post", "schedule")
-                {
-                    $allowed{$_} = 1;
-                }
-                $a{'print_and_post'} =
-                    (LedgerSMB::Sysconfig::latex()
-                     and LedgerSMB::Sysconfig::printer->%*);
-
-
-                for ( keys %button ) { delete $button{$_} if !$allowed{$_} }
-            }
-            elsif ( $transdate ) {
-                %button = %button{qw(update)};
-            }
-            else {
-                for ( keys %button ) { delete $button{$_} unless $_ eq 'update' };
-            }
-        }
-        for ( sort { $button{$a}->{ndx} <=> $button{$b}->{ndx} } keys %button )
-        {
-            $form->print_button( \%button, $_ );
-        }
-
-        $form->hide_form(qw(defaultcurrency workflow_id));
-
-        print "</td></tr>";
+        next if ($action->ui // '') eq 'none';
+        $button{$action_name} = {
+            ndx   => $action->order,
+            value => $locale->maketext($action->text),
+            doing => ($action->doing ? $locale->maketext($action->doing) : ''),
+            done  => ($action->done ? $locale->maketext($action->done) : ''),
+            type  => $button_types{$action->ui},
+            tooltip => ($action->short_help ? $locale->maketext($action->short_help) : '')
+        };
     }
 
+    for ( sort { $button{$a}->{ndx} <=> $button{$b}->{ndx} }
+          keys %button ) {
+        $form->print_button( \%button, $_ );
+    }
+
+    $form->hide_form(qw(defaultcurrency workflow_id));
+
+    print "</td></tr>";
 }
 
 sub void {
-    if ($form->{invnumber} =~ /-VOID$/){
-       $form->error($locale->text(
-           "Can't void a voided invoice!"
-       ));
-    }
-    for my $i (1 .. $form->{rowcount}){
-        $form->{"qty_$_"} *= -1;
-    }
-    $form->{invnumber} .= '-VOID';
-    $form->{reverse} = 1;
+    $form->{reversing_reference} = $form->{invnumber};
+    my $invnumber = $form->{invnumber} . '-VOID';
+    $form->{reverse} = not $form->{reverse};
     $form->{paidaccounts} = 1;
     if ($form->{paid_1}){
        warn $locale->text(
@@ -703,13 +616,21 @@ sub void {
         );
         delete $form->{paid_1};
     }
+    $form->{reversing} = delete $form->{id};
 
-    &post_as_new;
+    my $wf = $form->{_conn}->workflows->fetch( 'AR/AP', $form->{workflow_id} );
+    $wf->execute_action( $form->{__action} );
+
+    delete $form->{workflow_id};
+    &post_as_new( invnumber => $invnumber );
 }
 
 sub form_footer {
+    my $readonly =
+        ($form->{reversing} or $form->{approved}) ? 'readonly="readonly"' : '';
+    my $readonly_headers = $form->{approved} ? 'readonly="readonly"' : '';
     my $manual_tax;
-    if ($form->{id}){
+    if ($form->{approved}){
         $manual_tax =
             qq|<input type="hidden" name="manual_tax" value="|
                . $form->{manual_tax} . qq|" />|;
@@ -727,11 +648,11 @@ sub form_footer {
                     qq|<label for="manual-tax-0">|.
                        $locale->text("Automatic"). qq|</label>
                        <input type="radio" data-dojo-type="dijit/form/RadioButton" name="manual_tax" value="0"
-                              id="manual-tax-0" $checked0 />
+                              id="manual-tax-0" $checked0 $readonly />
                         <label for="manual-tax-1">|.
                         $locale->text("Manual"). qq|</label>
                       <input type="radio" data-dojo-type="dijit/form/RadioButton" name="manual_tax" value="1"
-                              id="manual-tax-1" $checked1 >|;
+                              id="manual-tax-1" $checked1 $readonly >|;
     }
     _calc_taxes();
     $form->{invtotal} = $form->{invsubtotal};
@@ -745,7 +666,7 @@ sub form_footer {
     $rows = ( $rows > $introws ) ? $rows : $introws;
     $form->{notes} //= '';
     $notes =
-        qq|<textarea data-dojo-type="dijit/form/Textarea" id="notes" name="notes" rows="$rows" cols="40" wrap="soft">$form->{notes}</textarea>|;
+        qq|<textarea data-dojo-type="dijit/form/Textarea" id="notes" name="notes" rows="$rows" cols="40" wrap="soft" $readonly_headers>$form->{notes}</textarea>|;
     $form->{intnotes} //= '';
     $intnotes =
 qq|<textarea data-dojo-type="dijit/form/Textarea" id="intnotes" name="intnotes" rows="$rows" cols="40" wrap="soft">$form->{intnotes}</textarea>|;
@@ -758,13 +679,14 @@ qq|<textarea data-dojo-type="dijit/form/Textarea" id="intnotes" name="intnotes" 
               <tr height="5"></tr>
               <tr>
             <td align=right>
-            <input id="taxincluded" name="taxincluded" class="checkbox" type="checkbox" data-dojo-type="dijit/form/CheckBox" value="1" $form->{taxincluded}></td><th align=left>|
+            <input id="taxincluded" name="taxincluded" class="checkbox" type="checkbox" data-dojo-type="dijit/form/CheckBox" value="1" $form->{taxincluded} $readonly></td><th align=left>|
           . $locale->text('Tax Included')
           . qq|</th>
          </tr>
 |;
     }
 
+    $form->{_setting_decimal_places} //= $form->get_setting('decimal_places');
     if ( !$form->{taxincluded} ) {
         if ($form->{manual_tax}){
              $tax .= qq|<tr class="listtop">
@@ -802,35 +724,35 @@ qq|<textarea data-dojo-type="dijit/form/Textarea" id="intnotes" name="intnotes" 
                # this in the normal way so we have to change the layout of the
                # notes fields. --CT
                $tax .= qq|<tr class="invoice-manual-tax">
-                <th align=right>$form->{"${taccno}_description"}</th>
+                <th align=right>$form->{_accno_descriptions}->{$taccno}</th>
                 <td><input data-dojo-type="dijit/form/TextBox" type="text" name="mt_amount_$item"
                         id="mt-amount-$item" value="|
-                        .$form->format_amount(\%myconfig, $form->{"mt_amount_$item"}, LedgerSMB::Setting->new(%$form)->get('decimal_places'))
-                        .qq|" size="10"/></td>
+                        .$form->format_amount(\%myconfig, $form->{"mt_amount_$item"}, $form->{_setting_decimal_places} )
+                        .qq|" size="10" $readonly /></td>
                 <td><input data-dojo-type="dijit/form/TextBox" type="text" name="mt_rate_$item"
                          id="mt-rate-$item" value="|
                         .$form->format_amount(\%myconfig, $form->{"mt_rate_$item"})
-                        .qq|" size="4"/></td>
+                        .qq|" size="4" $readonly /></td>
                 <td><input data-dojo-type="dijit/form/TextBox" type="text" name="mt_basis_$item"
                          id="mt-basis-$item" value="|
-                        .$form->format_amount(\%myconfig, $form->{"mt_basis_$item"}, LedgerSMB::Setting->new(%$form)->get('decimal_places'))
-                        .qq|" size="10"/></td>
+                        .$form->format_amount(\%myconfig, $form->{"mt_basis_$item"}, $form->{_setting_decimal_places} )
+                        .qq|" size="10" $readonly /></td>
                 <td><input data-dojo-type="dijit/form/TextBox" type="text" name="mt_ref_$item"
                          id="mt-ref-$item" value="|
-                        . $form->{"mt_ref_$item"} .qq|" size="10"/></td>
+                        . $form->{"mt_ref_$item"} .qq|" size="10" $readonly /></td>
                 <td><input data-dojo-type="dijit/form/TextBox" type="text" name="mt_memo_$item"
                          id="mt-memo-$item" value="|
-                        .$form->{"mt_memo_$item"} .qq|" size="10"/></td>
+                        .$form->{"mt_memo_$item"} .qq|" size="10" $readonly /></td>
                </tr>|;
             }  else {
            $form->{invtotal} += $form->round_amount($form->{taxes}{$item}, 2);
                 $form->{"${taccno}_total"} =
                       $form->format_amount( \%myconfig,
-                           $form->round_amount( $form->{taxes}{$item}, 2 ), LedgerSMB::Setting->new(%$form)->get('decimal_places') );
+                           $form->round_amount( $form->{taxes}{$item}, 2 ), $form->{_setting_decimal_places} );
                 next if !$form->{"${taccno}_total"};
                 $tax .= qq|
-                <tr class="invoice-auto-tax">
-                  <th align=right>$form->{"${taccno}_description"}</th>
+                <tr class="invoice-auto-tax" title="Source: $form->{acc_trans}{ $form->{id} }{ $taccno }{source}">
+                  <th align=right>$form->{_accno_descriptions}->{$taccno}</th>
                   <td align=right>$form->{"${taccno}_total"}</td>
                   <td>$form->{currency}</td>
                 </tr>|;
@@ -838,7 +760,7 @@ qq|<textarea data-dojo-type="dijit/form/Textarea" id="intnotes" name="intnotes" 
             $tax .= q|<tr><td>&nbsp;</td></tr>|;
         }
         $form->{invsubtotal} =
-          $form->format_amount( \%myconfig, $form->{invsubtotal}, LedgerSMB::Setting->new(%$form)->get('decimal_places'), 0 );
+          $form->format_amount( \%myconfig, $form->{invsubtotal}, $form->{_setting_decimal_places}, 0 );
 
         $subtotal = qq|
           <tr class="invoice-subtotal">
@@ -856,11 +778,11 @@ qq|<textarea data-dojo-type="dijit/form/Textarea" id="intnotes" name="intnotes" 
 
     $form->{oldinvtotal} = $form->{invtotal};
     $form->{invtotal} =
-    $form->format_amount( \%myconfig, $form->{invtotal}, LedgerSMB::Setting->new(%$form)->get('decimal_places'), 0 );
+    $form->format_amount( \%myconfig, $form->{invtotal}, $form->{_setting_decimal_places}, 0 );
     my $invtotal_bc;
     $invtotal_bc =
         $form->format_amount( \%myconfig,
-                              $form->{invtotal} * $form->{exchangerate}, LedgerSMB::Setting->new(%$form)->get('decimal_places'))
+                              $form->{invtotal} * $form->{exchangerate}, $form->{_setting_decimal_places})
         if $form->{currency} ne $form->{defaultcurrency};
 
 
@@ -874,7 +796,20 @@ qq|<textarea data-dojo-type="dijit/form/Textarea" id="intnotes" name="intnotes" 
         $hold_button_text = $locale->text('On Hold');
     }
 
+    $totalpaid = 0;
+    foreach my $i ( 1 .. $form->{paidaccounts} ) {
+        next if $readonly and not $form->{"datepaid_$i"};
+        $totalpaid += $form->{"paid_$i"};
+    }
+    $remaining_balance = $form->{invtotal} - $totalpaid;
+    $totalpaid = $form->format_amount( \%myconfig, $totalpaid, $form->{_setting_decimal_places}, 0 );
+    $remaining_balance = $form->format_amount( \%myconfig, $remaining_balance, $form->{_setting_decimal_places}, 0 );
+
+    my $display_barcode = $form->get_setting('have_barcodes') ? "initial" : "none";
     print qq|
+  <tr style="display:$display_barcode">
+   <td colspan="5"><b><label for="barcode">Barcode</label></b>: <input data-dojo-type="dijit/form/TextBox" id=barcode name=barcode></td>
+  </tr>
   <tr>
     <td>
       <table width=100%>
@@ -926,6 +861,18 @@ qq|<textarea data-dojo-type="dijit/form/Textarea" id="intnotes" name="intnotes" 
       (($form->{currency} ne $form->{defaultcurrency})
        ? "<tr><td><!-- total --></td><td align=right>$invtotal_bc</td><td>$form->{defaultcurrency}</td></tr>" : '')
       . qq|
+              <tr>
+                <td>&nbsp;</td>
+              </tr>
+      <tr class="invoice-total-paid">
+        <th>| . $locale->text('Total paid') . qq|</th><td align=right>$totalpaid</td><td>$form->{currency}</td>
+      </tr>
+              <tr>
+                <td>&nbsp;</td>
+              </tr>
+      <tr class="invoice-remaining-balance">
+        <th>| . $locale->text('Remaining balance') . qq|</th><td align=right>$remaining_balance</td><td>$form->{currency}</td>
+      </tr>
           $taxincluded
         </table>
       </td>
@@ -935,59 +882,31 @@ qq|<textarea data-dojo-type="dijit/form/Textarea" id="intnotes" name="intnotes" 
   </tr>
   <tr>
     <td>
-      <table width=100%>
-         <caption>History</caption>
 |;
-    # insert history items
-    my ($wf_id) =
-        $form->{dbh}->selectrow_array(
-            q{select workflow_id from transactions where id = ?},
-            {}, $form->{id});
-    my $wf      = FACTORY()->fetch_workflow( 'AR/AP', $wf_id );
-    if ($wf) {
-        my @history = $wf->get_history;
-        for my $h (sort { $a->id <=> $b->{id} } @history) {
-            my ($desc, $addn) = split( /[|]/, $h->description, 2);
-            my $link = '';
-            if ($addn) {
-                my %items = split(/[|:]/, $addn);
-                my %links = (
-                    'AR/AP|customer' => 'is.pl?action=edit&amp;workflow_id=',
-                    'AR/AP|vendor'   => 'ir.pl?action=edit&amp;workflow_id=',
-                    'Order/Quote'    => 'oe.pl?action=edit&amp;workflow_id=',
-                    'Email'          => 'email.pl?action=render&amp;id=',
-                    );
-                my ($id, $workflow) = split(/,/, $items{spawned_workflow}, 2);
-                $link = ($links{$workflow}
-                         // $links{"$workflow|$form->{vc}"}) . $id;
-            }
-            if ($link) {
-                print qq|<tr><td><a href="$link">$desc</a></td></tr>|;
-            }
-            else {
-                print qq|<tr><td>$desc</td></tr>|;
-            }
-        }
-    }
+
+    IIAA->print_wf_history_table($form, 'AR/AP');
+
     print qq|
-      </table>
     </td>
   </tr>
   <tr>
     <td>
       <table width=100% id="invoice-payments-table">
-    <tr class=listheading>
-      <th colspan=7 class=listheading>| . $locale->text('Payments') . qq|</th>
-    </tr>
+        <thead>
+          <tr class=listheading>
+            <th colspan=7 class=listheading>| . $locale->text('Payments') . qq|</th>
+          </tr>
+        </thead>
 |;
 
     if ( $form->{currency} eq $form->{defaultcurrency} ) {
-        @column_index = qw(datepaid source memo paid AR_paid);
+        @column_index = qw(status datepaid source memo paid AR_paid);
     }
     else {
-        @column_index = qw(datepaid source memo paid exchangerate paidfx AR_paid);
+        @column_index = qw(status datepaid source memo paid exchangerate paidfx AR_paid);
     }
 
+    $column_data{status}       = "<th></th>";
     $column_data{datepaid}     = "<th>" . $locale->text('Date') . "</th>";
     $column_data{paid}         = "<th>" . $locale->text('Amount') . "</th>";
     $column_data{exchangerate} = "<th>" . $locale->text('Exch') . "</th>";
@@ -1007,11 +926,18 @@ qq|<textarea data-dojo-type="dijit/form/Textarea" id="intnotes" name="intnotes" 
     $form->{"selectAR_paid"} =~ /value="(\Q$form->{cash_accno}\E--[^<]*)"/;
     $form->{"AR_paid_$form->{paidaccounts}"} = $1;
     foreach my $i ( 1 .. $form->{paidaccounts} ) {
+        next if $readonly and not $form->{"datepaid_$i"};
 
         $form->hide_form("cleared_$i");
 
-        print qq{
-        <tr class="invoice-payment">\n};
+        my ($title, $approval_status, $icon) =
+            ($form->{approved} and $form->{"paid_${i}_approved"}) ? ('', 'approved', '')
+            : $form->{"datepaid_$i"} ? ($locale->text('Pending approval'), 'unapproved', '&#x23F2;')
+            : ('', '', '');
+        $title = qq|title="$title"| if $title;
+        print qq|
+        <tr class="invoice-payment $approval_status" $title>
+|;
 
         $form->{"selectAR_paid_$i"} = $form->{selectAR_paid};
         $form->{"selectAR_paid_$i"} =~
@@ -1022,9 +948,9 @@ s/option value="\Q$form->{"AR_paid_$i"}\E"/option value="$form->{"AR_paid_$i"}" 
         $form->{"paidfx_$i"} =
             $form->format_amount(
                 \%myconfig,
-                $form->{"paid_$i"} * ($form->{"exchangerate_$i"} // 1), LedgerSMB::Setting->new(%$form)->get('decimal_places') );
+                $form->{"paid_$i"} * ($form->{"exchangerate_$i"} // 1), $form->{_setting_decimal_places} );
         $form->{"paid_$i"} =
-          $form->format_amount( \%myconfig, $form->{"paid_$i"}, LedgerSMB::Setting->new(%$form)->get('decimal_places') );
+          $form->format_amount( \%myconfig, $form->{"paid_$i"}, $form->{_setting_decimal_places} );
         $form->{"exchangerate_$i"} =
           $form->format_amount( \%myconfig, $form->{"exchangerate_$i"} );
 
@@ -1036,7 +962,7 @@ qq|<input type="hidden" name="exchangerate_$i" value="$form->{"exchangerate_$i"}
             }
             else {
                 $exchangerate =
-qq|<input data-dojo-type="dijit/form/TextBox" name="exchangerate_$i" id="exchangerate_$i" size="10" value="$form->{"exchangerate_$i"}">|;
+qq|<input data-dojo-type="dijit/form/TextBox" name="exchangerate_$i" id="exchangerate_$i" size="10" value="$form->{"exchangerate_$i"}" $readonly>|;
             }
         }
 
@@ -1044,55 +970,33 @@ qq|<input data-dojo-type="dijit/form/TextBox" name="exchangerate_$i" id="exchang
 <input type="hidden" name="forex_$i" value="$form->{"forex_$i"}">
 |;
 
+        $column_data{status} = qq|<td style="text-align:center">$icon</td>|;
         $column_data{paid} =
-qq|<td align="center"><input data-dojo-type="dijit/form/TextBox" name="paid_$i" id="paid_$i" size="11" value="$form->{"paid_$i"}"></td>|;
+qq|<td align="center"><input data-dojo-type="dijit/form/TextBox" name="paid_$i" id="paid_$i" size="11" value="$form->{"paid_$i"}" $readonly></td>|;
         $column_data{exchangerate} = qq|<td align="center">$exchangerate</td>|;
         $column_data{paidfx} = qq|<td align="center">$form->{"paidfx_$i"}</td>|;
         $column_data{AR_paid} =
-qq|<td align="center"><select data-dojo-type="dijit/form/Select" name="AR_paid_$i" id="AR_paid_$i">$form->{"selectAR_paid_$i"}</select></td>|;
+qq|<td align="center"><select data-dojo-type="dijit/form/Select" name="AR_paid_$i" id="AR_paid_$i" $readonly>$form->{"selectAR_paid_$i"}</select></td>|;
         $column_data{datepaid} =
-qq|<td align="center"><input class="date" data-dojo-type="lsmb/DateTextBox" name="datepaid_$i" id="datepaid_$i" size="11" title="$myconfig{dateformat}" value="$form->{"datepaid_$i"}"></td>|;
+qq|<td align="center"><input class="date" data-dojo-type="lsmb/DateTextBox" name="datepaid_$i" id="datepaid_$i" size="11" title="$myconfig{dateformat}" value="$form->{"datepaid_$i"}" $readonly></td>|;
         $column_data{source} =
-qq|<td align="center"><input data-dojo-type="dijit/form/TextBox" name="source_$i" id="source_$i" size="11" value="$form->{"source_$i"}"></td>|;
+qq|<td align="center"><input data-dojo-type="dijit/form/TextBox" name="source_$i" id="source_$i" size="11" value="$form->{"source_$i"}" $readonly></td>|;
         $column_data{memo} =
-qq|<td align="center"><input data-dojo-type="dijit/form/TextBox" name="memo_$i" id="memo_$i" size="11" value="$form->{"memo_$i"}"></td>|;
+qq|<td align="center"><input data-dojo-type="dijit/form/TextBox" name="memo_$i" id="memo_$i" size="11" value="$form->{"memo_$i"}" $readonly></td><td style="display:none">|;
 
         for (@column_index) { print qq|$column_data{$_}\n| }
-        print "
-        </tr>\n";
+        print "</td></tr>\n";
     }
+    print "</table>";
 
     $form->{oldtotalpaid} = $totalpaid;
     $form->hide_form(qw(paidaccounts oldinvtotal oldtotalpaid));
 
     print qq|
-      </table>
     </td>
   </tr>
   <tr>
     <td><hr size=3 noshade></td>
-  </tr>
-  <tr>
-    <td>
-|;
-
-    my $printops = &print_options;
-    my $formname = { name => 'formname',
-                     options => [
-                                  {text=> $locale->text('Sales Invoice'), value => 'invoice'},
-                                  {text=> $locale->text('Packing List'),  value => 'packing_list'},
-                                  {text=> $locale->text('Envelope'),      value => 'envelope'},
-                                  {text=> $locale->text('Shipping Label'), value=> 'shipping_label'},
-                                ]
-    };
-    if ($button{print}) {
-        print_select($form, $formname);
-        print_select($form, $printops->{lang});
-        print_select($form, $printops->{format});
-        print_select($form, $printops->{media});
-    }
-    print qq|
-    </td>
   </tr>
 </table>
 <br>
@@ -1110,17 +1014,48 @@ qq|<td align="center"><input data-dojo-type="dijit/form/TextBox" name="memo_$i" 
     # type=submit $locale->text('Delete')
     # type=submit $locale->text('Sales Order')
 
-    if ( !$form->{readonly} ) {
-        for ( sort { $button{$a}->{ndx} <=> $button{$b}->{ndx} } keys %button )
-        {
+    for ( sort { $button{$a}->{ndx} <=> $button{$b}->{ndx} } keys %button ) {
+        $form->print_button( \%button, $_ );
+    }
+
+    my $wf = $form->{_conn}->workflows->fetch( 'AR/AP', $form->{workflow_id} );
+    if ( $wf and grep { $_ eq 'print' } $wf->get_current_actions ) {
+        my $printops = &print_options;
+        print "<br /><br />";
+        print_select($form, $printops->{formname});
+        print_select($form, $printops->{lang});
+        print_select($form, $printops->{format});
+        print_select($form, $printops->{media});
+
+        %button_types = (
+            print => 'lsmb/PrintButton'
+            );
+        %button = ();
+        for my $action_name ( $wf->get_current_actions( 'output') ) {
+            my $action = $wf->get_action( $action_name );
+
+            next if ($action->ui // '') eq 'none';
+            $button{$action_name} = {
+                ndx   => $action->order,
+                value => $locale->maketext($action->text),
+                doing => ($action->doing ? $locale->maketext($action->doing) : ''),
+                done  => ($action->done ? $locale->maketext($action->done) : ''),
+                type  => $button_types{$action->ui},
+                tooltip => ($action->short_help ? $locale->maketext($action->short_help) : '')
+            };
+        }
+
+        for ( sort { $button{$a}->{ndx} <=> $button{$b}->{ndx} }
+              keys %button ) {
             $form->print_button( \%button, $_ );
         }
     }
 
+
     if ($form->{id}){
         IS->get_files($form, $locale);
         print qq|
-<a href="pnl.pl?action=generate_income_statement&pnl_type=invoice&id=$form->{id}">[| . $locale->text('Profit/Loss') . qq|]</a><br />
+<a href="pnl.pl?__action=generate_income_statement&pnl_type=invoice&id=$form->{id}">[| . $locale->text('Profit/Loss') . qq|]</a><br />
 <table width="100%">
 <tr class="listtop">
 <th colspan="4">| . $locale->text('Attached and Linked Files') . qq|</th>
@@ -1133,7 +1068,7 @@ qq|<td align="center"><input data-dojo-type="dijit/form/TextBox" name="memo_$i" 
         foreach my $file (@{$form->{files}}){
               print qq|
 <tr>
-<td><a href="file.pl?action=get&file_class=1&ref_key=$form->{id}&id=$file->{id}"
+<td><a href="file.pl?__action=get&file_class=1&ref_key=$form->{id}&id=$file->{id}"
        target="_download">$file->{file_name}</a></td>
 <td>$file->{mime_type}</td>
 <td>| . $file->{uploaded_at} . qq|</td>
@@ -1170,9 +1105,9 @@ qq|<td align="center"><input data-dojo-type="dijit/form/TextBox" name="memo_$i" 
        }
        print qq|
 </table>|;
-       $callback = $form->escape("is.pl?action=edit&id=".$form->{id});
+       $callback = $form->escape("is.pl?__action=edit&id=".$form->{id});
        print qq|
-<a href="file.pl?action=show_attachment_screen&ref_key=$form->{id}&file_class=1&callback=$callback"
+<a href="file.pl?__action=show_attachment_screen&ref_key=$form->{id}&file_class=1&callback=$callback"
    >[| . $locale->text('Attach') . qq|]</a>|;
     }
 
@@ -1194,7 +1129,7 @@ sub update {
     $form->{exchangerate} =
       $form->parse_amount( \%myconfig, $form->{exchangerate} );
 
-    $form->{$_} = LedgerSMB::PGDate->from_input($form->{$_})->to_output()
+    $form->{$_} = $form->parse_date( \%myconfig, $form->{$_} )->to_output()
        for qw(transdate duedate crdate);
 
 
@@ -1262,6 +1197,10 @@ sub update {
                || ! ( ( $form->{"partnumber_$i"} eq "" )
                       && ( $form->{"description_$i"} eq "" )
                       && ( $form->{"partsgroup_$i"}  eq "" ) );
+    }
+    if ($form->{barcode}) {
+        $non_empty_rows++;
+        IIAA->process_form_barcode(\%myconfig, $form, $non_empty_rows, $form->{barcode});
     }
 
     my $current_empties = $form->{rowcount} - $non_empty_rows;
@@ -1376,28 +1315,6 @@ sub update {
                       $form->format_amount( \%myconfig, $form->{"${_}_$i"} );
                 }
 
-            } else {
-
-                # ok, so this is a new part
-                # ask if it is a part or service item
-
-                if (   $form->{"partsgroup_$i"}
-                    && ( $form->{"partsnumber_$i"} eq "" )
-                    && ( $form->{"description_$i"} eq "" ) )
-                {
-                    $form->{rowcount}--;
-                    $form->{id} = $form_id;
-                    &display_form;
-                }
-                else {
-
-                    $form->{"id_$i"}   = 0;
-                    $form->{"unit_$i"} = $locale->text('ea');
-
-                    $form->{id} = $form_id;
-                    &new_item;
-
-                }
             }
         }
     }
@@ -1411,6 +1328,11 @@ sub update {
     check_form();
     $form->{rowcount}--;
     display_form();
+}
+
+sub post_and_approve {
+    post();
+    $form->call_procedure(funcname=>'draft_approve', args => [ $form->{id} ]);
 }
 
 sub post {
@@ -1479,12 +1401,12 @@ sub post {
     IS->post_invoice( \%myconfig, \%$form );
 
     my $id = $form->{old_workflow_id} // $form->{workflow_id};
-    my $wf = FACTORY()->fetch_workflow( 'AR/AP', $id );
+    my $wf = $form->{_conn}->workflows->fetch( 'AR/AP', $id );
 
-    # m/save_as/ matches both print_and_save_as_new as well as save_as_new
+    # m/save_as/ matches both 'print_and_save_as'_new as well as 'save_as_new'
     # note that "post" is modelled through the 'approve' entrypoint
     # and that the 'post' entrypoint actually models the 'save' action
-    if ($form->{action} =~ m/post_as/) {
+    if ($form->{__action} =~ m/post_as/) {
         $wf->execute_action( 'save_as_new' );
     }
     else {
@@ -1492,12 +1414,8 @@ sub post {
         $ctx->param( spawned_type => 'Order/Quote' );
         $ctx->param( spawned_id   => $form->{workflow_id} );
 
-        if ($form->{action} eq 'void') {
-            $wf->execute_action( 'void' );
-        }
-        else {
-            $wf->execute_action( 'save' );
-        }
+
+        $wf->execute_action( $form->{__action} );
     }
 
     delete $form->{old_workflow_id};
@@ -1526,10 +1444,18 @@ sub print_and_post {
     $old_form->{rowcount}++;
 
     my $wf =
-        FACTORY()->fetch_workflow( 'AR/AP', $form->{workflow_id} );
+        $form->{_conn}->workflows->fetch( 'AR/AP', $form->{workflow_id} );
     $wf->execute_action( 'print' );
     &print_form($old_form);
 
+}
+
+sub hold {
+    on_hold();
+}
+
+sub release {
+    on_hold();
 }
 
 sub on_hold {
@@ -1539,6 +1465,10 @@ sub on_hold {
         my $toggled = IS->toggle_on_hold($form);
 
         #&invoice_links(); # is that it?
+        if ($form->{workflow_id}) {
+            my $wf = $form->{_conn}->workflows->fetch( 'AR/AP', $form->{workflow_id} );
+            $wf->execute_action( $form->{__action} );
+        }
         &edit(); # it was already IN edit for this to be reached.
     }
 }
@@ -1573,6 +1503,10 @@ sub save_info {
 
         }
 
+        if ($form->{workflow_id}) {
+            my $wf = $form->{_conn}->workflows->fetch( 'AR/AP', $form->{workflow_id} );
+            $wf->execute_action( $form->{__action} );
+        }
         if ($form->{callback}){
         print "Location: $form->{callback}\n";
         print "Status: 302 Found\n\n";
@@ -1582,7 +1516,7 @@ sub save_info {
             . qq|here</a>.</body></html>|;
 
         } else {
-                edit();
+            edit();
         }
 
 }

@@ -12,7 +12,7 @@
    #       comments like this one.
 -%]
 <!DOCTYPE html>
-<html xmlns="http://www.w3.org/1999/xhtml">
+<html lang="[% USER.language %]">
 <head>
     <title>[% title %]</title>
     <link rel="shortcut icon" href="favicon.ico" type="image/x-icon" />
@@ -26,48 +26,53 @@
     <%= htmlWebpackPlugin.tags.headTags %>
     <link href="js/dojo/resources/dojo.css" rel="stylesheet">
     <link href="js/css/[% dojo_theme %].css" rel="stylesheet">
-    [%- IF form.stylesheet %]
-    <link href="js/css/[% form.stylesheet %]" rel="stylesheet">
-    [%- ELSIF stylesheet %]
+    <link href="js/css/quasar.css" rel="stylesheet">
+    [%- IF stylesheet %]
     <link href="js/css/[% stylesheet %]" rel="stylesheet">
     [%- END %]
     [%- FOREACH s = include_stylesheet %]
     <link href="js/css/[% s %]" rel="stylesheet">
     [%- END %]
-    [%- IF warn_expire;
-       IF pw_expires.years ;
-          ALERT = text("Warning: Your password will expire in [_1] years", pw_expires.years);
-       ELSIF pw_expires.months ;
-          ALERT = text("Warning: Your password will expire in [_1] months", pw_expires.months);
-       ELSIF pw_expires.weeks ;
-          ALERT = text("Warning: Your password will expire in [_1] weeks", pw_expires.weeks);
-       ELSIF pw_expires.days ;
-          ALERT = text("Warning: Your password will expire in [_1] days", pw_expires.days);
-       ELSE ;
-          ALERT = text("Warning: Your password will expire today");
-       END;
-    %]
     <script>
-        window.alert("[% ALERT %]");
-    </script>
-    [% END %]
-    <script>
+        var pw_expiration = {
+            "warn": [% warn_expire || 0 %],
+            "years": [% pw_expires.years || 0 %],
+            "months": [% pw_expires.months || 0 %],
+            "weeks": [% pw_expires.weeks || 0 %],
+            "days": [% pw_expires.days || 0 %]
+        };
         var dojoConfig = {
             async: 1,
-            parseOnLoad: true,
-            locale: "[% USER.language.lower().replace('_','-') %]",
+            parseOnLoad: false,
+            locale: "[% USER.language %]",
             packages: [{"name":"lsmb","location":"../lsmb"}],
             mode: "<%= htmlWebpackPlugin.options.mode %>"
         };
         var lsmbConfig = {
+            company: "[% company %]",
+            language: "[% USER.language %]",
+            login: "[% login %]",
             [% IF USER.dateformat %]
-            "dateformat": '[% USER.dateformat %]'
+            "dateformat": '[% USER.dateformat %]',
             [% END %]
+            version: "[% version %]"
         };
     </script>
-    ${htmlWebpackPlugin.tags.bodyTags}
+    <style>
+/* Undo Quasar messing with elements they have no business messing with */
+h1, h2, h3, h4, h5, h6, p, blockquote, pre, ul, ol, dl, figure, hr, fieldset, legend {
+  margin: revert;
+  font-weight: revert;
+  line-height: revert;
+}
+h1 { font-size: 2em; }
+h2 { font-size: 1.5em; }
+h3 { font-size: 1.17em; }
+h4 { font-size: 1em; }
+h5 { font-size: 0.83em; }
+h6 { font-size: 0.67em; }
+    </style>
     <meta name="robots" content="noindex,nofollow" />
 </head>
-[% BLOCK end_html %]
+[% content %]
 </html>
-[% END %]

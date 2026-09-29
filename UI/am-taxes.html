@@ -40,7 +40,7 @@
                          name = "validto_" _ i
                          size = 10
                          value = form.item("validto_$i")
-                         class = "date"
+                         type = "date"
                          } %]</td>
               <td>[% PROCESS input element_data = {
                          name = "pass_" _ i
@@ -66,15 +66,17 @@
                      };
            END;
     PROCESS button element_data={
-            name => 'action'
+            name => '__action'
             value => 'update'
             text => text('Update')
             };
     PROCESS button element_data={
-            name => 'action'
+            name => '__action'
             value => 'save_taxes'
             text => text('Save')
-            } %]
+            'data-lsmb-doing' = text('Saving...')
+            'data-lsmb-done' = text('Saved')
+    } %]
     <p>[% text('Tax items can be added to the list on this page by checking the "Tax" checkmark on the account configuration page.') %]
     </p>
   </form>

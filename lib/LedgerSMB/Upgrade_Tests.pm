@@ -18,12 +18,16 @@ This module has a single function that returns upgrade tests.
 use strict;
 use warnings;
 
+use JSON::PP;
+use Log::Any qw($log);
 use Moose;
 use Moose::Util::TypeConstraints;
 use namespace::autoclean;
 use List::Util qw( first );
 
 use LedgerSMB::Locale qw(marktext);
+
+my $json = JSON::PP->new;
 
 =head1 FUNCTIONS
 
@@ -274,11 +278,11 @@ sub fix {
     if ($self->insert) {
         my $columns =
             join ', ',
-            map { $dbh->quote_identifier($_) } @{$self->columns};
+            map { $dbh->quote_identifier($_) } (@{$self->columns}, @{$self->id_columns});
         my $values =
-            join ', ', map { '?' } @{$self->columns};
+            join ', ', map { '?' } (@{$self->columns}, @{$self->id_columns});
         $query = qq{INSERT INTO $table ($columns) VALUES ($values)};
-        @bind_columns = @{$self->columns};
+        @bind_columns = (@{$self->columns}, @{$self->id_columns});
     }
     else {
         my $setters =
@@ -294,6 +298,7 @@ sub fix {
 
     my $sth = $dbh->prepare($query)
         or die "Failed to compile query ($query) to apply fixes: " . $dbh->errstr;
+    $log->debug( "Running fix-query: $query" . $json->encode( { columns => \@bind_columns, values => $fixes } ) );
     for my $row (@$fixes) {
         my $rv = $sth->execute(map { $row->{$_} } @bind_columns);
         if (not $rv) {
@@ -361,13 +366,12 @@ sub _get_tests {
 # 1.2-1.3 tests
 
 push @tests, __PACKAGE__->new(
-        test_query =>
-           q{select count(*) as customer_count
-              from customer
-             where (select count(*)
-                      from chart
-                     where 'AR' = ANY(string_to_array(link,':'))) > 0
-            having count(*) = 0},
+    test_query => q{select 1
+                     where (select count(*) from customer) > 0
+                       and (select count(*)
+                              from chart
+                             where 'AR' = ANY(string_to_array(link,':'))) = 0
+                   },
  display_name => marktext('AR account available when customers defined'),
  instructions => marktext(
                    q(When customers are defined, an AR account must be defined,
@@ -383,12 +387,12 @@ push @tests, __PACKAGE__->new(
 
 push @tests, __PACKAGE__->new(
         test_query =>
-           q{select count(*) as vendor_count
-              from vendor
-             where (select count(*)
-                      from chart
-                     where 'AP' = ANY(string_to_array(link,':'))) > 0
-            having count(*) = 0},
+                 q{select 1
+                    where (select count(*) from vendor) > 0
+                      and (select count(*)
+                            from chart
+                           where 'AP' = ANY(string_to_array(link,':'))) = 0
+                 },
  display_name => marktext('AP account available when vendors defined'),
  instructions => marktext(
                    q(When vendors are defined, an AP account must be defined,
@@ -589,7 +593,7 @@ push @tests, __PACKAGE__->new(
              where (select count(*)
                       from chart
                      where 'AR' = ANY(string_to_array(link,':'))) > 0
-            having count(*) = 0},
+            having count(*) > 0},
  display_name => marktext('AR account available when customers defined'),
  instructions => marktext(
                    q(When customers are defined, an AR account must be defined,
@@ -605,12 +609,12 @@ push @tests, __PACKAGE__->new(
 
 push @tests, __PACKAGE__->new(
         test_query =>
-           q{select count(*) as vendor_count
-              from vendor
-             where (select count(*)
-                      from chart
-                     where 'AP' = ANY(string_to_array(link,':'))) > 0
-            having count(*) = 0},
+                 q{select 1
+                    where (select count(*) from vendor) > 0
+                      and (select count(*)
+                            from chart
+                           where 'AP' = ANY(string_to_array(link,':'))) = 0
+                 },
  display_name => marktext('AP account available when vendors defined'),
  instructions => marktext(
                    q(When vendors are defined, an AP account must be defined,
@@ -638,6 +642,7 @@ push @tests, __PACKAGE__->new(
          name => 'missing_gifi_table_rows',
  display_cols => [ 'accno', 'description' ],
         table => 'gifi',
+       insert => 1,
       columns => ['description'],
    id_columns => ['accno'],
  instructions => marktext('Please add the missing GIFI accounts'),
@@ -647,7 +652,7 @@ push @tests, __PACKAGE__->new(
 );
 
 push @tests, __PACKAGE__->new(
-   test_query => q{select distinct gifi_accno from account
+   test_query => q{select distinct gifi_accno as accno from account
                    where not exists (select 1
                                        from gifi
                                       where gifi.accno = account.gifi_accno)
@@ -655,9 +660,12 @@ push @tests, __PACKAGE__->new(
                          and gifi_accno !~ '^\s*$'},
  display_name => marktext('GIFI accounts not in "gifi" table'),
          name => 'missing_gifi_table_rows',
- display_cols => [ 'gifi_accno' ],
-        table => 'account',
- instructions => marktext('Please use the 1.3 UI to add the GIFI accounts'),
+ display_cols => [ 'accno', 'description' ],
+        table => 'gifi',
+       insert => 1,
+      columns => ['description'],
+   id_columns => ['accno'],
+ instructions => marktext('Please add the missing GIFI accounts'),
       appname => 'ledgersmb',
   min_version => '1.3',
   max_version => '1.3'
@@ -697,34 +705,43 @@ push @tests, __PACKAGE__->new(
   max_version => '1.3'
 );
 
+push @tests, __PACKAGE__->new(
+   test_query => q{select id, name, contact from customer
+                   where arap_accno_id is null
+                   order by name},
+ instructions => marktext(
+                   'Select and assign the missing AR accounts'),
+selectable_values => {
+    arap_accno_id => q/SELECT description as text, id as value FROM chart WHERE (':' || link || ':') like '%:AR:%'/,
+    },
+ display_name => marktext('Empty AR account'),
+         name => 'no_null_ar_accounts',
+ display_cols => [ 'name', 'contact', 'arap_accno_id' ],
+      columns => [ 'arap_accno_id' ],
+      appname => 'sql-ledger',
+        table => 'customer',
+  min_version => '2.7',
+  max_version => '3.0'
+   );
 
-#=pod
-
-#  push @tests, __PACKAGE__->new(
-#     test_query => "select * from customer where arap_accno_id is null",
-#   display_name => marktext('Empty AR account'),
-#           name => 'no_null_ar_accounts',
-#   display_cols => [ 'name', 'contact' ],
-#   instructions => marktext("Please correct the empty AR accounts"),
-#        appname => 'sql-ledger',
-#    min_version => '2.7',
-#    max_version => '3.0'
-#     );
-
-#  push @tests, __PACKAGE__->new(
-#     test_query => "select * from vendor where arap_accno_id is null",
-#   display_name => marktext('Empty AP account'),
-#           name => 'no_null_ap_accounts',
-#   display_cols => [ 'name', 'contact' ],
-#   instructions => marktext("Please correct the empty AP accounts"),
-#        appname => 'sql-ledger',
-#    min_version => '2.7',
-#    max_version => '3.0'
-#     );
-#*/
-
-#=cut
-
+push @tests, __PACKAGE__->new(
+   test_query => q{select id, name, contact from vendor
+                   where arap_accno_id is null
+                   order by name},
+ instructions => marktext(
+                   'Select and assign the missing AP accounts'),
+selectable_values => {
+    arap_accno_id => q/SELECT description as text, id as value FROM chart WHERE (':' || link || ':') like '%:AP:%'/,
+    },
+ display_name => marktext('Empty AP account'),
+         name => 'no_null_ap_accounts',
+ display_cols => [ 'name', 'contact', 'arap_accno_id' ],
+      columns => [ 'arap_accno_id' ],
+      appname => 'sql-ledger',
+        table => 'vendor',
+  min_version => '2.7',
+  max_version => '3.0'
+   );
 
 push @tests,__PACKAGE__->new(
     test_query => q{ select category, accno, description
@@ -885,25 +902,6 @@ selectable_values => { business_id => q{SELECT concat(description,' -- ',discoun
     max_version => '3.0'
     );
 
-# push @tests,__PACKAGE__->new(
-#     test_query => "select accno, description, link
-#                     from chart
-#                    where charttype = 'A'
-#                      and link ~ ':?\\(AR|AP|IC\\)\\(:|$\\)'",
-#     display_name => marktext('Unsupported account link combinations'),
-#     name => 'unsupported_account_links',
-#     display_cols => ['accno', 'description', 'link'],
-#  instructions =>
-#          marktext( 'An account can either be a summary account (which have a
-# link of "AR", "AP" or "IC" value) or be linked to dropdowns (having any
-# number of "AR_*", "AP_*" and/or "IC_*" links concatenated by colons (:).'),
-#    columns => ['category'],
-#     table => 'chart',
-#     appname => 'sql-ledger',
-#     min_version => '2.7',
-#     max_version => '3.0'
-#     );
-
 push @tests,__PACKAGE__->new(
     test_query => 'select id, customernumber, name
                     from customer
@@ -1040,7 +1038,7 @@ push @tests, __PACKAGE__->new(
     );
 
 push @tests, __PACKAGE__->new(
-   test_query => 'select partnumber, description, sellprice
+   test_query => 'select id, partnumber, description, sellprice
                   from parts where obsolete is not true
                   and partnumber in
                   (select partnumber from parts
@@ -1243,25 +1241,6 @@ Void the clearing date in the dialog shown or go back to SQL-Ledger if you feel 
        min_version => '2.7',
        max_version => '3.0'
 );
-
-
-### On the vendor side, SL doesn't use pricegroups
-# push @tests, __PACKAGE__->new(
-#     test_query => "select *
-#                      from partsvendor
-#                     where not exists (select 1
-#                                         from pricegroup
-#                                        where id = pricegroup_id)",
-#     display_name => marktext('Non-existing vendor pricegroups in partsvendor'),
-#     name => 'partsvendor_pricegroups_exist',
-#     display_cols => ['parts_id', 'credit_id', 'pricegroup_id'],
-#  instructions =>
-#         marktext('Please fix the pricegroup data in your partsvendor table (no UI available)'),
-#     table => 'partsvendor',
-#     appname => 'sql-ledger',
-#     min_version => '2.7',
-#     max_version => '3.0'
-#     );
 
     return @tests;
 }

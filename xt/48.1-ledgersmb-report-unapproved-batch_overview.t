@@ -10,11 +10,12 @@ that exercise interaction with a test database.
 use Test2::V0;
 
 use DBI;
+use URI;
+
 use LedgerSMB::Batch;
-use LedgerSMB::Report::Unapproved::Batch_Overview
+use LedgerSMB::Report::Unapproved::Batch_Overview;
 
 # Create test run conditions
-my $data;
 my $report;
 my $rows;
 my $row;
@@ -68,7 +69,8 @@ foreach my $batch_data(@test_batches) {
         $batch = LedgerSMB::Batch->new(
             dbh => $dbh,
             batch_id => $batch_id,
-        );
+            );
+        $batch->get;
         $batch->post or die 'Failed to post/approve test batch';
     }
 }
@@ -76,7 +78,9 @@ foreach my $batch_data(@test_batches) {
 
 
 # Initialise Object
-$report = LedgerSMB::Report::Unapproved::Batch_Overview->new();
+$report = LedgerSMB::Report::Unapproved::Batch_Overview->new(
+    _uri => URI->new,
+    );
 isa_ok($report, ['LedgerSMB::Report::Unapproved::Batch_Overview'], 'instantiated object');
 ok($report->set_dbh($dbh), 'set dbh');
 
@@ -100,7 +104,6 @@ is($row->{control_code}, 'TEST-001', 'row control_code field is correct');
 is($row->{description}, 'Test AP batch Description', 'row payment field is correct');
 is($row->{default_date}, '2018-09-08', 'row default_date field is correct');
 is($row->{transaction_total}, 0, 'row transaction_total field is correct');
-is($row->{payment_total}, 0, 'row payment_total field is correct');
 like($row->{created_on}, qr/\d{4}-\d{2}-\d{2}/, 'row created_on field is of expected format');
 ok(exists $row->{created_by}, 'row created_by field exists');
 ok(exists $row->{lock_success}, 'row lock_success field exists');

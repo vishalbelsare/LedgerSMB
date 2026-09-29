@@ -1,4 +1,6 @@
 
+use v5.38;
+
 package LedgerSMB::PGTimestamp;
 
 =head1 NAME
@@ -14,14 +16,11 @@ The type behaves internally as a Datetime module.
 
 =cut
 
-use strict;
-use warnings;
-use base qw(PGObject::Type::DateTime);
+use parent qw(PGObject::Type::DateTime);
 
 use Carp;
 use DateTime::Format::Strptime qw(strptime);
 
-use LedgerSMB::App_State;
 use LedgerSMB::Magic
     qw( MONTHS_PER_QUARTER YEARS_PER_CENTURY FUTURE_YEARS_LIMIT );
 
@@ -33,9 +32,7 @@ use overload (
 __PACKAGE__->register(registry => 'default',
                       types => ['timestamp', 'timestamptz']);
 
-sub _stringify {
-    my $self = shift;
-
+sub _stringify($self, $, $) {
     # Stringify without the 'T' in the middle
     #   which is the same way Pg stringifies
     return $self->strftime('%F %T');
@@ -69,10 +66,7 @@ defers object creation to the superclass.
 
 =cut
 
-sub new {
-    my $class = shift;
-    my @args = @_;
-
+sub new($class, @args) {
     if (! @args) {
         my $self = {};
         bless $self, $class;
@@ -92,8 +86,7 @@ This adds $n * $interval to the date, defaulting to 1 if $n is not supplied.
 
 =cut
 
-sub add_interval {
-    my ($self,$interval,$n) = @_;
+sub add_interval($self, $interval, $n) {
 
     my %delta_names = (
         day => 'days',
@@ -104,7 +97,7 @@ sub add_interval {
     );
     my $delta_name = $delta_names{$interval};
     #Validate asked interval
-    die "Bad interval: $interval" if not defined $delta_name;
+    croak "Bad interval: $interval" if not defined $delta_name;
 
     $n //= 1;    # Default to 1
     $n *= MONTHS_PER_QUARTER if $interval eq 'quarter'; # A quarter is 3 months
@@ -151,19 +144,15 @@ my $fb_parser =  DateTime::Format::Strptime->new(
     on_error  => 'undef' );
 
 
-sub from_input{
-    my ($self, $input) = @_;
-
-    local $@ = undef;
-    return $input if eval {$input->isa(__PACKAGE__)} && $input->is_date;
-
+sub from_input($self, $input) {
+    return $input if $input isa __PACKAGE__ && $input->is_date;
     return __PACKAGE__->new()
         if ! $input; # matches undefined as well as ''
 
     my $dt = $pref_parser->parse_datetime($input)
         // $fb_parser->parse_datetime($input);
 
-    die "Bad timestamp ($input)" if $input && ! $dt;
+    croak "Bad timestamp ($input)" if $input && ! $dt;
     bless $dt, __PACKAGE__;
     $dt->is_date(1);
     $dt->is_time(($input && $input =~ /\:/) ? 1 : 0); # Define time
@@ -178,31 +167,29 @@ used.  If $format is not supplied, the dateformat of the user is used.
 
 =cut
 
-sub to_output {
-    my ($self) = @_;
+sub to_output($self, @args) {
     return '' if not $self->is_date();
-    my $fmt;
-    if (defined LedgerSMB::App_State::User()->{dateformat}){
-        $fmt = LedgerSMB::App_State::User()->{dateformat};
-    } else {
-        $fmt = '%F';
-    }
-    $fmt = $formats->{uc($fmt)} if defined $formats->{uc($fmt)};
+    my %args  = (ref($args[0]) eq 'HASH')? %{$args[0]}: @args;
 
-    $fmt .= ' %T' if $self->is_time();
-    $fmt =~ s/^\s+//;
+    my $fmt = $args{format} // $args{datetimeformat};
+    if (not defined $fmt) {
+        $fmt = $args{dateformat} // '%F';
+        $fmt = $formats->{uc($fmt)} if defined $formats->{uc($fmt)};
+
+        $fmt .= ' %T' if $self->is_time();
+        $fmt =~ s/^\s+//;
+    }
 
     # the hard-coded 'en_US' locale here is no problem: it's used
     # for the %b format ('mon') to look up the names of the months;
     # however, we only support numeric formats
     my $formatter = DateTime::Format::Strptime->new(
-             pattern => $fmt,
-              locale => 'en_US',
-            on_error => 'croak',
-    );
-    my $date = $formatter->format_datetime($self);
-    if ($date =~ /\:/ and not $self->is_time()) { die 'to_output'; }
-    return $date;
+        pattern  => $fmt,
+        locale   => 'en_US',
+        on_error => 'croak',
+        );
+
+    return $formatter->format_datetime($self);;
 }
 
 =item $self->to_sort()
@@ -211,8 +198,7 @@ Returns sortable key for the Date/Time value (epoch)
 
 =cut
 
-sub to_sort {
-    my $self = shift;
+sub to_sort($self) {
     return $self->epoch;
 }
 
@@ -229,6 +215,3 @@ option any later version.  A copy of the license should have been included with
 your software.
 
 =cut
-
-
-1;

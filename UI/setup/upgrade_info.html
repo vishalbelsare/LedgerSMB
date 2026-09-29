@@ -1,14 +1,15 @@
-[% INCLUDE "ui-header.html"
+[% WRAPPER "ui-header.html"
 stylesheet="ledgersmb.css"
-include_stylesheet=["setup.css"] %]
+include_stylesheet=["system/setup.css"] %]
 [% PROCESS elements.html %]
 <body id="setup-upgrade-info" class="lsmb [% dojo_theme %]">
-<div class="setupconsole" data-dojo-type="lsmb/main">
+<div><div class="setupconsole">
 <h2>[% text('Database Management Console') %]</h2>
 <div class="listtop">[% text('Upgrade Info') %]</div>
 <form data-dojo-type="lsmb/SimpleForm"
       action="setup.pl" method="POST"
       name="upgrade_info">
+  <input type="hidden" name="csrf_token" value="[% csrf_token %]" />
 [% INCLUDE input element_data = {
     name = 'database'
     type = 'hidden'
@@ -44,7 +45,7 @@ INCLUDE input element_data = {
                             class = 'country'
 } %]
 </div>
-[% IF ar_accounts.size > 1; %]
+[% IF default_ar.size > 1; %]
 <div class="input_row">
 <p>
   [% text('LedgerSMB supports multiple <em>Accounts receivable (AR)</em> accounts ' _
@@ -66,7 +67,7 @@ INCLUDE input element_data = {
    value = default_ar
 };
 END %]
-[% IF ap_accounts.size > 1; %]
+[% IF default_ap.size > 1; %]
 <div class="input_row">
 <p>
   [% text('LedgerSMB supports multiple <em>Accounts payable (AP)</em> accounts ' _
@@ -96,7 +97,7 @@ END %]
 </p>
 [% INCLUDE button element_data = {
     text = text('Upgrade')
-    name = 'action'
+    name = '__action'
    value = upgrade_action
     type = 'submit'
    class = 'submit'
@@ -104,6 +105,6 @@ END %]
 </div>
 </div>
 </form>
-</div>
+</div></div>
 </body>
-[% end_html %]
+[% END %]

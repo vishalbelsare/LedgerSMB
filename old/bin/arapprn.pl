@@ -107,7 +107,7 @@ sub print {
     }
 
     if ( $form->{printandpost} ) {
-        $form->{action} = 'post';
+        $form->{__action} = 'post';
         delete $form->{printandpost};
         &post;
     }
@@ -138,7 +138,7 @@ sub print_transaction {
 
         push( @{ $form->{accno} },         $form->{tempaccno} );
         push( @{ $form->{account} },       $form->{tempaccount} );
-        push( @{ $form->{description} },   $form->{tempdescription} );
+        push( @{ $form->{linedescription} },   $form->{tempdescription} );
         push( @{ $form->{projectnumber} }, $form->{tempprojectnumber} );
 
         push( @{ $form->{amount} }, $form->{"amount_$i"} );
@@ -202,7 +202,7 @@ sub print_transaction {
     $form->{integer_amount} = $form->format_amount( \%myconfig, $whole );
 
     foreach my $field (qw(invtotal subtotal paid total)) {
-        $form->{$field} = $form->format_amount( \%myconfig, $form->{$field}, LedgerSMB::Setting->new(%$form)->get('decimal_places') );
+        $form->{$field} = $form->format_amount( \%myconfig, $form->{$field}, $form->get_setting('decimal_places') );
     }
 
     ( $form->{employee} ) = split /--/, $form->{employee};
@@ -228,21 +228,11 @@ sub print_transaction {
     }
 
     if ( lc($form->{media}) eq 'zip'){
-        $form->{OUT}       = $form->{zipdir};
+        $form->{OUT} = $form->{zipdir};
         $form->{printmode} = '>';
     } elsif ( $form->{media} !~ /(zip|screen)/ ) {
-        $form->{OUT}       = LedgerSMB::Sysconfig::printer()->{ $form->{media} };
+        $form->{OUT} = $form->{_wire}->get( 'printers' )->get( $form->{media} );
         $form->{printmode} = '|-';
-
-        if ( $form->{printed} !~ /$form->{formname}/ ) {
-
-            $form->{printed} .= " $form->{formname}";
-            $form->{printed} =~ s/^ //;
-
-            $form->update_status;
-        }
-
-        $old_form->{printed} = $form->{printed} if %$old_form;
     }
 
     $form->{fileid} = $form->{invnumber};
@@ -258,7 +248,9 @@ sub print_transaction {
         path => 'DB',
         locale => $locale,
         output_options => \%output_options,
-        format => uc $form->{format} );
+        format_plugin   =>
+           $form->{_wire}->get( 'output_formatter' )->get( uc($form->{format} || 'HTML') ),
+        );
     $template->render($form);
     LedgerSMB::Legacy_Util::output_template($template, $form);
 

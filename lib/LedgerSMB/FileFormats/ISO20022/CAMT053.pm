@@ -1,10 +1,11 @@
+
+use v5.38;
+use experimental 'try';
+
 package LedgerSMB::FileFormats::ISO20022::CAMT053;
-use strict;
-use warnings;
 
 use XML::LibXML;
 use XML::LibXML::XPathContext;
-use Feature::Compat::Try;
 
 =head1 NAME
 
@@ -33,15 +34,13 @@ not identified as a CAMT053 document.
 
 =cut
 
-sub new {
-    my ($class, $content) = @_;
-    return unless defined $content;
+sub new($class, $fh) {
+    return unless defined $fh;
 
     my ($dom, $ns);
     try {
-        $dom = XML::LibXML->load_xml(
-            string => $content
-        );
+        binmode $fh; # remove all IO layers as per the docs
+        $dom = XML::LibXML->load_xml(IO => $fh);
         $ns = $dom->documentElement->namespaceURI;
     }
     catch ($e) { }
@@ -61,8 +60,7 @@ Returns the XML::LibXML DOM tree representing the input xml.
 
 =cut
 
-sub dom {
-    my ($self) = @_;
+sub dom($self) {
     return $self->{dom};
 }
 
@@ -89,8 +87,7 @@ Returns a flattened list with the following elements:
 
 =cut
 
-sub _decode_crdt {
-    my ($code) = @_;
+sub _decode_crdt($code) {
     die "bad debit/credit code: $code"
           unless lc($code) =~ /^(crdt|dbit)$/;
     my $ret;
@@ -98,8 +95,7 @@ sub _decode_crdt {
     return $ret // 'debit';
 }
 
-sub lineitems_simple {
-    my ($self) = @_;
+sub lineitems_simple($self) {
 
     my $xpc = XML::LibXML::XPathContext->new;
     $xpc->registerNs(
@@ -135,5 +131,3 @@ option any later version.  A copy of the license should have been included with
 your software.
 
 =cut
-
-1;

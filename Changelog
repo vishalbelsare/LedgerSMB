@@ -1,40 +1,1065 @@
                                                         -*- fundamental -*-
 
-Changelog for 1.10 Series
-Unreleased
+Changelog for 1.14 Series
+
+Changelog for 1.14.0
+
+Added functionalities
+* Support textual numbers for check printing for all translations (#9430)
+* New numbering sequences for lots, payments and asset reports (#9283, #9321)
+
+Changed functionalities
+* Added support for spaces around commas in CSV uploads (#9505)
+* Batch date is now clearly indicated to be default posting date (#9791)
+
+Removed functionalities
+* Use of multiple cash accounts on the single payment entry screen (#9508)
+* Support for the INI configuration file format (#9433)
+* Table 'voucher' dropped as part of (#9788)
+
+Bugs fixed
+* Overpayment reversals don't have a 'payment' record (#9257)
+* Overpayments don't show on AR/AP invoices and transactions (#2367)
+* One voucher per batch instead of one per transaction in a batch (#9572)
+* Partial payments data generated from vouchers in 1.8 migration script (#9794)
+* Exit code from 'ledgersmb-admin' is zero on failed user creation (#9745)
+
+Cleanup & architecture improvements
+* Payments are now tracked as first-order transactions (#9508)
+* Refactored tracking of AR/AP/overpayment invoice/transaction balances (#9405)
+* Refactored tracking of customer/vendor overpayment balances (#9449)
+* Centralized 'transactions' table, reducing role of ar/ap/gl tables (#9283)
+* Subledger transactions no longer *also* gl transactions (#9235)
+* Batches are now a collection of transactions, not journal lines (#9788)
+* Removed unused SQL modules (#9279)
+* Move last tables to GENERATED IDENTITY (#9319)
+* Various improvements to the generation of our API documentation (#9334, #9335, #9344)
+* Dropped custom number-to-text conversion in favor of Lingua::Num2Word (#9430)
+* Reduce use of App_State::DBH and remove App_State::User remnants (#9760)
+* Harmonization of syntax in modules which 'use v5.xx' to v5.38 (#9744)
+
+Updated dependencies
+* Perl minimum version increased to 5.38 (from 5.36)
+* PostgreSQL minimum version increased to v14 (from v13)
+
+
+Changelog for 1.13 Series
+Released 2025-10-04
+
+Changelog for 1.13.8
+* Fix ledgersmb-admin error code to be non-zero on user creation failure (#9746)
+* Prevent errors for database handles accessed during global destruction (#9748)
+* Fix Apache2 example config failing to resolve static assets (#9804)
+* Fix reporting units not showing up on AR/AP transactions (#9816)
+* Explicitly return an HTTP error when user session creation fails (#9827)
+
+
+Changelog for 1.13.7
+* Fix error thrown when selecting 'All accounts' on the trial balance (#9699)
+
+
+Changelog for 1.13.6
+* Fix double-counting of transaction amounts in batch searches (#9522)
+* Add pre-upgrade consistency checks in setup.pl (#9559)
+* Add upgrade consistency checks for payments (#9559)
+* Add consistency checks on transaction balancedness (#9573)
+* Add consistency checks ov voucher linkage (#9573)
+
+
+Changelog for 1.13.5
+* Restore ability to run upgrades as non-superuser (#9381)
+* Fix the New (new contact) link on the Order screen (#9409)
+* Fix scrollbar appearance on tabbed UI (e.g. Contacts page) (#9415)
+* Extend GL workflows to support batch approval (#9418)
+* Fix uploaded GL transactions missing assigned workflows (#9418)
+* Fix asset report approval (#9482)
+
+
+Changelog for 1.13.4
+* Fix dates not always shown on old-code screens (#9304)
+* Fix password duration not showing correctly on configuration screen (#9315)
+* Fix loading the menu after migrations (#9373)
+* Fix PostgreSQL v13 compatibility of SQL Ledger and LedgerSMB migrations (#9379)
+* Fix migrations for LedgerSMB 1.2 without customers or vendors (#9371, #9377)
+* Fix migrations for SQL Ledger without customers or vendors (#9371, #9377)
+
+
+Changelog for 1.13.3
+* Fix foreign currency calculation on single payment screen (#9231)
+* Print company address above PNL and balance reports (#9256)
+
+
+Changelog for 1.13.2
+* Fix 'Send' on e-mail of invoice/order throwing an error (#9180)
+* Fix logs filled with undefined value warnings in LedgerSMB::PGDate (#9177)
+
+
+Changelog for 1.13.1
+* Fix for printing of invoices with manual taxes (#9116)
+* Fix for comparisons in the Income Statement report (#9114)
+* Fix for tax calculations in invoice API calls without taxes (#9111)
+* Fix spacing in the HTML invoice template (#9118)
+* Fix for WA tax module (#9092)
+* Fix examples in OpenAPI API documentation (#9109)
+
+
+Changelog for 1.13.0
+
+Added functionalities
+* Concurrent logins into multiple companies on a single browser (#8496)
+* Ability to remove unused customers, credit accounts (#8616)
+* Search box added to the menu (#8831)
+* Tracking of user logins and logout for audit purposes (#8784)
+* Localization of names in the country selection drop-down (#8749)
+* Improved on-boarding experience with new installer supporting more platforms
+  to handle dependencies than previous methods; see https://get.ledgersmb.org
+* Technical support for arbitrary attributes on parts and others (#8996)
+* Scheduled actions from upgrades; e.g. removal of migration artifacts (#8979)
+* GL Report improvements:
+  * Opening and closing balances split by FX in GL report (#9023)
+  * Opening and closing balances in GL report FX Debit/credit columns (#9018)
+
+Changed functionalities
+* Concurrent logins with different users on one browser throw an error (#8496)
+* Confusing menu name 'Add Contact' changed to 'Add entity' (#8003)
+* Split toplevel Reports menu over General Journal and Goods & Services (#8850)
+* Menu reloaded from file (./locale/menu.xml) on each upgrade (#8876)
+
+Removed functionalities
+
+Bugs fixed
+* Better referential integrity with more relational constraints (#8661, #8794)
+
+Cleanup & architecture improvements
+* Simplified balance sheet and income statement report templates (#9024, #9025)
+* Added several ADRs (architecture decision records) describing project direction
+* Encapsulation of Dojo widgets in custom (web) elements (#8874)
+* Deprecated 'ledgersmb.conf' configuration in favor of 'ledgersmb.yaml' (#8570)
+* Loading of main section more predictable through state machine use (#8530)
+* Removed deps in favor of (experimental) built-in functionality (#8571, #8572)
+* Allow workflows to determine buttons on read-only screens (#8583)
+* Removal of custom SMTP handling class; replaced with Email::Sender (#8576)
+* Dropped unnecessary table inheritance (#8046)
+* Replacement of various Dojo layout components with Vue equivalents (#8811)
+* Dead code removal (#8579, #8591, #8613, #8826, #8874)
+* Move end-to-end UI tests from Selenium Hub v3 to v4 (#8829)
+
+Updated dependencies
+* Feature::Compat::Try (removed)
+* IO::Scalar (removed)
+* Workflow (2.06, from <2.0)
+
+
+Changelog for 1.12 Series
+Released 2024-12-14
+
+Changelog for 1.12.20
+* Fix error thrown when selecting 'All accounts' on the trial balance (#9699)
+
+
+Changelog for 1.12.19
+* Fix double-counting of transaction amounts in batch searches (#9522)
+* Add pre-upgrade consistency checks in setup.pl (#9559)
+* Add upgrade consistency checks for payments (#9559)
+* Add consistency checks on transaction balancedness (#9573)
+* Add consistency checks ov voucher linkage (#9573)
+
+
+Changelog for 1.12.18
+* Restore ability to run upgrades as non-superuser (#9381)
+* Fix the New (new contact) link on the Order screen (#9409)
+* Fix scrollbar appearance on tabbed UI (e.g. Contacts page) (#9415)
+* Extend GL workflows to support batch approval (#9418)
+* Fix uploaded GL transactions missing assigned workflows (#9418)
+* Fix asset report approval (#9482)
+
+
+Changelog for 1.12.17
+* Fix migrations for LedgerSMB 1.2 without customers or vendors (#9371, #9377)
+* Fix migrations for SQL Ledger without customers or vendors (#9371, #9377)
+
+
+Changelog for 1.12.16
+* Fix undefined value warning caused by converting dates to strings (#9178)
+
+
+Changelog for 1.12.15
+* Fix for printing of invoices with manual taxes (#9116)
+* Fix for tax calculations in invoice API calls without taxes (#9111)
+* Fix spacing in the HTML invoice template (#9118)
+* Fix for WA tax module (#9092)
+* Fix examples in OpenAPI API documentation (#9109)
+
+
+Changelog for 1.12.14
+* Fix WHERE statement in schema upgrade script (#9061)
+* Fix typo in table name in post-upgrade script (#9060)
+
+
+Changelog for 1.12.13
+* Fix reconciliations missing workflow context (#9004)
+* Fix starting balance in GL report filtered by account (#9020)
+* Add taxtotal for invoice printing (#9006)
+
+
+Changelog for 1.12.12
+* [MAJOR] Fix parts incorrectly marked as 'used for Cost Of Goods Sold' (#8952)
+* [MAJOR] Repair historic incorrect COGS markings and post missing COGS (#8986)
+   See https://ledgersmb.org/content/bug-explained-double-allocation-parts-cogs
+* Add database triggers to prevent COGS becoming messed up (#8972)
+* Add consistency check for COGS allocation in setup.pl (#8961)
+* Fix 'onhand' being clobbered by repeated saving of invoices (#8964)
+* Fix SQL error showing when reversing an AP invoice (#8950)
+
+Changelog for 1.12.11
+* Fix regressions since 1.11 in fixed assets posting (#8919)
+* Fix ETag values without double-quote quoting in API calls (#8898)
+
+
+Changelog for 1.12.10
+* Fix 'Login' button sometimes inactive on login page (#8813)
+* Fix taxes inappropriately rounded to number precision (#8822)
+* Fix typo on AR/AP Import screen (#8853)
+* Fix CSV export for AR/AP search results (#8840)
+* Remove English-to-English translations for AR/AP/Customer/Vendor
+
+
+Changelog for 1.12.9
+* Fix check for financial report templates when upgrading pre-1.8 databases
+* Fix report csv export template missing linebreaks
+* Fix searching for fixed assets throws a translation error (#8803)
+
+
+Changelog for 1.12.8
+* Fix non-posted transactions being included in Tax Forms (#8774)
+* Fix visual hint for non-posted payments on invoices and transactions (#8544)
+
+
+Changelog for 1.12.7
+* Fix entity search by country
+* Fix sales person drop-down on new quotes and orders (#8734)
+
+
+Changelog for 1.12.6
+* Fix Contact > Bank accounts screen (#8695)
+* Fix partial customer name matches on order search (#8728)
+* Fix removal of LedgerSMB::Moose::* types in US/Washington tax module (#8727)
+
+
+Changelog for 1.12.5
+* Fix missing aging statement attachment on e-mail statement output (#8672)
+* Fix missing payment bank account dropdown on invoice screen (#8678)
+* Remove double html-encoding of label text (#8663)
+* Fix setup.pl login with French as language preference (#8663)
+
+
+Changelog for 1.12.4
+* Fix AR/AP Invoice search by date period
+* Fix SASL authentication for SMTP when using ledgersmb.conf (#8669)
+
+
+Changelog for 1.12.3
+* Fix GL search and sort not correctly applying search parameters (#8630)
+
+
+Changelog for 1.12.2
+* Fix warnings in 'ledgersmb-admin template' command (#8595)
+* Fix pre-upgrade schema check feedback (#8606)
+* Fix failure to post payment/receipt batches (#8610)
+* Exclude buggy Workflow version 2.02 dependency (#8610)
+
+
+Changelog for 1.12.1
+* Ignore Content-Type header on GET requests (#8562)
+* Fix persisting of E-mail workflows without attachments (#8564)
+* Fix printing of GL and cash transfer transactions (#8580)
+* Fix error of Cash > Use [AR] Overpayment menus (#8582)
+
+
+Changelog for 1.12.0
+
+Added functionalities
+* AR/AP transaction history similar to invoices (#7773)
+* More consistency checks in setup.pl (#7649)
+* Ability to include documentation in Chart of Account definition files (#7651)
+* Highlighting of unapproved payments on invoices and transactions (#7777)
+* Enhancements for migrations from 1.3 through 1.7 (#7794)
+* Enhancements for migrations from 1.3 through 1.5 (#7795)
+* Enhancements for migrations from 1.3 (#7793)
+* Experimental Orders API (#8084)
+* Persistence of calculated taxes on orders and quotes (#8038)
+* Database upgrade log inspection in setup.pl (#8363)
+* Ship To 'At the attention of' (Ship To Attn) (#8360)
+* Support for external template rendering engines like weasyprint (#8440)
+
+Changed functionalities
+* Sub-templates 'dynatable' merged into 'display_report' templates (#8380)
+* Default cookie names no longer include LedgerSMB version number (#7639)
+* Reconciliation state managed through workflows (#8154, #8158)
+* Ship To addresses now immutable (#8365)
+* Move '(in)active' from location itself to entity/credit account link (#8333)
+
+Removed functionalities
+* 'Class' removed from Company and Person entry and search (#8086, #8087)
+
+Bugs fixed
+* Invoices from batch printed even though not paid (#7761)
+* Countries in setup.pl from Locale::CLDR; use reference data instead (#7648)
+* Correctness of HTML pages, now includes 'html' closing tag (#7784)
+* JavaScript dependencies versus dev-dependencies (#8028)
+* AR/AP items in vouchers can be saved only once (#6895)
+* Accounts marked for reconciliation can't be deleted (#7805)
+* Transactions and invoices with attachments can't be saved (#6018)
+* Aging statement shows functional instead of foreign currency amounts (#2162)
+* Incorrect starting balance of fx-based reconciliations (#8295)
+* Syntax error in 1099-INT report template (#8162)
+* Ship To on orders, quotes and purchase invoices (#8329)
+
+Cleanup & architecture improvements
+* Reference data factored out of database schema (#7648)
+* Removed global state LedgerSMB::App_State::User (#7876)
+* Improved state tracking using workflows (#7908, #8136, #8154)
+* Move PostgreSQL SERIAL to GENERATED BY DEFAULT (#8047)
+* Removed workaround class LedgerSMB::Mailer::TransportSMTP (#7932)
+* Removed `new_shipto` table, fixating shipping addresses (#8312)
+
+Updated dependencies
+* Email::Sender (minimum increased to 2.601)
+* Locale::CLDR (minimum increased to 0.44.1)
+* Workflow (compatibility with 2.0)
+
+
+Changelog for 1.11 Series (End of Life)
+Released 2023-10-03
+
+Changelog for 1.11.28
+* Fix starting balance in GL report filtered by account (#9020)
+
+
+Changelog for 1.11.27
+* [MAJOR] Fix parts incorrectly marked as 'used for Cost Of Goods Sold' (#8952)
+* [MAJOR] Repair historic incorrect COGS markings and post missing COGS (#8986)
+   See https://ledgersmb.org/content/bug-explained-double-allocation-parts-cogs
+* Add database triggers to prevent COGS becoming messed up (#8972)
+* Add consistency check for COGS allocation in setup.pl (#8961)
+
+
+Changelog for 1.11.26
+* Fix ETag values without double-quote quoting in API calls (#8898)
+
+
+Changelog for 1.11.25
+* Fix draft transactions appearing in Tax Form Reports (#8770)
+* Fix inactive 'Login' button on login page (#8814)
+* Fix typo on AR/AP Import Batch screen (#8843)
+
+
+Changelog for 1.11.24
+* Fix entity search by country
+
+
+Changelog for 1.11.23
+* Fix Contact > Bank accounts screen (#8695)
+* Fix partial customer name matches on order search (#8728)
+
+
+Changelog for 1.11.22
+* Remove double html-encoding of label text (#8663)
+* Fix setup.pl login with French as language preference (#8663)
+* Fix incorrect css values (#8645)
+
+
+Changelog for 1.11.21
+* Exclude buggy Workflow version 2.02 dependency (#8610)
+
+
+Changelog for 1.11.20
+* Fix warnings in 'ledgersmb-admin template' command (#8595)
+* Fix pre-upgrade schema check feedback, regressed in 1.11.17 (#8606)
+
+
+Changelog for 1.11.19
+* Fix post-and-approve action failing to approve transactions (#8442)
+* Fix failure to load modules using Perl 5.40 (#8468)
+
+
+Changelog for 1.11.18
+* Fix specifying an alternative database server port number (#8400)
+* Fix hostname with hyphen breaks ledgersmb-admin database URI (#8415)
+* Allow ledgersmb-admin to use pre-created databases, e.g. DigitalOcean (#8422)
+* Fix PNL and B/S CSV output missing 'heading_account' column (#8428)
+
+
+Changelog for 1.11.17
+* Fix negative COGS for assemblies [*only* assemblies affected] (#8351)
+    for more info see https://ledgersmb.org/content/cogs-assembly-fix
+* Fix saved orders and quotes showing as read-only [Part 2] (#8348)
+
+
+Changelog for 1.11.16
+* Restore 'Save Template' on GL transations, regressed from 1.10 (#8340)
+* Fix saved orders and quotes showing as read-only (#8348)
+* Fix AR/AP Outstanding Summary report generation (#8378)
+
+
+Changelog for 1.11.15
+* Fix order of comparisons with over 9 columns (#8246)
+* Remove spurious column from PNL and B/S CSV template (#8247)
+* Fix values in wrong columns in balance sheet CSV output (#8247)
+* Fix reconciliation between B/S and AR Aging report (#8300)
+* Show auto-generated invoice number after posting (#8322)
+* Prevent some actions on voided invoices and reversed transactions (#8324)
+* Fix migration failure when renamed role already exists (#8325)
+* Fix Save and Post buttons not appearing on Update of GL entry (#8327)
+
+
+Changelog for 1.11.14
+* Fix drill-down on trial balance to pass report selections (#8177)
+* Fix read access on 'templates' table for printed documents (#8180)
+* Fix error when clicking 'Attach' button on e-mail screen (#8193)
+
+
+Changelog for 1.11.13
+* Compatibility with Workflow 2.0 [to be released] (#8138)
+* Fix recurring items re-using state of the original item (#8157)
+* Fix download links at the bottom of the tax form report (#8164)
+
+
+Changelog for 1.11.12
+* Fix download of attachments to reconciliations (#8088)
+* Fix e-mailing of AR aging statements (#8111)
+
+
+Changelog for 1.11.11
+* Fix 'not set up for hierarchy reporting' on Entity Account screen (#8065)
+* Fix date format presentation misalignment with placeholder (#7983)
+* Fix order of comparison periods in PNL and B/S (#7800)
+* Fix handling of discounts in invoice API (#8030)
+* Restore Hebrew 'nplurals' setting back to 4
+* Enable scroll bars on setup(upgrade) data fix screens (#8071)
+
+
+Changelog for 1.11.10
+* Fix upgrades from older Pg versions with the 'cash_impact' view (#7987)
+* Fix missing locale parameter creating GL Search report (#7997)
+* Fix setup.pl CSRF regressions (#8007, #8000)
+* Fix date filters on Cash > Receipt/Payment (#8015)
+
+
+Changelog for 1.11.9
+* Add missing batch and entity sequences to the Defaults screen (#7965)
+* Stop warning during startup without configuration file (#7928)
+* CVE-2024-23831: CSRF attack on 'setup.pl'
+
+
+Changelog for 1.11.8
+* Fix changing Taxform checkmark after posting AR/AP transactions (#7894)
+* Restore customer/vendor name on PNL drilldown after GL column change (#7895)
+* Fix formatting of amounts on AR/AP search results (#7896)
+* Fix import of CoA csv with non-empty 'links' field (#7912)
+* Explicitly set foreground color on dark backgrounds in blue theme (#7875)
+* Fix screens, e.g. contacts, impacted by rename of 'action' parameter (#7918)
+
+
+Changelog for 1.11.7
+* Fix creating an invoice from an order (#7855)
+* Retain partsgroup selection on Update in parts screen (#7848)
+* Fix missing columns on trial balance 'Ending' report type (#7870)
+
+
+Changelog for 1.11.6
+* Fix 'Current earnings' not showing in the balance sheet report (#7785)
+* Fix saving headings of headings (#7802)
+* Fix saving unused accounts configured for reconciliation (#7805)
+* Fix 'delete' link shown in CoA screen on accounts used with parts (#7812)
+* Fix deletion of parts (#7811)
+
+
+Changelog for 1.11.5
+* Load paper size from database settings, if set (#7738)
+* Fix CoA and Trial Balance PDF reports missing data in some columns (#7739)
+* Fix check printing when paying a subset of the available invoices (#7761)
+* Add missing AR/AP workflow context creation in 1.10->1.11 migration (#7765)
+* Show workflow based AR/AP transaction history, same as on invoices (#7774)
+* Fix approval of payment/receipt batches (#7771)
+
+
+Changelog for 1.11.4
+* Show database and user name in setup.pl consistency result screen (#7714)
+* Fix AR/AP transaction Reverse button (#7719, #7717)
+* Fix invoices created from API to be in SAVED state (#7733)
+* Fix 'New Window' menu item throwing an error (#7735)
+* Fix Parts > Group > Add throwing 'Group missing!' (#7737)
+
+
+Changelog for 1.11.3
+* Fix typo to make 'Copy to New' button work on GL screen (#7675)
+* Minimum PGObject::Type::BigFloat version resolving Math::BigFloat issue (#7704)
+* Show posted AR/AP transaction after Post instead of 'Draft posted' (#7701)
+* Consistency 'New button in GL/AR/AP screens in SAVED + POSTED states (#7702)
+
+
+Changelog for 1.11.2
+* Fix trial balance drill down showing partial results (#7657)
+* Specify Locale::CLDR minimum version to fix numbers shown as 'HASH()' (#7671)
+
+
+Changelog for 1.11.1
+* API documentation lists incorrect version in cookie name (#7640)
+* Further Math::BigFloat fixes (combined with Locale::CLDR) (#7646)
+* Order/Quote can't be deleted due to unconfirmed prior deletion (#7654)
+* Fix syntax error in consistency check and add two new ones (#7650)
+
+
+Changelog for 1.11.0
+
+Added functionalities
+* Reclassification of negative assets to liabilities and vice versa (#7389)
+* AR/AP invoice history shows more actions, user and timestamp (#5873)
+* Bank statement parser for reconciliation through configuration (#7050)
+* System > Users menu item listing users in the company (#7032)
+* More webservice APIs (#7056, ...)
+* Total paid and Remaining balance summaries added to invoices (#7130)
+* Configurable directories (UI, workflows & sql) (#7236, #7250, #7251)
+* Tracking of user name in AR/AP/GL history (#5023)
+* Printing of GL and cash transfer transactions (#7310)
+* Barcode support added on invoices (regressed since 1.5) (#1584)
+* Loading template-sets with 'ledgersmb-admin template load-all' (#7367)
+* Database restore to user-specified schema with ledgersmb-admin (#7259)
+* GL transaction notes editable after posting (#7517)
+* Cross-referencing reversed and reversing transactions (#6715)
+* Shipto* variables added for expansion in invoice e-mails (#7543)
+* SQL Ledger and Ledger123 migrations for SL versions prior to 2.8.4
+
+Changed functionalities
+* Fresh new application logo and login page layout (#7317, #7319)
+* More database statistics reported after upgrade completion (#7017)
+* System > Sequences lists next value for consistency with Defaults (#7054)
+* Posted transactions show as read-only to differentiate from saved ones
+* Improve migration of not-the-latest LedgerSMB 1.3 databases
+
+Removed functionalities
+* Reconciliation file parser customization (#7050)
+* Inaccessible (partially duplicated) Colombian reports (#7138)
+* Customization through import of 'scripts/custom/*.pl' (#7138)
+
+Bugs fixed
+* Performance fixes for stored procedures being slow on huge databases (#7072)
+* Multiple fixes on AR/AP template transactions
+* Command 'setup' of ledgersmb-admin erroneously marked unimplemented (#7367)
+* Broken SQL-Ledger 2.8 and Ledger123 migration
+
+Code cleanup & architecture improvements
+* Continued removal of code based on the DBObject coding paradigm
+* Removed unused 'entity_id' and 'till' fields from AR and AP tables (#7390)
+* Removed broken autoselection of last-used customer/vendor (#7527)
+* JavaScript unit tests built on Jest
+* Factoring AR/AP/GL process into separate state
+* 'ledgersmb-common.css' moved from UI/css/ to UI/css/global/ (#7316)
+* Database data consistency checks in setup.pl (#7265)
+* Architecture Decision Record (ADR) repository added
+* Detach JavaScript front-end build from repository root
+* Resolve naming conflict on 'action' between URL and form parameters
+* Continued migration of table-based pages to CSS Grid (#7344)
+* Output HTML generator (for UI) configurable with dependency injection
+* Vue UI state managed by state machines
+
+Dependency updates
+* Countless JavaScript dependency updates
+
+
+Changelog for 1.10 Series (End of Life)
+Released 2022-10-08
+
+Changelog for 1.10.38
+* Fix PDF generation error for the outstanding AR/AP summary report (#8377)
+* Fix hostname with hyphen breaks ledgersmb-admin database URI (#8415)
+* Allow ledgersmb-admin to use pre-created databases, e.g. DigitalOcean (#8422)
+
+
+Changelog for 1.10.37
+* Fix reconciliation between B/S and AR Aging report (#8300)
+
+
+Changelog for 1.10.36
+* Fix drill-down on trial balance to pass report selections (#8177)
+* Fix read access on 'templates' table for printed documents (#8180)
+
+
+Changelog for 1.10.35
+* Fix download links at the bottom of the tax form report (#8164)
+
+
+Changelog for 1.10.34
+* Fix e-mailing of AR aging statements (#8111)
+
+
+Changelog for 1.10.33
+* Enable scroll bars on setup(upgrade) data fix screens (#8071)
+* Fix 'not set up for hierarchy reporting' on Entity Account screen (#8056)
+* Fix order of period comparisons in PNL and B/S (#7800)
+* Fix recurring transactions after setup.pl CSRF mitigation (#8042)
+* Revert Hebrew 'nplurals' back to 4
+
+
+Changelog for 1.10.32
+* Fix upgrades from older Pg versions with the 'cash_impact' view (#7987)
+* Fix missing locale parameter creating GL Search report (#7997)
+* Fix setup.pl CSRF regressions (#8007, #8000)
+* Fix date filters on Cash > Receipt/Payment (#8015)
+
+
+Changelog for 1.10.31
+* Fix GL transaction entry regressed from 1.10.29 (#7984)
+
+
+Changelog for 1.10.30
+* Add missing batch and entity sequences to the Defaults screen (#7965)
+* Stop warning during startup without configuration file (#7928)
+* CVE-2024-23831: CSRF attack on 'setup.pl'
+
+
+Changelog for 1.10.29
+* Fix formatting of amounts in AR/AP search results (#7896)
+* Explicitly set foreground color on dark backgrounds in blue theme (#7875)
+
+
+Changelog for 1.10.28
+* Retain partsgroup selection on Update in parts screen (#7848)
+* Fix missing columns on trial balance 'Ending' report type (#7870)
+
+
+Changelog for 1.10.27
+* Fix 'delete' link shown in CoA screen on accounts used with parts (#7812)
+* Fix deletion of parts (#7811)
+
+
+Changelog for 1.10.26
+* Load paper size from database settings, if set (#7738)
+* Fix CoA and Trial Balance PDF reports missing data in some columns (#7739)
+* Fix check printing when paying a subset of the available invoices (#7761)
+
+
+Changelog for 1.10.25
+* Minimum PGObject::Type::BigFloat version to resolve Math::BigFloat issue (#7704)
+
+
+Changelog for 1.10.24
+* Specify Locale::CLDR minimum version to fix numbers shown as 'HASH()' (#7671)
+
+
+Changelog for 1.10.23
+* Further Math::BigFloat fixes (combined with Locale::CLDR) (#7647)
+* Order/Quote can't be deleted due to unconfirmed prior deletion (#7655)
+
+
+Changelog for 1.10.22
+* Fix Math::BigFloat 1.999831 compatibility, included in Perl 5.36+ (#7635)
+
+
+Changelog for 1.10.21
+* Add option to include tax codes to taxform report (#7581)
+
+
+Changelog for 1.10.20
+* Increase maximum comparison periods from 9 to 13 (#7468)
+* Fix check to complement missing GIFI on SQL-Ledger migration (#7500)
+* Fix CSV imports with non-ascii, valid UTF-8, characters (#7511)
+* Fix multi-currency migration from SQL-Ledger 3.0 (#7519)
+* Fix transaction date of year-end reversals (#6852)
+* Save 'Ship To' data on invoices (#7453)
+* Fix 'Microfiche' column appearing empty on Goods search (#7558)
+
+
+Changelog for 1.10.19
+* Fix handling of updates with consecutive, exactly equal pages (#7464)
+
+
+Changelog for 1.10.18
+* Fix regression since 1.10.16 upgrading old companies while renaming setting
+* Fix selection of default AR/AP accounts while importing databases (#7419)
+* Fix error sending AR Aging statements, even though successful (#7428)
+
+
+Changelog for 1.10.17
+* Change workflow timestamps to per-second granularity (from minutes) (#7360)
+* Fix workflow actions not being logged despite configuration (#7360)
+* Fix deletion of parts groups (#7363)
+* Align invoice/order entry between databases with and without parts (#7374)
+
+
+Changelog for 1.10.16
+* Hide CSS files from the theme drop-down which render the app unusable (#7326)
+* Improve HTML compliance by moving INPUT tags around inside TABLE tags (#7323)
+* Fix addition of second and further make/model rows in parts (#7346)
+* Fix typo in setting name (#7337)
+
+
+Changelog for 1.10.15
+* Fix failure to save GL template transactions due to number formatting (#7302)
+
+
+Changelog for 1.10.14
+* Fix e-mail addresses on aging statement mails (#7235)
+* Fix error popup after successfully sending aging statement mail (#7242)
+* Fix 'cleared balance' on overlapping approved reconciliations (#7244)
+
+
+Changelog for 1.10.13
+* Aging reports per account; do not all entity invoices (#7177)
+* Follow up to Print buttons fix -- Dojo doesn't support 'async') (#7131)
+* Fix JOIN in 'all_managers' stored procedure (#7201)
+* On CoA, Service, Goods and OOverhead import, hide transaction fields (#7212)
+* Fix cloning companies being dependent on PG* environment vars (#7220)
+
+
+Changelog for 1.10.12
+* Random errors reported at the bottom of invoices without good reason (#7144)
+* Asset disposal results in asset of disposed amount (#7143)
+* Third address line on entity screen not saved for credit accounts (#7127)
+* Print buttons call removed function (#7151)
+* Empty inventory reports don't show in searches (#2661)
+* Error thrown while mailing AR aging statements (#7158)
+* CSV batch import fails due to incorrect function name (#7160)
+* Align SQL setting-increment function with Perl implementation (#7186)
+* Transaction Approval > Drafts doesn't set workflow state to POSTED (#7170)
+* Order number filter on invoice search ignored (#7178)
+* Fix notes from orders being on wrong invoice line (#7179)
+
+
+Changelog for 1.10.11
+* Stricter allowance for non-uniquely reconciled lines during migration (#7078)
+* Rounding crash in reports with huge numbers (#7100)
+* Unbalanced fixed asset disposal (through sale) transaction (#5180)
+* Correctly show populated reconciliation after bank statement upload (#6183)
+* CSV imports throwing a 'missing function' error (#7108)
+* Restore logging into the default company entering the name (#7114)
+* Addresses not aligning correctly with labels in some cases (#7117)
+* <ENTER> not triggering login from input fields on login page (#7121)
+
+
+Changelog for 1.10.10
+* Don't show obsolete accounts in account drop-downs (#7061)
+* Focus the first empty line on Update in AR, AP, Orders and Quotes (#1584)
+* Correct alignment in HTML income statement and balance sheet (#7074)
+* Improved layout of balance sheet and P&L reports for hierarchical CoA (#7086)
+* Fixed database creation and upgrades failing for non-superuser admin (#7073)
+
+
+Changelog for 1.10.9
+* Various fixes to make tax forms work (#7037 and #7040)
+* Fix error when retrieving template GL transactions (#7030)
+* Fix borders on sort order drop-down in reconciliation screen (#7052)
+* Fix report-sorting dropping results on each sort for some searches (#7057)
+
+
+Changelog for 1.10.8
+* Fix rendering performance of search results on Chrome-based browsers (#7018)
+* Improve request performance by loading document formatters on server startup
+* Improve invoice/order/quote performance by caching output formats
+* Reduce the number of database queries retrieving 'decimal_places'
+
+
+Changelog for 1.10.7
+* Fix 'remaining life' for monthly depreciation in fixed assets (#6563)
+* Fix new account configuration missing drop-down values and checkmarks (#7007)
+* Fix various buttons in payment and customer screens (#7010)
+* Fix alignment on Contact screen address, contact info and notes tabs (#7012)
+
+
+Changelog for 1.10.6
+* Fix serial numbers from orders being on wrong invoice line (#6979)
+* Fix searching on quotation numbers in quote searching (#6988)
+* Remove negative feedback in password change while typing passwords (#6991)
+* Fix failing password resets resulting in a technical error (#6995)
+* Fix changing passwords from user preferences page (#6978)
+
+
+Changelog for 1.10.5
+* Fix populating e-mail screen when mailing orders (#6956)
+* Populate 'memo' instead of 'source' when applying payment discount (#6943)
+
+
+Changelog for 1.10.4
+* Fix AR/AP transactions posted, not saved, with separation of duties (#6932)
+
+
+Changelog for 1.10.3
+* Fix 'New' button on invoice and transaction screens (#6893)
+* Fix UTF-8 character handling calling into old code (#6897)
+* Fix database upgrades based on demo dataset (#6879)
+* Remove stray double quote and curly character in purchase invoice (#6905)
+* Fix regression preventing cross-yearend pnl reporting (#6386)
+* Catch and report errors from updating pages (#6906)
+* Fix invoice and order screens breaking on 'min empty lines' > 1 (#6911)
+
+
+Changelog for 1.10.2
+* Fix multiple uploads through the [Attach] link failing (#6855)
+* Fix '<< Return' link on the e-mail screen being broken in some cases (#6858)
+* Improve query performance by declaring stored functions STABLE (#6872)
+* Fix manual tax entry unavailable on saved invoices (#6791)
+* Fix added line being dropped from invoice while deleting another (#6788)
+
+
+Changelog for 1.10.1
+* Fix batch details screen failing to load (#6850)
+* Update 1.10.0 Perl dependency changes in Changelog
+* Fix taxes wrong taxes being applied to invoices (#6857)
+* Fix HTML-encoding values on (PDF) printed documents (#6861)
+
 
 Changelog for 1.10.0
 
 Added functionalities
 * Example hierarchical chart of accounts, US General
 * Ability to delete user login accounts (#1135)
+* SysV init script for managing 'starman' process (#6455)
+* US/Washington tax module, doubling as an example for custom modules
+* Customer address data passed to Tax modules
+* Support for custom Tax modules adding a Source value on output lines
+* Possibility to add Vue component based pages
+* User-modified workflows through "custom_workflows" config path setting
+* Increased configurability by using dependency injection instead of configuration
+* Default printer selection supports 'Screen' as default output location
+* Default page size for PDFs selectable through System > Defaults
+* Support for Right-to-Left (RTL) languages
+* Ability to download all document templates as a zip file (#1931)
+* Added 'Currency', 'FX Debits' and 'FX Credits' columns to GL report (#3999)
+* Attachments to reconciliations, e.g. bankstatement PDFs
 
 Changed functionalities
-* Overpayment section in payment screen hidden on missing configuration
+* Overpayment section in payment screen hidden on missing configuration (#2512)
+* Batch AR/AP upload changed to support foreign currency transactions
+* Line description on AR/AP transactions renamed to 'linedescription' (#6482)
+* Some existing pages (including login.pl) converted to Vue.js v3
+* INI-format configuration file replaced by YAML dependency injection file
+* Localization of setup.pl & login.pl based on browser preferences
+* Some variables in document templates (e.g. 'company_name') renamed (#6672)
+* Simplified and fixed 'display_report.tex' and 'dynatable.tex' templates (#6676)
+* Stricter database schema to ensure reconciliation correctness (#2485)
 
 Removed functionalities
+* HTML 'accesskey' attribute, based on WebAIM.org guidance
+* DojoToolkit's TableContainerWidget converting its use to CSS3 Grid
+* Dependency on 'zip' program; replaced by dependency on Archive::Zip
+* Broken 'auth' config key for user authentication provider configuration
+* Unused config keys:
+  * force_username_case (section: main)
+  * check_max_invoices (section: main)
+  * dojo_theme (section: main)
+  * dojo_unbuilt (section: debug)
+* Template set 'xedemo'; functionality merged into 'demo' templates
 
 Bugs fixed
+* Tax incorrect on existing invoice after customer tax status change (#2322)
 * Better logging on authentication failure
 * Full support for running from a schema other than 'public'
+* Printing checks fails to include invoices on the check's voucher (#6253)
+* Languages in language selection drop down now in user's language (#6289)
+* Tax module initialization, in support of the US/Washington implementation
+* B/S and PnL PDF templates cleaned up and alignment fixed
+* Aging statements language selector restored (#6353)
+* Multiple aging statements generation and e-mailing restored (#6353)
+* Default printer selection in user preferences restored
+* Template 'display_report.html' doesn't depend on 'ui-header' anymore (#6672)
 
 Code cleanup
 * Fewer warnings from old code
+* Start changing client to use Vue3, vue-router and vue-i18n
 * Remove unused defaults table settings 'revtrans', 'yearend' and 'closedto'
 * Complete replacement of Log::Log4perl with Log::Any in library code
+* Remove unused UI templates
+* Simplify non-UI templates created from UI templates, removing UI remnants
+* Encapsulate Dijit (Dojo) widgets in Web Components / Custom Elements
+* Remove unused Dijit widget(s)
+* Use more idiomatic Template Toolkit coding style for templates
+* Remove duplicated (buggy) function from sql/moduls/Parts.sql
 
 Dependency updates
 * Perl 5.32 (updated from 5.24)
+* Dojo and Dijit 1.17.2 (from 1.16)
+* PostgreSQL 13 (updated from 10)
 * PGObject 2.3.2 (updated from 2.2.0)
 * PGObject::Simple 3.1.0 (updated from 3.0.2)
 * PGObject::Simple::Role 2.1.1 (updated from 2.0.2)
 * PGObject::Util::DBAdmin 1.6.1 (updated from 1.4.0)
-* PostgreSQL 13 (updated from 10)
-* Workflow 1.57 (upadted from 1.56)
+* Workflow 1.59 (upadted from 1.56)
+* YAML::PP (new)
+* YAML (dropped)
+* Version::Compare (dropped)
+* JSONSchema::Validator (new)
+* Locales (new)
+* HTTP::AcceptLanguage (new)
+* HTTP::Negotiate (new)
+* Beam::Wire (new)
+* Archive::Zip (new)
 
 
-Changelog for 1.9 Series
+Changelog for 1.9 Series (End of Life)
 Released 2021-09-24
+
+Changelog for 1.9.30
+* Fix check for missing GIFI on SQL-Ledger migration (#7501)
+* Fix CSV import failure on non-ascii, but valid UTF-8, character (#7512)
+* Fix transaction date on year-end reversal (#7540)
+* Save 'Ship To' selection on invoices (#7546)
+* Fix 'Microfiche' appearing empty on Goods search (#7559)
+
+
+Changelog for 1.9.29
+* Fix regression since 1.9.27 upgrading old companies while renaming setting
+* Fix selection of default AR/AP accounts while importing databases (#7419)
+
+
+Changelog for 1.9.28
+* Fix deletion of parts groups (#7363)
+* Align invoice/order entry between databases with and without parts (#7374)
+
+
+Changelog for 1.9.27
+* Hide CSS files from the theme drop-down which render the app unusable (#7326)
+* Improve HTML compliance by moving INPUT tags around inside TABLE tags (#7323)
+* Fix addition of second and further make/model rows in parts (#7346)
+* Fix typo in setting name (#7337)
+
+
+Changelog for 1.9.26
+* Fix failure to save GL template transactions due to number formatting (#7302)
+* Fix JOIN in 'all_managers' stored procedure (#7201)
+
+
+Changelog for 1.9.25
+* Random errors reported at the bottom of invoices without good reason (#7144)
+* Asset disposal results in asset of disposed amount (#7143)
+* Third address line on entity screen not saved for credit accounts (#7127)
+* Empty inventory reports don't show in searches (#2661)
+* Align SQL setting-increment function with Perl implementation (#7186)
+* Order number filter on invoice search ignored (#7178)
+* Fix notes from orders being on wrong invoice line (#7179)
+
+
+Changelog for 1.9.24
+* Don't show obsolete accounts in account selection drop-downs (#7062)
+
+
+Changelog for 1.9.23
+* Various fixes to make tax forms work (#7037 and #7040)
+* Fix borders on sort order drop-down in reconciliation screen (#7052)
+
+
+Changelog for 1.9.22
+* Fix rendering performance of search results on Chrome-based browsers (#7018)
+* Improve invoice/order/quote performance by caching output formats
+* Reduce the number of database queries retrieving 'decimal_places'
+
+
+Changelog for 1.9.21
+* Fix 'remaining life' for monthly depreciation in fixed assets (#6563)
+* Fix new account configuration missing drop-down values and checkmarks (#7007)
+
+
+Changelog for 1.9.20
+* Fix serial numbers from orders being on wrong invoice line (#6979)
+* Fix searching on quotation numbers in quote searching (#6988)
+* Remove negative feedback in password change while typing passwords (#6991)
+
+
+Changelog for 1.9.19
+* Fix UTF-8 character handling calling into old code (#6998)
+* Fix regression preventing cross-yearen PNL reporting (#6386)
+* Fix invoice and order screens breaking on 'min empty lines' > 1 (#6926)
+
+
+Changelog for 1.9.18
+* Fix '<< Return' link on the e-mail screen being broken in some cases (#6858)
+* Improve query performance by declaring stored functions STABLE (#6872)
+* Fix added line being dropped from invoice while deleting another (#6788)
+
+
+Changelog for 1.9.17
+* Fix HTML-encoding values on (PDF) printed documents (#6861)
+* Fix removal of invoice line breaking entire UI interaction (#6807)
+
+
+Changelog for 1.9.16
+* Support for PostgreSQL 14 for databases upgraded from pre-1.9.15
+
+
+Changelog for 1.9.15
+* Fix invoices randomly being incorrectly voided (#2321)
+* Fix response status code checks to correctly roll back on error (#6586)
+* Fix incorrect template delimiters in 'templates/demo/*.html' (#6659)
+* Fix Changelog for 1.9.14 - add two missing entries
+
+
+Changelog for 1.9.14
+* Fix reconciliation for multiple payments with the same Source (#6526)
+* Fix reconciliation for payments with GL corrections (#6533)
+* Fix GIFI account numbers not presented in the balance sheet report (#6520)
+* Fix typo in the invoice TeX templates: acrue -> accrue (#6532)
+
+
+Changelog for 1.9.13
+* Fix line descriptions missing on AP transaction prints (#6482)
+    Requires templates update.
+* Support PostgreSQL 14 (#6500)
+* Fix saving of vendor invoices (#6507)
+* Allow deletion of transactions with shipto address (#6509)
+
+
+Changelog for 1.9.12
+* Fix CSV export regression since 1.9.8 throwing an error (#6474)
+* Remove runtime Javascript dependencies with security issues [CVE] (#6475)
+* Fix tax form details reports throwing an error (#6458)
+
+
+Changelog for 1.9.11
+* Fix Goods > Search filters to honor selected part type (#6428)
+* Update invoice creation date when posting recurring invoices (#6432)
+* Fix double-counting of lines with business units in the trial balance (#6402)
+
+
+Changelog for 1.9.10
+* Second fix for sending e-mail due to the incompatibility in Workflow 1.59
+
+
+Changelog for 1.9.9
+* Fix sending e-mail due to an incompatibility in Workflow 1.59 (#6413)
+
+
+Changelog for 1.9.8
+* Fix regression in editing e-mail fields being discarded (#6168)
+* Fix regression in CSV download report being mostly empty (#6389)
+* Fix authentication failure returning incorrect HTTP error number (#6380)
+
+
+Changelog for 1.9.7
+* Fix clearing To/Cc/Bcc/... fields which were cleared in the UI (#6168)
+* Fix invoice amounts for invoices generated from orders (#6125)
+* Fix saving purchase orders as invoices (#6341)
+* Require gain/loss account setup to post FX transaction payments #6360)
+* [DATALOSS] Fix deletion of any batch removing payment information (#6368)
+
+
+Changelog for 1.9.6
+* Populate more fields in batch approval details report (#6271)
+* Fix error when posting an invoice created from an order (#6280)
+* Fix saving invoices and transactions as part of vouchers (#6327)
+* Fix printing batch details from batch details approval screen (#6324)
+
+
+Changelog for 1.9.5
+* Fix correct AR/AP account being selected on Update and when editing (#6191)
+* On date-entry, add the separator character immediatly when possible (#6121)
+* Fix the end date on credit accounts being shown correctly (#6235)
+* Fix calculation of credit limit remaining shown on transactions and invoices
+* Fix credit limit remaining calculation for foreign currency transactions
+* Extend AR/AP batch import to support multi currency imports (#6250)
+* Fix login errors being hidden behind an "insecure response" error (#6251)
+* Fix deletion of unapproved batches failing (#6252)
+* Fix GL batch import menu item missing, even with appropriate permissions (#6248)
+
 
 Changelog for 1.9.4
 * Fix balance sheet printing template listing account descriptions (#6203)
@@ -168,8 +1193,53 @@ Dependency updates (Perl)
 * YAML (new)
 
 
-Changelog for 1.8 Series
+Changelog for 1.8 Series (End Of Life)
 Released 2020-09-04
+
+Changelog for 1.8.31
+* Support for PostgreSQL 14 for databases upgraded from pre-1.9.15
+
+
+Changelog for 1.8.30
+* Fix invoices randomly being incorrectly voided (#2321)
+* Fix response status code checks to correctly roll back on error (#6586)
+
+Changelog for 1.8.29
+* Fix the 1.8 Changelog which had been replaced with the 1.9 Changelog
+
+
+Changelog for 1.8.28 (not released)
+* Fix reconciliation for multiple payments with the same Source (#6526)
+* Fix reconciliation for payments with GL corrections (#6533)
+
+
+Changelog for 1.8.27
+* Fix tax form details reports throwing an error (#6458)
+* Support PostgreSQL 14 (#6500)
+* Allow deletion of transactions with shipto address (#6509)
+
+
+Changelog for 1.8.26
+* Fix double-counting of lines with business units in the trial balance (#6402)
+
+
+Changelog for 1.8.25
+* Fix batch details printing throwing a PSGI error (#6325)
+* Fix saving of AR/AP vouchers throwing errors (#6327)
+* Fix account initialization in tax calculation module (#6335)
+* Require gain/loss account setup to post FX transaction payments (#6360)
+* [DATALOSS] Fix deletion of any batch removing payment information (#6368)
+
+
+Changelog for 1.8.24
+* Fix multiple issues with bank account reconciliation (#6122)
+* Fix correct AR/AP account being selected on Update and when editing (#6191)
+* Fix the end date on credit accounts being shown correctly (#6235)
+* Fix calculation of credit limit remaining shown on transactions and invoices
+* Fix credit limit remaining calculation for foreign currency transactions
+* Fix login errors being hidden behind an "insecure response" error (#6251)
+* Fix GL batch import menu item missing, even with appropriate permissions (#6248)
+
 
 Changelog for 1.8.23
 * Use a temp table to prevent bulk payments trampling on each other
@@ -458,8 +1528,33 @@ Dependency updates
 * XML::Simple (dropped)
 
 
-Changelog for 1.7 Series
+Changelog for 1.7 Series (End of Life)
 Released 2019-10-04
+
+Changelog for 1.7.41
+* Support for PostgreSQL 14 for databases upgraded from pre-1.9.15
+
+
+Changelog for 1.7.40
+* Fix invoices randomly being incorrectly voided (#2321)
+* Reduce memory consumption rendering XLSX output (#6483)
+
+
+Changelog for 1.7.39
+* Fix tax form details reports throwing an error (#6458)
+* Support PostgreSQL 14 (#6500)
+* Allow deletion of transactions with shipto address (#6509)
+
+
+Changelog for 1.7.38
+* Fix batch details printing throwing a PSGI error (#6325)
+* Fix saving of AR/AP vouchers throwing errors (#6327)
+* Fix account initialization in tax calculation module (#6335)
+
+
+Changelog for 1.7.37
+* Fix login errors being hidden behind an "insecure response" error (#6251)
+
 
 Changelog for 1.7.36
 * Fix manual taxes on credit invoices (#5721)
@@ -790,7 +1885,7 @@ Erik H is Erik Huelsmann
 Chris T is Chris Travers
 
 
-Changelog for 1.6 Series
+Changelog for 1.6 Series (End of Life)
 Released 2018-06-10
 
 Changelog for 1.6.33
@@ -1142,7 +2237,7 @@ Rob R is Rob Ransbottom
 David G is David Godfrey
 
 
-Changelog for 1.5 Series
+Changelog for 1.5 Series (End of Life)
 Released 2016-12-24
 
 Changelog for 1.5.30
@@ -1602,7 +2697,7 @@ ErikH is Erik Huelsmann
 JohnL is John Locke
 
 
-Changelog for 1.4 Series
+Changelog for 1.4 Series (End of Life)
 Released 2014-09-15
 
 Changelog for 1.4.42
@@ -2333,15 +3428,16 @@ Chris T is Chris Travers
 Steven M is Steven Marshall
 Havard S is Havard Sorli
 
-Changelog for 1.3 Series
-Initial Release:  Monday, Oct 12 2011
-Supported Presently
+
+Changelog for 1.3 Series (End of Life)
+Released 2011-10-12
 
 Changelog for 1.3.47
 * Fixed bug 1271, default payment account not set on 2nd line (Chris T)
 * Fixed bug 1275, post error due to trying to double encode arry (Chris T)
 
 Chris T is Chris Travers
+
 
 Changelog for 1.3.46
 * Fixing bug 1257, ordnumber shows all orders open/closd (Chris T)
@@ -2375,6 +3471,7 @@ Changelog for 1.3.45
 Chris T is Chris Travers
 Pongracz I is Pongracz Istvan
 
+
 Changelog for 1.3.44
 * Allow blank salutations, bug 1204. (Chris T)
 * Easier creation of select widgets with blanks. (Chris T)
@@ -2382,6 +3479,7 @@ Changelog for 1.3.44
 * Fixed issue where locked batch prevents login (Chris T)
 
 Chris T is Chris Travers
+
 
 Changelog for 1.3.43
 * Fixed bug 1136, manual tax not respecting user number formats (Chris T)
@@ -2433,6 +3531,7 @@ Changelog for 1.3.40
 Chris T is Chris Travers
 Pongracz I is Pongracz Istvan
 
+
 Changelog for 1.3.39
 * Fixed Internal Server Error clicking through ar/ap report (Chris T, 1022)
 * Fixed internal server error deleting part (Chris T, 1027)
@@ -2447,6 +3546,7 @@ Changelog for 1.3.39
 
 Chris T is Chris Travers
 Robert C is Robert Clay
+
 
 Changelog for 1.3.38
 * Fixed AR/AP transactions resetting currency/exchange rate (Chris T)
@@ -2473,6 +3573,7 @@ Erik H is Erik Huelsmann
 Nick P is Nick Prater
 P. Isvan is Pongracz Istvan
 
+
 Changelog for 1.3.37
 * 1.3-1.2 downgrade now drops extensions (Chris T, 943)
 * Fixed db names with spaces not supported (Chris T, 946)
@@ -2496,6 +3597,7 @@ Changelog for 1.3.37
 Chris T is Chris Travers
 Erik H is Erik Huelsmann
 
+
 Changelog for 1.3.36
 * Set default date for AP invoice creation to current date (Chris T)
 * Removed "apply discount" from use overpayment screen (Chris T)
@@ -2516,6 +3618,7 @@ Chris T is Chris Travers
 Nick P is Nick Prater
 Giovanni B is Giovanni Biscuolo
 P. Istvan is Pongracz Istvan
+
 
 Changelog for 1.3.35
 * Fixed uninitialized value warnings when cached template enabled (Chris T)
@@ -2592,6 +3695,7 @@ Changelog for 1.3.33
 Herman V is Herman Vierendeels
 Chris T is Chris Travers
 
+
 Changelog for 1.3.32
 * Fixed em-dash handling for pdfs (Chris T)
 * Fixed multiple blank line handling for pdfs (Chris T)
@@ -2608,8 +3712,8 @@ Changelog for 1.3.32
 * Fixed department dropdown not showing values (Chris T, 805)
 * Fixed error causing Reconciliation.sql not to be loaded/reloaded (Chris T)
 
-
 Nick P is Nick Prater
+
 
 Changelog for 1.3.31
 * Removed spurious commit saving orders (Chris T)
@@ -2629,6 +3733,7 @@ Changelog for 1.3.31
 * Fixed country changes to companies not saving (Chris T, 3607437)
 * Fixed customer search on address data (Chris T, 3607436)
 
+
 Changelog for 1.3.30
 * Documented behavior of Outstanding Summary report (Chris T, 3601314)
 * Fix for translations showing multiple types (Chris T, 3601737)
@@ -2641,6 +3746,7 @@ Changelog for 1.3.30
 * Fixed DB API for reopening books (Chris T)
 * Fixed menu-selected vendors and customers not working (Chris T)
 * Fixed packing list not found in dropdown on invoices since 1.3 (Chris T)
+
 
 Changelog for 1.3.29
 * Added db routines for role backup and restore for shared hosting
@@ -2669,6 +3775,7 @@ is not a total pain(Chris T)
 Chris T is Chris Travers
 Erik H is Erik Huelsmann
 
+
 Changelog for 1.3.28
 * Added db list to setup.pl when no db is entered and credentials allow login
   to "postgres" db. (Chris T)
@@ -2687,6 +3794,7 @@ Changelog for 1.3.28
 * Moved Fixes.sql to top of LOADORDER to fix some upgrade issues (Chris T)
 * Fixing handling of unknown browsers in logout (Chris T, 3599930)
 * Fixed error generating invoice when mintax threshhold not met Chris T)
+
 
 Changelog for 1.3.27
 * Detect whether ledgersmb.conf exists during Makefile.PL run and create if
@@ -2710,6 +3818,7 @@ Changelog for 1.3.27
 Chris T is Chris Travers
 Havard S is Havard Sorli
 
+
 Changelog for 1.3.26
 * Added db statistics post-upgrade and pre/post rebuild (Chris T, 3586113)
 * Merged in fcgi support from addons (Chris T)
@@ -2729,6 +3838,7 @@ Brian W is Brian Wolf
 Chris T is Chris Travers
 Havard S is Havard Sorli
 Nigel T is Nigel Titley
+
 
 Changelog for 1.3.25
 * Fixed internal server errors on LedgerSMB->error() during new() (Chris T)
@@ -2752,6 +3862,7 @@ Chris T is Chris Travers
 Erik H is Erik Huelsmann
 Kevin B is Kevin Bailey
 Havard S is Havard Sorli
+
 
 Changelog for 1.3.24
 * Fixed error in msgid for "Add Language" (Havard S, h/t Robert C)
@@ -2786,6 +3897,7 @@ Neil S is Neil Smith
 Robert C is Robert James Clay
 Nick P is Nick Prater
 
+
 Changelog for 1.3.23
 * Fixed query string/stdin handling where both stdin and query string are set
 * Moved http error framework to use header methods (Chris T)
@@ -2811,6 +3923,7 @@ Istvan P is Istvan Pongracz
 Brian W is Brian Wolf
 Nick P is Nick Prater
 Robert C is Robert James Clay
+
 
 Changelog for 1.3.22
 * Fixed error when trying to save multiple make/models for a part (Chris T)
@@ -2846,7 +3959,7 @@ Changelog for 1.3.21
 * File->get_for_template now gets most recent parts image (Chris T)
 * Fixed error on generate purchase orders (Chris T, 3544857, h/t Nigel T)
 * Fixed internal server errors with date parsing (Chris T, 3546698)
-* Fixed "Directory Transversal Not Allowed w/fs_cssdir (Chris T, h/t Robert C)
+* Fixed "Directory Transversal Not Allowed" w/fs_cssdir (Chris T, h/t Robert C)
 * Fixed customer/vendor cleared on ship/receive update (Chris T, 3548104)
 * SECURITY FIX for System/Defaults denial of service advisory (Chris T)
 * Added missing ap_transaction_all role (Chris T, h/t Erik H)
@@ -2859,6 +3972,7 @@ Erik H is Erik Huelsmann
 Nick P is Nick Prater
 Nigel T is Nigel Titley
 Robert C is Robert James Clay
+
 
 Changelog for 1.3.20
 * Fixes for es_AR translation, duplicate keys removed (Andres B)
@@ -2882,6 +3996,7 @@ Erik H is Erik Huelsmann
 Jigme D is JigmeDatse
 lbm is Louis Moore
 Matt B is Matthew Bourque
+
 
 Changelog for 1.3.19
 * New link for customer/vendor when not a dropdown (Chris T)
@@ -2951,8 +4066,8 @@ Erik H is Erik Huelsmann
 Herman V is Herman Vierendiels
 Mark L is Matt Lubratt
 
-Changelog for 1.3.16
 
+Changelog for 1.3.16
 * Changes in <head> element for non-Latin characters, HTML invoices (Erik H)
 * Corrected untranslated string in Contact management screen (Chris T)
 * Corrected permissions issue creating pricelist (Chris T, 3513861)
@@ -2988,6 +4103,7 @@ Chris T is Chris Travers
 H Sorli is Havard Sorli
 Robert C is Robert James Clay
 
+
 Changelog for 1.3.14
 * Argentina (Spanish) translation and charts of accounts added. (Andres B)
 * Fixed errors saving when duedate is blank, bug 3503463 (Chris T)
@@ -3019,6 +4135,7 @@ Erik H is Erik Huelsmann
 H Sorli is Havard Sorli
 Robert C is Robert James Clay
 
+
 Changelog for 1.3.13
 * Reduced log messages when upgrading/creating db, for some log levels (Chris T)
 * Changed db setup not to use createdb for simple admin of pg_hba.conf (Chris T)
@@ -3036,6 +4153,7 @@ Changelog for 1.3.13
 Chris T is Chris Travers
 Erik H is Erik Huelsmann
 H Sorli is Havard Sorli
+
 
 Changelog for 1.3.12
 * Corrected processing of <?lsmb tags in order/invoice numbers (Chris T)
@@ -3064,6 +4182,7 @@ Hilton D is Hilton Day
 Frans S is Frans van der Star
 Chris T is Chris Travers
 
+
 Changelog for 1.3.11
 * Fixed outstanding report for payment reversal and partial payments (Chris T)
 * Fixed handling of non-existing roles in menu grants (Chris T)
@@ -3086,6 +4205,7 @@ Chris T is Chris Travers
 Erik H is Erik Huelsmann
 Herman V is Herman Vierendeels
 Robert C is Robert James Clay
+
 
 Changelog for 1.3.10
 * Fixes for permissions for exchangerate table (Erik H)
@@ -3118,6 +4238,7 @@ John L is John Locke
 Michael R is Michael Richardson
 Pongracz I is Pongracz Istvan
 
+
 Changelog for 1.3.9
 * More logging enhancements (Herman V)
 * Translation fixes in tax form reports (Chris T)
@@ -3134,6 +4255,7 @@ Changelog for 1.3.9
 
 Chris T is Chris Travers
 Herman V is Herman Vierendeels
+
 
 Changelog for 1.3.8:
 * Fixed duplicate key error saving taxes (Herman V)
@@ -3159,7 +4281,8 @@ Chris T is Chris Travers
 David B is David Bandel
 Herman V is Herman Vierendeels
 
-Changelog for LedgerSMB 1.3.7 (Categorized due to length)
+
+Changelog for 1.3.7 (Categorized due to length)
 Database
 * Added foreign key of entity_credit_account.language_code (Herman V)
 * Corrected permissions issue for editing assembly (Chris T)
@@ -3206,7 +4329,7 @@ Erik H is Erik Huelsmann
 Herman V is Herman Vierendeels
 
 
-Changelog for LedgerSMB 1.3.6
+Changelog for 1.3.6
 * Including xelatex templates under directory templates/xedemo (Chris T)
 * Fix for company name in order entry (David B)
 * Corrected UI dropdown box issue on ar/ap transaction screen (Herman V)
@@ -3229,7 +4352,8 @@ David B is David Bandel
 Herman V is Herman Vierendeels
 Pongracz I is Pongracz Istvan
 
-Changelog for LedgerSMB 1.3.5
+
+Changelog for 1.3.5
 * Fixing Menu and Permissions bug 3430820 (Chris T)
 * Fixing permissions bug 3433644 (Chris T)
 * Fixing file not found printing HTML invoice (Chris T)
@@ -3255,7 +4379,8 @@ Erik H is Erik Huelsmann
 Herman V is Herman Vierendeels
 Pongracz I is Pongracz Istvan
 
-Changelog for LedgerSMB 1.3.4
+
+Changelog for 1.3.4
 * Corrected case matching error in upgrade script (Chris T)
 * Corrected version number on new databases (Chris T)
 * Corrected multiple load errors on upgrade (David B)
@@ -3273,7 +4398,8 @@ Chris T is Chris Travers
 David B is David Bandel
 Herman V is Herman Vierendeels
 
-Changelog for LedgerSMB 1.3.3
+
+Changelog for 1.3.3
 * Fix for being unable to delete AR/AP drafts (Herman V)
 * Additional button cleanup (Herman V)
 * Fix for is_zero issue with latest Math::BigFloat in AR/AP trans (Chris T)
@@ -3290,7 +4416,8 @@ Herman V is Herman Vierendeels
 Erik H is Erik Huelsman
 Frans S is Frans van der Star
 
-Changelog for LedgerSMB 1.3.2
+
+Changelog for 1.3.2
 * Fixed a few files where suExec fixes were not applied (Chris T)
 * Fixed erroneous buttons marked "Save and Post" showing up (Chris T)
 * Corrected test cases so they do not fail w/o optional LaTeX mods (Chris T)
@@ -3310,7 +4437,8 @@ Chris T is Chris Travers
 Herman V is Herman Vierendeels
 Frans S is Frans van der Star
 
-Changelog for LedgerSMB 1.3.1
+
+Changelog for 1.3.1
 * Language selection for invoice templates fixed (Chris T)
 * Fixed DB errors on project search (Chris T)
 * Fixed DB errors on timecard entry (Chris T)
@@ -3321,10 +4449,12 @@ Changelog for LedgerSMB 1.3.1
 * Fixed upgrade script error importing duplicate customer/vendor numbers
 (Chris T)
 
-Changelog for LedgerSMB 1.3.0
+
+Changelog for 1.3.0
 
 Security:
 * Security is now robustly enforced on the db level (Chris T and Josh D)
+  Fixes CVE-2007-1923
 * New user interface to manage users (Chris T and Aurynn)
 * Framework in place, used to prevent XSRF attacks (Chris T)
 
@@ -3411,19 +4541,22 @@ Database:
 * Redesigned database schema for reconciliation (Aurynn and Chris T)
 * Redesigned database schema for payments (David M)
 
-Changelog for 1.2 Series
+
+Changelog for 1.2 Series (End of Life)
 Released 2007-04-04
-Currently supported, through at least 2012-03-01
 
 Changelog for 1.2.27
 * Corrected an issue with redirects (Turtle)
+
 
 Changelog for 1.2.26
 * Corrected is_zero errors updating ar/ap transactions (Chris T)
 * Corrected is_zero errors printing invoices (Chris T)
 
+
 Changelog for 1.2.25
 * Corrected sql injection issue (Chris T)
+
 
 Changelog for 1.2.24
 * Corrected (non-exploitable) SQL injection issue in custom field management
@@ -3431,10 +4564,12 @@ stored procs.  Chris T
 * Corrected issues running LedgerSMB with SuExec.  (Matt S Trout)
 * Corrected filenamme bug in batch printing module (Chris T)
 
+
 Changelog for 1.2.23
 * Fix for sales tax incorrect on sales/purchase order screen
 * fix for unreadable characters in HTML templates in some charsets.
 * Correcting backup name on backup by email
+
 
 Changelog for 1.2.22
 * Corrected error for cases where no buttons occur on GL Journal Entry screen
@@ -3444,11 +4579,13 @@ Changelog for 1.2.22
 * Corrected erroneous test case failures due to erroneous order of regexp's in
 test cases (Chris T)
 
+
 Changelog for 1.2.21
 * Corrected a number of templates with HTML issues (Luke)
 * AR/AP Aging Report fixed, ignores payment after report date (Chris T)
 * Minor documentation updates (Chris T)
 * Fixed bug saving SIC (Adam T)
+
 
 Changelog for 1.2.20
 * Commented out credits in ledgersmb-blue.css
@@ -3456,6 +4593,7 @@ Changelog for 1.2.20
 * Minor fixes to release notes (SF User akaihola)
 * Exchange rate fix (SF User Anarcat)
 * Fixed whitespace handling in admin.pl when saving permissions (Chris T)
+
 
 Changelog for 1.2.19
 * Fixed short sales with never-closed books (Chris T)
@@ -3466,10 +4604,12 @@ Changelog for 1.2.19
 * Corrected an issue with URL escaping (M Lubratt)
 * Corrected an issue with email id's (Michael Richardson)
 
+
 Changelog for 1.2.18
 * Corrected httpd configuration bit. (Roderick Anderson)
 * COGS fix for return handling (Sadashiva and Chris T)
 * Cumulative tax handling fix for Quebec users (Jerome Oufella)
+
 
 Changelog for 1.2.17
 * Corrected "Attempt to free unreferenced scalar" error (oe.pl, 5.10.0, Chris T)
@@ -3478,9 +4618,11 @@ Changelog for 1.2.17
 * Corrected defaults not saving properly when not already in db (Sadashiva)
 * Corrected undefined dbh when generating sales orders (Sadashiva)
 
+
 Changelog for 1.2.16
 * Correcting "Attempt to free unreferenced scalar" error on 5.10.0 (Chris T)
 * Correcting "Access Denied" when searching for timecards (Seneca)
+
 
 Changelog for 1.2.15
 * Uppercasing some SQL statements (Chris T)
@@ -3495,6 +4637,7 @@ Changelog for 1.2.15
 * Fixed errors in the backported triggers for transaction table (Jeffk, 1928336)
 * Corrected corner case on ar_ap_summary_fix_1.2.14.sql (Chris T)
 
+
 Changelog for 1.2.14
 * Build.PL now requires Test::Trap (Chris T, 1872529)
 * Fixed double escaping of tex under some circumstances (Seneca)
@@ -3503,6 +4646,7 @@ Changelog for 1.2.14
 * Fixed posting issue behind AR/AP transaction report anomilies (Chris T)
 * Fixed taxes added twice when viewing existing transaction (Chris T)
 * Fixed erroneous discount lines in POS invoice (Chris T)
+
 
 Changelog for 1.2.13
 * Fixed all known implicit cast issues with PostgreSQL 8.3 (Chris T)
@@ -3535,6 +4679,7 @@ Changelog for 1.2.11
 * Fixed the displayed number format for AP invoice taxes (Seneca)
 * Fixed the selection of taxes when validto is involved (Seneca, anarcat's
 addition to 1818792)
+
 
 Changelog for 1.2.10
 * Fixed bug 1765161, post button duplicates invoices.(Chris T)
@@ -3577,14 +4722,13 @@ Changelog for 1.2.10
 * Encoding fixes for the backup routines (Seneca)
 
 
-
-
 Cangelog for 1.2.9
 * Removed GNUisms from find arguments (Seneca)
 * Corrected SQL errors in Belgium, and other COAs (Seneca, 1804712)
 * Added COA load test script (Seneca)
 * Rewritten COGS system (Chris T)
 * Scoping issues fixed (Seneca, 1809384)
+
 
 Changelog for 1.2.8
 * Fix SQL errors saving customer price lists (Chris T, 1754172)
@@ -3614,6 +4758,7 @@ Changelog for 1.2.8
 * Fixed minor documentation errors (Seneca)
 * Adding more NaN checks to transaction posting (Seneca, 1789169)
 
+
 Changelog for 1.2.7
 * Fixed user@company logins (Chris T)
 * Fixed closed books detection (Chris T)
@@ -3635,6 +4780,7 @@ Changelog for 1.2.7
 * fixing vendor taxes displaying improperly when printing PO (Seneca)
 * Corrected security bypass in login.pl (Seneca)
 
+
 Changelog for 1.2.6
 * More date tests added (Seneca)
 * Fixed customer_id error in AP transactions (Chris T)
@@ -3645,6 +4791,7 @@ Changelog for 1.2.6
 * Fixed error db error saving items with custom fields (Chris T)
 * Fixed db error saving project with NULL customer id (Chris T)
 * Improved upgrade_templates' tag handling (Seneca)
+
 
 Changelog for 1.2.5
 * Partsgroup handling corrected on POS and Sales invoice screens (Chris T)
@@ -3659,6 +4806,7 @@ Changelog for 1.2.5
 * Corrected a number of date handling issues and added tests (Seneca).
 * Applied invoice performance patch from Ashley Gittins (Chris T)
 * Applide performance improvements to lastname_used (Chris T)
+
 
 Changelog for 1.2.4
 * Fixed internal functions avgcost() and lastcost() to not use float (Joshua D)
@@ -3677,13 +4825,15 @@ Changelog for 1.2.3
 * Corrected data types for invoice.qty and invoice.allocated in new dbs (CHris T)
 * Corrected suffix error in 1.2.1 to use .sqlc for backups (Joshua D)
 
+
 Changelog for 1.2.2
 * Corrected sales tax display bug in order entry screen (Chris T)
 * Corrected database update unable to connect (Seneca)
 * Corrected login problems on 1.2.1
 * Corrected INSTALL for [GlobalDBH] (Joshua Drake)
 
-Changelog for LedgerSMB 1.2.1
+
+Changelog for 1.2.1
 * Modifed AM.pm to correctly use globals from ledgersmb.conf (Joshua Drake)
 * Simplified backup functions in AM.pm (Joshua Drake)
 * Corrected serious sales tax posting bug (Chris Travers)
@@ -3692,7 +4842,8 @@ Changelog for LedgerSMB 1.2.1
 * Corrected documentation about tax entry (Chris Travers)
 * Corrected logos not printing on PDF/PS invoices (Chris Travers)
 
-Changelog for LedgerSMB 1.2.0
+
+Changelog for 1.2.0
 
 Database:
 * Added script to configure Slony replication (Chris Browne)
@@ -3753,19 +4904,19 @@ Other:
 * ledger-smb.conf is now an ini file (Seneca)
 * Experimental scripting wrapper in utils/cli (Chris T)
 
-Changelog for 1.1 Series
+
+Changelog for 1.1 Series (End of Life)
 Released 2006-09-20
 Unsupported due to major security oversights in inherited code corrected in
 1.2 series
 
-Changelog for LedgerSMB 1.1.1
-
+Changelog for 1.1.1
 * Fixed problem with parts_short trigger not being created
 * Fixed problem with custom fields functions not being created
 * Pg driver is now checked by default.
 
-Changelog for LedgerSMB 1.1.0
 
+Changelog for 1.1.0
 Database
 * Added add_custom_field and drop_custom_field functions.
         -- will be more integrated into API next version
@@ -3795,15 +4946,16 @@ Usability
 * Links between admin and login pages
 * Experimental support for Windows printing
 
-Changelog for LedgerSMB v 1.0.0p1
-* Fixed directory transversal/arbitrary code execution vulnerability.
 
-Changelog for LedgerSMB 1.0 series
+Changelog for 1.0 series (End of Life)
 Released 2006-09-06
 Unsupported for reasons of age and security flaws in inherited code
 
-Changelog for LedgerSMB v 1.0.0
+Changelog for 1.0.0p1
+* Fixed directory transversal/arbitrary code execution vulnerability.
 
+
+Changelog for 1.0.0
 (Changes relative to the pre-fork SQL-Ledger 2.6.17)
 
 * Corrected sessionid security hole allowing bypass of login to main application
@@ -3813,5 +4965,4 @@ Changelog for LedgerSMB v 1.0.0
 * Added an open content manual to the main distribution.
 * New logo.
 * Began whitespace reformatting of main application.
-
 

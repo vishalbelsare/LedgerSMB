@@ -26,7 +26,6 @@ use Digest::MD5 qw(md5_hex);
 use Text::Markdown qw(markdown);
 
 use LedgerSMB::Database::ChangeChecks qw/ run_with_formatters /;
-use LedgerSMB::Template::UI;
 
 our @EXPORT = ## no critic
     qw| html_formatter_context |;
@@ -61,22 +60,25 @@ sub _unpack_grid_data {
 sub _wrap_html {
     my ($request) = shift;
 
-    my $template = LedgerSMB::Template::UI->new_UI;
-    unshift @HTML, $template->render_string(
-        $request,
-        'setup/upgrade/preamble',
-        {
-            check_id => _check_hashid( $failing_check ),
-            database => $request->{database},
-            resubmit_action => $request->{resubmit_action},
-            action_url => $request->get_relative_url,
-        });
-
-    $template = LedgerSMB::Template::UI->new_UI;
-    push @HTML, $template->render_string($request,
-                                         'setup/upgrade/epilogue');
-
-    return \@HTML;
+    my $template = $request->{_wire}->get('ui');
+    return [
+        $template->render_string(
+            $request,
+            'setup/upgrade/wrapper',
+            {
+                action_url      => $request->{_uri}->as_string,
+                check_id        => _check_hashid( $failing_check ),
+                database        => $request->{database},
+                resubmit_action => $request->{resubmit_action},
+                # note: the line below works because the upgrade
+                # has completed when this wrapper is being run
+                run_id          => $request->{run_id},
+                title           => $failing_check->{title}
+            },
+            {
+                validation_html => join("\n", @HTML)
+            })
+        ];
 }
 
 sub _format_confirm {
@@ -89,7 +91,7 @@ sub _format_confirm {
 
     my $seq = 0;
     while (@confirmations) {
-        my $template = LedgerSMB::Template::UI->new_UI;
+        my $template = $request->{_wire}->get('ui');
         push @HTML, $template->render_string(
             $request,
             'setup/upgrade/confirm',
@@ -112,13 +114,11 @@ sub _format_describe {
     $failing_check = $check;
 
     $msg //= $check->{description};
-    my $template = LedgerSMB::Template::UI->new_UI;
+    my $template = $request->{_wire}->get('ui');
     push @HTML, $template->render_string(
         $request,
         'setup/upgrade/describe',
-        {
-            title => $check->{title},
-        },
+        { }, # no template variables which need HTML encoding
         {
             description => markdown($msg),
         });
@@ -181,7 +181,7 @@ sub _format_grid {
         id => $args{name},
     };
 
-    my $template = LedgerSMB::Template::UI->new_UI;
+    my $template = $request->{_wire}->get('ui');
     push @HTML, $template->render_string(
         $request,
         'setup/upgrade/grid',

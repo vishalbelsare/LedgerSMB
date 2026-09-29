@@ -92,8 +92,8 @@
              PROCESS input element_data = {
              label = text('As per')
              name = 'to_date'
-             value = to_date
-             class = 'date'
+             value = (to_date OR 'today')
+             type = 'date'
              size = 12
              };
              %]
@@ -139,12 +139,14 @@
                    name = 'comparison_periods'
                    value = 0
                    size = '3'
-                   "data-dojo-type"="dijit/form/NumberSpinner"
-                   "data-dojo-props"="constraints:{min:0,max:9,places:0},intermediateChanges:true,style:'width:7ex'"
+                   type = 'number-spinner'
+                   min  = 0
+                   max  = 13
+                   places = 0
                    };
                    %]</legend>
         <div id="comparison_dates">
-          [% FOREACH c IN [1 .. 9]; %]
+          [% FOREACH c IN [1 .. 13]; %]
           <div class="input_row">
             <div id="comparison_dates_[% c %]" style="display:none">
               [%
@@ -153,7 +155,7 @@
                  label = text('Through date') #'
                  name = 'to_date_' _ c
                  value = to_date
-                 class = 'date'
+                 type = 'date'
                  size = 12
                  };
                  %]
@@ -175,6 +177,17 @@
              type = 'checkbox'
              value = 1
              checked = 'checked' # checked by default
+             };
+             %]
+        </div>
+        <div class="input_row">
+          [%
+             label_pos = -1;  # Something leaks label_pos...
+             PROCESS input element_data = {
+             label = text('Split by foreign currencies')    #'
+             name = 'fx_split'
+             type = 'checkbox'
+             value = 1
              };
              %]
         </div>
@@ -248,7 +261,7 @@
         [%
         PROCESS button element_data = {
             text = text('Continue')
-            name = 'action'
+            name = '__action'
            value = 'generate_balance_sheet'
             type = 'submit'
            class = 'submit'

@@ -24,7 +24,7 @@ Implements a listing of parts, reporting numbers in 4 categories of activity:
 =head1 SYNOPSIS
 
  my $report = LedgerSMB::Report::Inventory::Activity->new(%$request);
- $report->render($request);
+ $report->render();
 
 =cut
 
@@ -101,7 +101,7 @@ sub columns {
        class => 'amount',
         name => $self->Text('Sold'),
    href_base => "invoice.pl?&from_date=$from_date&to_date=$to_date"
-                . '&open=1&closed=1&action=invoice_search&'
+                . '&open=1&closed=1&__action=invoice_search&'
                 . 'col_invnumber=1&col_transdate=1&col_entity_name=1&'
                 . 'col_netamount=1&entity_class=2&partnumber=',
      },
@@ -116,7 +116,7 @@ sub columns {
        class => 'amount',
         name => $self->Text('Purchased'),
    href_base => "invoice.pl?&date_from=$self->date_from&date_to=$self->date_to"
-                . '&open=1&closed=1&action=invoice_search&'
+                . '&open=1&closed=1&__action=invoice_search&'
                 . 'col_invnumber=1&col_transdate=1&col_entity_name=1&'
                 . 'col_netamount=1&entity_class=1&partnumber=',
      },
@@ -162,10 +162,10 @@ sub columns {
 sub header_lines {
     my ($self) = @_;
     return [
-      { name => 'partnumber',  text => $self->Text('Partnumber') },
-      { name => 'description', text => $self->Text('Description') },
-      { name => 'date_from',   text => $self->Text('From Date') },
-      { name => 'date_to',     text => $self->Text('To Date') },
+      { value => $self->partnumber,  text => $self->Text('Partnumber') },
+      { value => $self->description, text => $self->Text('Description') },
+      { value => $self->date_from,   text => $self->Text('From Date') },
+      { value => $self->date_to,     text => $self->Text('To Date') },
     ];
 }
 

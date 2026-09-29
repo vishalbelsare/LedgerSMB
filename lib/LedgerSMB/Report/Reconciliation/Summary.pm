@@ -9,7 +9,7 @@ LedgerSMB
 =head1 SYNPOSIS
 
  my $report = LedgerSMB::Report::Reconciliation::Summary->new(%$request);
- $report->render($request);
+ $report->render();
 
 =cut
 
@@ -46,8 +46,7 @@ to this.
 
 =cut
 
-has balance_from => (is => 'ro', isa => 'LedgerSMB::Moose::Number',
-              required => 0, coerce => 1);
+has balance_from => (is => 'ro', isa => 'LedgerSMB::PGNumber', required => 0);
 
 =item balance_to
 
@@ -56,8 +55,7 @@ to this.
 
 =cut
 
-has balance_to => (is => 'ro', isa => 'LedgerSMB::Moose::Number', required => 0,
-              coerce => 1);
+has balance_to => (is => 'ro', isa => 'LedgerSMB::PGNumber', required => 0);
 
 =item account_id
 
@@ -139,7 +137,7 @@ sub columns {
              {col_id => 'end_date',
                 name => $self->Text('Statement Date'),
                 type => 'href',
-           href_base => 'recon.pl?action=display_report&report_id=', },
+           href_base => 'recon.pl?__action=display_report&report_id=', },
              {col_id => 'their_total',
                 name => $self->Text('Statement Balance'),
                money => 1,
@@ -178,14 +176,16 @@ sub columns {
 
 sub header_lines {
     my ($self) = @_;
-    return [{name => 'date_from',
-             text => $self->Text('From Date')},
-            {name => 'date_to',
-             text => $self->Text('To Date') },
-            {name => 'balance_from',
-             text => $self->Text('From Amount')},
-            {name => 'balance_to',
-             text => $self->Text('To Amount')}
+    return [{value => $self->date_from,
+             text  => $self->Text('From Date')},
+            {value => $self->date_to,
+             text  => $self->Text('To Date') },
+            {value => $self->account_name,
+             text  => $self->Text('Account') },
+            {value => $self->balance_from,
+             text  => $self->Text('From Amount')},
+            {value => $self->balance_to,
+             text  => $self->Text('To Amount')}
      ];
 }
 
@@ -198,6 +198,25 @@ sub header_lines {
 sub name {
     my ($self) = @_;
     return $self->Text('Reconciliation Reports');
+}
+
+=head2 account_name
+
+=cut
+
+sub account_name {
+    my ($self) = @_;
+
+    my $sth = $self->dbh->prepare('select accno, description from account where id = ?')
+        or die $self->dbh->errstr;
+    $sth->execute( $self->account_id )
+        or die $sth->errstr;
+    my ($accno, $desc) = $sth->fetchrow_array;
+
+    $accno //= '';
+    $desc //= '';
+
+    return "$accno - $desc";
 }
 
 =head1 METHODS

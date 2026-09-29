@@ -40,7 +40,7 @@ sub run {
     my @sl_columns = qw(account_number account_desc starting_balance debits
                         credits ending_balance);
     my @balance_columns = qw(account_number account_desc ending_balance_debit
-                            ending_balance_credit);
+                            ending_balance_credit ending_balance);
     my $cols = \@sl_columns;
     $cols = \@balance_columns if $request->{tb_type} eq 'balance';
     $request->{"col_$_"} = 1 for @$cols;
@@ -51,8 +51,12 @@ sub run {
     delete $request->{business_units}
     unless scalar @{$request->{business_units}};
     return $request->render_report(
-        LedgerSMB::Report::Trial_Balance->new(%$request)
-        );
+        LedgerSMB::Report::Trial_Balance->new(
+            %$request,
+            formatter_options => $request->formatter_options,
+            from_date => $request->parse_date( $request->{from_date} ),
+            to_date => $request->parse_date( $request->{to_date} ),
+        ));
 }
 
 =back

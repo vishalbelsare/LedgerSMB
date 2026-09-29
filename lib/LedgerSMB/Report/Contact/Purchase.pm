@@ -9,8 +9,7 @@ generate Reports
 =head1 SYNPOSIS
 
   my $report = LedgerSMB::Report::Contact::Purchase->new(%$request);
-  $report->run;
-  $report->render($request, $format);
+  $report->render();
 
 =head1 DESCRIPTION
 
@@ -141,10 +140,10 @@ sub name {
 sub header_lines {
     my ($self) = @_;
      return [
-            {name => 'name_part',
-             text => $self->Text('Name')},
-            {name => 'meta_number',
-             text => $self->Text('Account Number')}
+            {value => $self->name_part,
+             text  => $self->Text('Name')},
+            {value => $self->meta_number,
+             text  => $self->Text('Account Number')}
        ];
 }
 
@@ -251,7 +250,7 @@ Shows invoice balances as of this date.
 
 =cut
 
-has as_of => (is => 'ro', coerce => 1, isa => 'LedgerSMB::Moose::Date');
+has as_of => (is => 'ro', isa => 'LedgerSMB::PGDate');
 
 =item summarize
 
@@ -300,7 +299,7 @@ sub run_report {
                     $href = 'ar.pl';
                 }
             }
-            $r->{invnumber_href_suffix} = "$href?action=edit&id=$r->{id}";
+            $r->{invnumber_href_suffix} = "$href?__action=edit&id=$r->{id}";
        }
     }
     return $self->rows(\@rows);

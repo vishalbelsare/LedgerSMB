@@ -93,7 +93,6 @@ END;
            id="partnumber_[% suffix %]"
            size="15"
            value="[% ${"partnumber_$suffix"} %]"
-           accesskey="p"
            title="[p]"
            style="width:100%" />
     </div>
@@ -124,10 +123,12 @@ END;
 <div id="buttons-div">
 [% PROCESS button element_data = {
     text = text('Save')
-    name = 'action'
+    name = '__action'
    value = 'save_week'
     type = 'submit'
    class = 'submit'
+'data-lsmb-doing' = text('Saving...')
+'data-lsmb-done' = text('Saved')
 } %]
 </div>
 </form>

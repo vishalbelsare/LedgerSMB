@@ -6,7 +6,6 @@ onLoad="maximize_minimize_on_load(event, 'div_topay_state', 'payments/img/down.g
     [% PROCESS elements.html  # Include form elements helper. %]
     [% accountclass.type = 'hidden';
         PROCESS input element_data=accountclass %]
-    [% login.type = 'hidden' ; PROCESS input element_data=login %]
     [% #WE NEED TO KNOW HOW MANY COLUMNS ARE WE USING, PLEASE DO NOT MOVE THE NEXT LINE -%]
     [% column_count = 0; FOREACH column IN column_headers; column_count = column_count + 1; END -%]
 
@@ -14,7 +13,6 @@ onLoad="maximize_minimize_on_load(event, 'div_topay_state', 'payments/img/down.g
       <tr id="top_bar" class="listtop">
         <th id="top_bar_header" class="listtop">
             [% header.text %]
-          [% type.type = 'hidden' ; PROCESS input element_data=type %]
         </th>
       </tr>
     </table>
@@ -98,9 +96,9 @@ onLoad="maximize_minimize_on_load(event, 'div_topay_state', 'payments/img/down.g
             <tr id="date_row">[% # here goes an input where the date can be written, we can also use a java calendar :). We can use an ajax script to call the Exchange rate of the input date which can be called with the onChange Method   %]
               <th align="right" nowrap id="date_label_column">
                 <label for="datepaid">[% text('Date') %]</label></th>
-              [%- datepaid.class = 'date' %]
+              [%- datepaid.type = 'date' %]
               <td colspan="2" id="date_column">
-                [% PROCESS input element_data=datepaid %]
+                [% DEFAULT datepaid.value = 'today'  ; PROCESS input element_data=datepaid %]
                 [% datepaid.id='olddatepaid'; datepaid.name='olddatepaid'; datepaid.type='hidden'; PROCESS input element_data=datepaid %]
                 [% INCLUDE tooltip element_data = {
                        ref_id => "datepaid"
@@ -196,12 +194,16 @@ onLoad="maximize_minimize_on_load(event, 'div_topay_state', 'payments/img/down.g
       <tbody>
       <tr class="[% alternating_style %] open-item-row">
         <td class="invoice-number"
-            ><a href="erp.pl?action=root#[% row.invoice.href %]"
+            ><a href="erp.pl#[% row.invoice.href %]"
                 target="_blank">[% row.invoice.number %]</a>
         </td>
         [% # we can use an href to link this invoice number to the invoice %]
         <td class="invoice-date">
           [% row.invoice_date %]
+          [% PROCESS input element_data = {
+             type="hidden"
+             name="open_item_id_" _ row.invoice.id
+             value=row.open_item_id } %]
           [% PROCESS input element_data = {
                  type="hidden"
                  name="invoice_date_" _ row.invoice.id
@@ -257,49 +259,6 @@ onLoad="maximize_minimize_on_load(event, 'div_topay_state', 'payments/img/down.g
                 name = "orig_" _ row.topay_fx.name
                 value = row.orig_topay_fx
           } %]
-          <img src="payments/img/up.gif" alt=[% text('Up') %]
-               data-dojo-type="lsmb/MaximizeMinimize"
-               data-dojo-props="mmNodeId: 'div_topay_[% row.invoice.id %]'"
-               class="details-toggler">
-          <div id="div_topay_[% row.invoice.id %]" class="[% alterning_style %] details-popup" >
-            <table class="invoice-posting-details">
-              <tr id="[% "account-row$i"%]">
-                [% # here goes all the posible accounts were the paid can be  done %]
-                <th align="right" nowrap id="[% "account_label_column$i" %]">[% text('Account') %]</th>
-                <td colspan="2" id="[% "account_column$i" %]">
-                  [% PROCESS select element_data = {
-                                                  id="account_"  _ row.invoice.id
-                                                  name="account_" _ row.invoice.id
-                                                  options=account
-                                                  value_attr='id'
-                                                  text_attr='description'
-                                                  default_values=[row.selected_account] } %]
-                </td>
-              </tr>
-              <tr id="[% "source_row$i" %]">
-                [% # here goes all the posible sources which we can used %]
-                <th align="right" nowrap id="[% "source_label_column$i" %]">[% text('Source') %]</th>
-                <td>[% PROCESS input element_data={
-                           name  => "source_text_$row.invoice.id",
-                  id    => "source_text_$row.invoice.id",
-                                              value => row.source_text
-                  } -%]</td>
-                <td nowrap align="left">
-                       [% IF row.optional ;
-                                   CHECKED='checked' ;
-                                   ELSE ;
-                                   CHECKED='';
-                                   END ; %]
-                       [% PROCESS input element_data = {
-                                   name="optional_pay_" _ row.invoice.id
-                                   id="optional_pay_" _ row.invoice.id
-                                   type="checkbox"
-                                   class="checkbox"
-                                   checked=CHECKED } %]
-                     </td>
-              </tr>
-            </table>
-          </div>
         </td>
         <td valign="middle"
             align="center">
@@ -331,7 +290,13 @@ onLoad="maximize_minimize_on_load(event, 'div_topay_state', 'payments/img/down.g
       [%  colspan = column_count - 2 # We will use this later on totals -%]
       <tr class="listsubtotal">
         <th colspan="[% colspan -%]" align="right">[% text('Subtotal') -%]</th>
-        <th colspan="2">[% topay_subtotal -%]&nbsp;[% curr.value -%]</th>
+      [%- IF defaultcurrency.text != curr.value -%]
+        <th colspan="2">[% topayfx_subtotal -%]&nbsp;[% curr.value -%]</th>
+      </tr>
+      <tr class="listsubtotal">
+        <th colspan="[% colspan -%]" align="right"></th>
+      [%- END; # IF -%]
+        <th colspan="2">[% topay_subtotal -%]&nbsp;[% defaultcurrency.text -%]</th>
       </tr>
     </table>
 
@@ -475,12 +440,24 @@ onLoad="maximize_minimize_on_load(event, 'div_topay_state', 'payments/img/down.g
    </tr>
    <tr class="listsubtotal">
    <th colspan="5" align="right">[% text('Subtotal') -%]</th>
-   <th colspan="2">[% overpayment_subtotal -%]&nbsp;[% curr.value -%]</th>
+   [%- IF defaultcurrency.text != curr.value -%]
+   <th colspan="2">[% overpaymentfx_subtotal -%]&nbsp;[% curr.value -%]</th>
+   </tr>
+   <tr class="listsubtotal">
+   <th colspan="5" align="right"></th>
+   [%- END; # IF -%]
+   <th colspan="2">[% overpayment_subtotal -%]&nbsp;[% defaultcurrency.text -%]</th>
    </tr>
    <!-- this bit is repeated in the ELSE section too -->
    <tr class="listtotal">
    <th colspan="5" align="right">[% text('Total') -%]</th>
-   <th colspan="2">[% payment_total -%]&nbsp;[% curr.value -%]</th>
+   [%- IF defaultcurrency.text != curr.value -%]
+   <th colspan="2">[% paymentfx_total -%]&nbsp;[% curr.value -%]</th>
+   </tr>
+   <tr class="listtotal">
+   <th colspan="5" align="right"></th>
+   [%- END; # IF -%]
+   <th colspan="2">[% payment_total -%]&nbsp;[% defaultcurrency.text -%]</th>
    </tr>
    </table>
 
@@ -496,23 +473,20 @@ onLoad="maximize_minimize_on_load(event, 'div_topay_state', 'payments/img/down.g
 
    <hr />
    [% PROCESS button element_data={
-          accesskey   = "U"
           title       = "UPDATE ALT+U"
-          name        = "action"
+          name        = "__action"
           value       = "update_payment2"
           text        = text("Update")
          } -%]
   [% PROCESS button element_data={
-         accesskey   = "P"
          title       = "POST ALT+P"
-         name        = "action"
+         name        = "__action"
          value       = "post_payment"
          text        = text("Post")
          } -%]
   [% PROCESS button element_data={
-         accesskey = "R"
          title     = "POST AND PRINT ALT+R"
-         name = "action"
+         name = "__action"
          value = "post_and_print_payment"
          text = text("POST AND PRINT")
          "data-dojo-type" = "lsmb/payments/PostPrintButton"

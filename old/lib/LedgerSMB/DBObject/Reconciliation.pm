@@ -49,9 +49,8 @@ package LedgerSMB::DBObject::Reconciliation;
 use strict;
 use warnings;
 
-use base qw(LedgerSMB::PGOld);
+use parent qw(LedgerSMB::PGOld);
 use List::Util qw(sum);
-use LedgerSMB::Reconciliation::CSV;
 use LedgerSMB::PGNumber;
 
 
@@ -85,20 +84,6 @@ sub _pre_save {
     return $self->{line_ids} =~ s/,?$/}/;
 }
 
-=item submit
-
-Submits the reconciliation set for approval.
-
-=cut
-
-sub submit {
-    my $self = shift @_;
-    $self->_pre_save;
-    return $self->call_dbmethod(funcname=>'reconciliation__submit_set');
-}
-
-
-
 =item save
 
 Saves the reconciliation set for later work
@@ -109,24 +94,6 @@ sub save {
     my $self = shift @_;
     $self->_pre_save;
     return $self->call_dbmethod(funcname=>'reconciliation__save_set');
-}
-
-=item import_file
-
-Calls the file import function.  This is generally assumed to be a csv file
-although the plugin is very modular and plugins could be written for other
-formats.  The format structure is per account id.
-
-=cut
-
-sub import_file {
-    my $self = shift @_;
-    my $contents = shift @_;
-
-    my $csv = LedgerSMB::Reconciliation::CSV->new(%$self);
-    $self->{import_entries} = $csv->process($self, $contents);
-
-    return $self->{import_entries};
 }
 
 =item unapproved_checks
@@ -158,108 +125,18 @@ sub unapproved_checks {
                     $self->call_dbmethod(funcname=>'reconciliation__check') };
 }
 
-=item approve
-
-Approves the reconciliation report specified by the object's C<report_id>
-property and marks associated transactions as cleared.
-
-=cut
-
-sub approve {
-    my $self = shift;
-
-    $self->call_dbmethod(
-        funcname => 'reconciliation__report_approve'
-    );
-
-    return;
-}
-
-=item new_report
-
-Creates a new reconciliation report. Returns the id of the inserted report
-record.
-
-Expects the following object parameters:
-
-  * chart_id  (mandatory)
-  * total     (mandatory
-  * end_date  (defaults to now)
-  * recon_fx  (defaults to false)
-
-=cut
-
-sub new_report {
-    my $self = shift @_;
-
-    my $report = $self->call_dbmethod(funcname=>'reconciliation__new_report_id');
-    $self->{report_id} = $report->{reconciliation__new_report_id};
-
-    $self->call_dbmethod(funcname=>'reconciliation__pending_transactions');
-    return $self->{report_id};
-}
-
-
-=item delete ($self, $report_id)
-
-Requires report_id
-
-This will allow the deletion of a report if the report is not approved and
-the user either owns the unsubmitted report, or the user has the right to
-approve reports.
-
-Returns 0 if successful, or a true result if not.
-
-=cut
-
-sub delete {
-
-    my $self = shift @_;
-
-    my ($report_id) = @_;
-    my $retval;
-    my $found;
-
-    ($found) = $self->call_procedure(
-        funcname => 'reconciliation__delete_unapproved',
-        args => [$report_id]);
-
-    if ($found){
-        $retval = '0';
-    } else {
-        $retval = '1';
-    }
-    return $retval;
-}
-
-=item reject
-
-This rejects a submitted but not approved report, by marking it as
-not submitted.
-
-Requires that the following object properties are set:
-
-  * report_id
-
-=cut
-
-sub reject {
-    my ($self) = @_;
-    return $self->call_dbmethod(funcname => 'reconciliation__reject_set');
-}
-
-=item add_entries
+=item add_entries(\@entries)
 
 Adds entries from the import file routine.
 
 This function is extremely order dependent.  Meaningful scn's must be submitted
-first it is also recommended that amounts be ordered where scn's are not found.
+first; it is also recommended that amounts be ordered where scn's are not found.
 
 =cut
 
 sub add_entries {
     my $self = shift;
-    my $entries = $self->{import_entries};
+    my $entries = shift;
     for my $entry ( @{$entries} ) {
 
         # Codes:
@@ -282,7 +159,7 @@ sub add_entries {
                 $self->{report_id},
                 $entry->{scn},
                 $entry->{type},
-                $entry->{cleared_date},
+                $entry->{date},
                 $entry->{amount}, # needs leading 0's trimmed.
             ]
         );
@@ -393,7 +270,7 @@ sub build_totals {
         mismatch_their_credits
         mismatch_their_debits
     )) {
-        $self->{$field} = LedgerSMB::PGNumber->from_input(0);
+        $self->{$field} = LedgerSMB::PGNumber->bzero;
     }
 
     # For some types of account, balances are inverted
@@ -404,21 +281,21 @@ sub build_totals {
 
         # Separate 'their' credits and debits
         if ($l->{their_balance} > 0){
-           $l->{their_debits} = LedgerSMB::PGNumber->from_input(0);
+           $l->{their_debits} = LedgerSMB::PGNumber->bzero;
            $l->{their_credits} = $l->{their_balance}->copy;
         }
         else {
-           $l->{their_credits} = LedgerSMB::PGNumber->from_input(0);
+           $l->{their_credits} = LedgerSMB::PGNumber->bzero;
            $l->{their_debits} = ($l->{their_balance} * -1);
         }
 
         # Separate 'our' credits and debits
         if ($l->{our_balance} > 0){
-           $l->{our_debits} = LedgerSMB::PGNumber->from_input(0);
+           $l->{our_debits} = LedgerSMB::PGNumber->bzero;
            $l->{our_credits} = $l->{our_balance}->copy;
         }
         else {
-           $l->{our_credits} = LedgerSMB::PGNumber->from_input(0);
+           $l->{our_credits} = LedgerSMB::PGNumber->bzero;
            $l->{our_debits} = ($l->{our_balance} * -1);
         }
 
@@ -588,7 +465,6 @@ sub get_report_summary {
     @{$self}{keys %$r} = values %$r;
 
     # Add summary details of the account we're reconciling
-    # We should perhaps be instantiating a LedgerSMB::DBObject::Account object
     $self->{account_info} = $self->call_dbmethod(
         funcname=>'account_get',
         args => { id => $self->{chart_id} }
@@ -682,7 +558,8 @@ sub previous_cleared_balance {
     my $r = $self->call_dbmethod(
         funcname => 'reconciliation__get_cleared_balance',
         args => {
-            report_date => $previous->{end_date}
+            report_date => $previous->{end_date},
+            fx_balance => $self->{recon_fx}
         }
     );
 

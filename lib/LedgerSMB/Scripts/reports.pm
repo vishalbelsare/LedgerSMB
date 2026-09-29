@@ -27,8 +27,6 @@ use LedgerSMB::Report::Listings::Language;
 use LedgerSMB::Report::Listings::SIC;
 use LedgerSMB::Report::Listings::Overpayments;
 use LedgerSMB::Report::Listings::Warehouse;
-use LedgerSMB::Setting;
-use LedgerSMB::Template::UI;
 
 our $VERSION = '1.0';
 
@@ -98,8 +96,7 @@ sub start_report {
     if (!$request->{report_name}){
         die $request->{_locale}->text('No report specified');
     }
-    @{$request->{country_list}} =
-        LedgerSMB::I18N::location_list_country_localized($request);
+    $request->{country_list} = $request->enabled_countries;
     @{$request->{employees}} =  $request->call_procedure(
         funcname => 'employee__all_salespeople'
     );
@@ -108,7 +105,7 @@ sub start_report {
         );
 
     $request->{earn_id} = $request->setting->get('earn_id');
-    my $template = LedgerSMB::Template::UI->new_UI;
+    my $template = $request->{_wire}->get('ui');
     return $template->render($request,
                              'Reports/filters/' . $request->{report_name},
                              $request);
@@ -125,8 +122,10 @@ Lists the business types.  No inputs expected or used.
 sub list_business_types {
     my ($request) = @_;
     return $request->render_report(
-        LedgerSMB::Report::Listings::Business_Type->new(%$request)
-        );
+        LedgerSMB::Report::Listings::Business_Type->new(
+            %$request,
+            formatter_options => $request->formatter_options
+        ));
 }
 
 =item list_gifi
@@ -138,8 +137,10 @@ List the gifi entries.  No inputs expected or used.
 sub list_gifi {
     my ($request) = @_;
     return $request->render_report(
-        LedgerSMB::Report::Listings::GIFI->new(%$request)
-        );
+        LedgerSMB::Report::Listings::GIFI->new(
+            %$request,
+            formatter_options => $request->formatter_options
+        ));
 }
 
 =item list_warehouse
@@ -151,8 +152,10 @@ List the warehouse entries.  No inputs expected or used.
 sub list_warehouse {
     my ($request) = @_;
     return $request->render_report(
-        LedgerSMB::Report::Listings::Warehouse->new(%$request)
-        );
+        LedgerSMB::Report::Listings::Warehouse->new(
+            %$request,
+            formatter_options => $request->formatter_options
+        ));
 }
 
 =item list_language
@@ -164,8 +167,10 @@ List language entries.  No inputs expected or used.
 sub list_language {
     my ($request) = @_;
     return $request->render_report(
-        LedgerSMB::Report::Listings::Language->new(%$request)
-        );
+        LedgerSMB::Report::Listings::Language->new(
+            %$request,
+            formatter_options => $request->formatter_options
+        ));
 }
 
 =item list_sic
@@ -187,25 +192,22 @@ Generates a balance sheet
 
 =cut
 
-use Log::Any;
-my $logger = Log::Any->get_logger(category => 'LedgerSMB::Scripts::reports');
-
 sub generate_balance_sheet {
     my ($request) = @_;
-    $logger->debug("Stub LedgerSMB::Scripts::reports->generate_balance_sheet\n");
     my $rpt = LedgerSMB::Report::Balance_Sheet->new(
         %$request,
+        formatter_options => $request->formatter_options,
+        from_date  => $request->{from_date} ? $request->parse_date( $request->{from_date} ) : undef,
+        to_date  => $request->{to_date} ? $request->parse_date( $request->{to_date} ) : undef,
         column_path_prefix => [ 0 ]);
-    $rpt->run_report;
-
-    for my $key (qw(from_month from_year from_date to_date internal)) {
-        delete $request->{$_} for (grep { /^$key/ } keys %$request);
-    }
+    $rpt->run_report($request);
 
     for my $cmp_dates (@{$rpt->comparisons}) {
         my $cmp = LedgerSMB::Report::Balance_Sheet->new(
-            %$request, %$cmp_dates);
-        $cmp->run_report;
+            %$request,
+            formatter_options => $request->formatter_options,
+            %$cmp_dates);
+        $cmp->run_report($request);
         $rpt->add_comparison($cmp);
     }
     return $request->render_report($rpt);
@@ -224,8 +226,13 @@ sub search_overpayments {
                post_date batch_class account_class);
 
     return $request->render_report(
-        LedgerSMB::Report::Listings::Overpayments->new(%$request)
-        );
+        LedgerSMB::Report::Listings::Overpayments->new(
+            %$request,
+            post_date => $request->parse_date( $request->{post_date} ),
+            from_date => $request->parse_date( $request->{from_date} ),
+            to_date => $request->parse_date( $request->{to_date} ),
+            formatter_options => $request->formatter_options
+        ));
 }
 
 =item reverse_overpayment

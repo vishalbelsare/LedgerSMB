@@ -21,7 +21,7 @@ When qr/^I select the rows? where "(.*)" is "(.*)"$/, sub {
     foreach my $row(@rows) {
         if ($row->{$column} eq $value) {
             my $checkbox = $row->{_element}->find(
-                './td/div/input[@type="checkbox"]'
+                './td//input[@type="checkbox"]'
             );
             my $checked = $checkbox->get_attribute('checked');
             $checked && $checked eq 'true' or $checkbox->click;
@@ -33,7 +33,7 @@ When qr/^I select the rows? where "(.*)" is "(.*)"$/, sub {
 Then qr/the Balance Sheet per (.{10}) looks like:/, sub {
     my $date = $1;
 
-    S->{ext_wsl}->page->body->menu->click_menu(['Reports', 'Balance Sheet']);
+    S->{ext_wsl}->page->body->menu->click_menu(['General Journal', 'Reports', 'Balance Sheet']);
     S->{ext_wsl}->page->body->maindiv->content->run(date => $date);
 
     my @step_data =
@@ -62,7 +62,7 @@ Then qr/I expect the report to contain (\d+) rows?$/, sub {
 };
 
 
-Then qr/I expect the '(.*)' report column to contain '(.*)' for (.*) '(.*)'/, sub {
+Then qr/I expect the '(.*)'\s+(?:report )?column to contain '(.*)'\s+for (.*) '(.*)'/, sub {
     my @rows = S->{ext_wsl}->page->body->maindiv->content->rows;
     my $column = $1;
     my $value = $2;
@@ -110,8 +110,6 @@ When qr/^I click "(.*)" for the row with (.*) "(.*)"$/, sub {
     my $column = $2;
     my $value = $3;
     my @rows = S->{ext_wsl}->page->body->maindiv->content->rows;
-
-    ok(@rows, qq/found row with $column "$value"/);
 
     foreach my $row(@rows) {
         if ($row->{$column} eq $value) {

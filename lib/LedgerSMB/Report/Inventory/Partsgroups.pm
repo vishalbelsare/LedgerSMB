@@ -12,7 +12,7 @@ Implements a listing of parts groups
 =head1 SYNOPSIS
 
  my $report = LedgerSMB::Report::Inventory::Partsgroups->new(%$request);
- $report->render($request);
+ $report->render();
 
 =cut
 
@@ -51,7 +51,7 @@ sub columns {
     my ($self) = @_;
     return [{col_id => 'partsgroup',
                type => 'href',
-          href_base => 'pe.pl?action=edit&type=partsgroup&id=',
+          href_base => 'pe.pl?__action=edit&type=partsgroup&id=',
                name => $self->Text('Group') }];
 }
 
@@ -67,7 +67,7 @@ sub columns {
 
 sub header_lines {
     my ($self) = @_;
-    return [{name => 'partsgroup',
+    return [{value => $self->partsgroup,
              text => $self->Text('Partsgroup') }];
 }
 

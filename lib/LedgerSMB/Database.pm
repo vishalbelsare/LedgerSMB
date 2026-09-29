@@ -34,12 +34,18 @@ C<PGObject::Util::DBAdmin>.
 use strict;
 use warnings;
 
+use Carp;
 use DateTime;
 use DBD::Pg;
 use DBI;
 use File::Spec;
 use File::Temp;
-use PGObject::Util::DBAdmin 'v1.6.1';
+use JSON::PP;
+use Module::Runtime qw( use_module );
+use PGObject::Util::DBAdmin v1.6.2;
+use Scope::Guard;
+use XML::LibXML;
+use XML::LibXML::XPathContext;
 
 use Moose;
 use namespace::autoclean;
@@ -50,6 +56,8 @@ use LedgerSMB::Database::Loadorder;
 
 our $VERSION = '1.2';
 
+# en/decode in-memory data that's already correct "internal Unicode"; not UTF-8
+my $json = JSON::PP->new->utf8(0);
 
 
 around BUILDARGS => sub {
@@ -83,6 +91,15 @@ to be the root of the LedgerSMB source tree.
 
 has source_dir => (is => 'ro', default => './sql');
 
+=head2 data_dir
+
+Indicates the path to the directory which holds the 'initial-data.xml' file
+containing the reference and static data to be loaded into the base schema.
+
+=cut
+
+has data_dir => (is => 'ro', default => './locale');
+
 =head2 default_connect_options
 
 =cut
@@ -103,6 +120,15 @@ has default_connect_options => (is => 'rw',
 =cut
 
 has schema => (is => 'ro', default => 'public');
+
+=head2 upgrade_run_id
+
+Contains the C<run_id> of the upgrade after invoking C<apply_changes>.
+
+=cut
+
+has upgrade_run_id => (is => 'rw');
+
 
 =head1 METHODS
 
@@ -271,12 +297,16 @@ sub get_info {
     local $@ = undef;
 
     my $dbh = eval { $self->connect({PrintError => 0, AutoCommit => 0}) };
-    if (!$dbh){ # Could not connect, try to validate existance by connecting
-                # to postgres and checking
+    if ( !$dbh ) {
+        # Could not connect, try to validate existance by connecting
+        # to postgres and checking
+
+        $self->logger->debug(
+            "Can't connect to database; falling through to $authdb"
+            );
         $dbh = $self->new($self->export, (dbname => $authdb))
             ->connect({PrintError=>0});
         return $retval unless $dbh;
-        $self->logger->debug("DBI->connect dbh=$dbh");
         _set_system_info($dbh, $retval);
 
         # don't assign to App_State::DBH, since we're a fallback connection,
@@ -299,15 +329,14 @@ sub get_info {
         $dbh->disconnect();
 
         return $retval;
-   } else { # Got a db handle... try to find the version and app by a few
-            # different means
-       $self->logger->debug("DBI->connect dbh=$dbh");
-
+    }
+    else {
+        # Got a db handle... try to find the version and app by a few
+        # different means
        $retval->{status} = 'exists';
        _set_system_info($dbh, $retval);
 
-       my $sth;
-       $sth = $dbh->prepare('SELECT SESSION_USER');
+       my $sth = $dbh->prepare('SELECT SESSION_USER');
        $sth->execute;
        $retval->{username} = $sth->fetchrow_array();
        $sth->finish();
@@ -327,12 +356,12 @@ sub get_info {
              }
        );
        $sth->execute();
-       my ($have_version_column) =
-       $sth->fetchrow_array();
+       my ($have_version_column) = $sth->fetchrow_array();
        $sth->finish();
 
        if ($have_version_column) {
            # Legacy SL and LSMB
+           $self->logger->trace( 'Legacy SL or LSMB database' );
            $sth = $dbh->prepare(
                'SELECT version FROM defaults'
                );
@@ -375,11 +404,14 @@ sub get_info {
        $sth = $dbh->prepare('SELECT fldvalue FROM defaults WHERE fldname = ?');
        $sth->execute('version');
        if (my $ref = $sth->fetchrow_hashref('NAME_lc')){
+            $self->logger->trace( 'SL' );
             $retval->{appname} = 'sql-ledger';
             $retval->{full_version} = $ref->{fldvalue};
             $retval->{version} = $ref->{fldvalue};
             $retval->{version} =~ s/(\d+\.\d+).*/$1/g;
        } else {
+            my $schema = $self->schema;
+            $self->logger->debug( "SL; possibly no version set; $schema" );
             $retval->{appname} = 'unknown';
        }
        $dbh->rollback;
@@ -459,14 +491,10 @@ Copies the existing database to a new name.
 
 sub copy {
     my ($self, $new_name) = @_;
-    my $rc = $self->new($self->export, (dbname => $new_name)
-        )->create(copy_of => $self->dbname);
+    my $new_db = $self->new($self->export, (dbname => $new_name));
+    my $rc = $new_db->create(copy_of => $self->dbname);
 
-    (__PACKAGE__->new(
-         dbname    => $new_name,
-         username  => $self->username,
-         password  => $self->password,
-     ))->connect({ AutoCommit => 1 })->do(
+    $new_db->connect({ AutoCommit => 1 })->do(
         q|SELECT setting__set('role_prefix',
                               coalesce((setting_get('role_prefix')).value,?))|,
         undef, 'lsmb_' . $self->dbname . '__');
@@ -483,6 +511,84 @@ When an C<upto_tag> argument is provided, only schema changes upto a specific
 tag in the LOADORDER file will be applied (the main use-case being migrations).
 
 =cut
+
+sub _load_contact_classes {
+    my ($self, $dbh, $xpc) = @_;
+    my @nodes = $xpc->findnodes( './x:contact-classes/x:class' );
+    return unless @nodes;
+
+    my $sth = $dbh->prepare(
+        q|INSERT INTO contact_class (class) VALUES (?)|
+        ) or die $dbh->errstr;
+    for my $node (@nodes) {
+        my $atts = $node->attributes;
+        my @vals = (
+            $atts->getNamedItem( 'name' )->nodeValue,
+            );
+        $self->logger->tracef( 'Inserting contact class "%s"', @vals );
+        $sth->execute( @vals )
+            or die $sth->errstr;
+    }
+}
+
+sub _load_countries {
+    my ($self, $dbh, $xpc) = @_;
+    my @nodes = $xpc->findnodes( './x:countries/x:country' );
+    return unless @nodes;
+
+    my $sth = $dbh->prepare(
+        q|INSERT INTO country (short_name, name) VALUES (?, ?)|
+        ) or die $dbh->errstr;
+    for my $node (@nodes) {
+        my $atts = $node->attributes;
+        my @vals = (
+            $atts->getNamedItem( 'code' )->nodeValue,
+            $atts->getNamedItem( 'description' )->nodeValue
+            );
+        $self->logger->tracef( 'Inserting country code "%s"/"%s"', @vals );
+        $sth->execute( @vals )
+            or die $sth->errstr;
+    }
+}
+
+sub _load_languages {
+    my ($self, $dbh, $xpc) = @_;
+    my @nodes = $xpc->findnodes( './x:languages/x:language' );
+    return unless @nodes;
+
+    my $sth = $dbh->prepare(
+        q|INSERT INTO language (code, description) VALUES (?, ?)|
+        ) or die $dbh->errstr;
+    for my $node (@nodes) {
+        my $atts = $node->attributes;
+        my @vals = (
+            $atts->getNamedItem( 'code' )->nodeValue,
+            $atts->getNamedItem( 'description' )->nodeValue
+            );
+        $self->logger->tracef( 'Inserting language code "%s"/"%s"', @vals );
+        $sth->execute( @vals )
+            or die $sth->errstr;
+    }
+}
+
+sub _load_salutations {
+    my ($self, $dbh, $xpc) = @_;
+    my @nodes = $xpc->findnodes( './x:salutations/x:salutation' );
+    return unless @nodes;
+
+    my $sth = $dbh->prepare(
+        q|INSERT INTO salutation (salutation) VALUES (?)|
+        ) or die $dbh->errstr;
+    for my $node (@nodes) {
+        my $atts = $node->attributes;
+        my @vals = (
+            $atts->getNamedItem( 'text' )->nodeValue,
+            );
+        $self->logger->tracef( 'Inserting salutation "%s"', @vals );
+        $sth->execute( @vals )
+            or die $sth->errstr;
+    }
+}
 
 sub load_base_schema {
     my ($self, %args) = @_;
@@ -514,7 +620,23 @@ sub load_base_schema {
     die 'Base schema failed to load'
         if ! $success;
 
-    $self->_load_module($dbh, 'triggers.sql');
+    $dbh->disconnect;
+    $dbh = $self->connect();
+    my $guard = Scope::Guard->new(sub { $dbh->disconnect if $dbh; });
+    my $initial = File::Spec->catfile( $self->data_dir, 'initial-data.xml' );
+    open( my $fh, '<:bytes', $initial )
+        or croak "Failed to open schema seed data file ($initial): $!";
+    my $doc = XML::LibXML->load_xml( IO => $fh );
+    my $xpc = XML::LibXML::XPathContext->new( $doc->documentElement );
+    $xpc->registerNs( 'x', 'http://ledgersmb.org/xml-schemas/initial-data' );
+    close( $fh ) or carp "Failed to close seed data file ($initial): $!";
+    $self->_load_contact_classes( $dbh, $xpc );
+    $self->_load_countries( $dbh, $xpc );
+    $self->_load_languages( $dbh, $xpc );
+    $self->_load_salutations( $dbh, $xpc );
+    $dbh->commit;
+    $dbh->disconnect;
+    $dbh = undef;
 
     if (opendir(LOADDIR, "$self->{source_dir}/on_load")) {
         while (my $fname = readdir(LOADDIR)) {
@@ -533,7 +655,7 @@ sub load_base_schema {
 
 Loads or reloads sql modules from $loadorder
 
-Returns true when succesful, dies upon error.
+Returns true when successful, dies upon error.
 
 =cut
 
@@ -631,6 +753,57 @@ sub create_and_load {
 }
 
 
+=head2 $db->run_postupgrade_hooks()
+
+This routine runs upgrade hooks registered during upgrade. Upgrade hooks
+allow parts of the upgrade process to register processing to be done once
+the upgrade is done, meaning the schema and modules are all up-to-date.
+
+=cut
+
+my %postupgrade_actions = (
+    'cogs-allocation'         => 'LedgerSMB::Database::PostUpgrade::CogsAllocation',
+    'cogs-allocation-cleanup' => 'LedgerSMB::Database::PostUpgrade::CogsAllocationCleanup',
+    );
+
+sub run_postupgrade_hooks {
+    my ($self) = @_;
+
+    my $dbh = $self->connect(
+        {
+            PrintError => 0,
+            AutoCommit => 0,
+            RaiseError => 0
+        });
+    my $sth = $dbh->prepare(<<~'SQL') or die $dbh->errstr;
+        SELECT *
+          FROM defaults
+         WHERE setting_key LIKE 'post-upgrade-run:%'
+               AND (NOT value::jsonb \? 'run-after'
+                    OR (value::jsonb->>'run-after')::date < CURRENT_DATE)
+        SQL
+    my $dsh = $dbh->prepare(q{DELETE FROM defaults WHERE setting_key = ?})
+        or die $dbh->errstr;
+
+    $sth->execute or die $sth->errstr;
+    while (my $hook = $sth->fetchrow_hashref('NAME_lc')) {
+        my $data = $json->decode( $hook->{value} );
+        if (not exists $postupgrade_actions{$data->{action}}) {
+            die $self->logger->error("Post-upgrade action '$data->{action}' not defined");
+        }
+
+        my $action_module = $postupgrade_actions{$data->{action}};
+        use_module($action_module)->run({ dbh => $dbh }, $data->{args});
+
+        # delete the hook
+        $dsh->execute( $hook->{setting_key} );
+    }
+
+    $dbh->commit;
+    $dbh->disconnect;
+    return undef;
+}
+
 =head2 $db->upgrade_modules($loadorder, $version)
 
 This routine upgrades modules as required with a patch release upgrade.
@@ -662,10 +835,13 @@ sub upgrade_modules {
     return 1;
 }
 
-=head2 apply_changes( [upto_tag => $tag], [checks => $boolean] )
+=head2 apply_changes( [upto_tag => $tag], [checks => $boolean], $run_id => $uuid_str )
 
 Runs fixes if they have not been applied, optionally up to
-a specific tagged point in the LOADORDER file.
+a specific tagged point in the LOADORDER file; supply C<$run_id> if
+this is a continued invocation of a prior, failed upgrade run. In case
+no C<run_id> is provided, a new UUID will be generated and assigned to
+C<upgrade_run_id>.
 
 Runs schema upgrade checks when the value of C<checks> is true.
 
@@ -683,12 +859,67 @@ sub apply_changes {
     my $loadorder =
         LedgerSMB::Database::Loadorder->new(
             "$self->{source_dir}/changes/LOADORDER",
-            upto_tag => $args{upto_tag});
-    $loadorder->init_if_needed($dbh);
+            upto_tag => $args{upto_tag},
+            run_id => $args{run_id});
+    if ($loadorder->init_if_needed($dbh)) {
+        $dbh->commit;
+    }
+    $self->logger->debug('Applying database schema upgrades');
     my $rv = $loadorder->apply_all($dbh, checks => $args{checks});
+    $self->upgrade_run_id( $loadorder->run_id );
     $dbh->disconnect;
 
     return $rv;
+}
+
+=head2 list_changes( [run_id => $uuid] );
+
+List all applied database schema patches as triggered by C<apply_changes>.
+
+Returns an arrayref of hashes with the following keys:
+
+=over
+
+=item * run_id
+
+=item * sha
+
+=item * path
+
+=item * last_updated
+
+=item * messages
+
+=back
+
+=cut
+
+sub list_changes {
+    my ($self, %args) = @_;
+    my $run_id = $args{run_id};
+
+    my $dbh = $self->connect({
+        PrintError => 0,
+        AutoCommit => 0,
+        pg_server_prepare => 0});
+    my $changes;
+    if ($run_id) {
+        $changes = $dbh->selectall_arrayref(
+            q{select * from db_patches where run_id = ? order by last_updated},
+            { Slice => {} },
+            $run_id);
+    }
+    else {
+        $changes = $dbh->selectall_arrayref(
+            q{select * from db_patches order by last_updated},
+            { Slice => {} });
+    }
+    $self->logger->info($dbh->errstr) if $dbh->err;
+    return undef if $dbh->err;
+
+    $_->{messages} = $json->decode( $_->{messages} )
+        for (grep { $_->{messages} } ($changes // [])->@*);
+    return $changes;
 }
 
 =head2 stats
@@ -717,7 +948,7 @@ Returns a hashref of table names to rows.  The following tables are counted:
 
 =cut
 
-my @tables = qw(ar ap gl users entity_credit_account entity acc_trans oe);
+my @tables = qw(ar ap gl users entity_credit_account entity acc_trans oe parts orderitems invoice);
 
 sub stats {
     my ($self) = @_;

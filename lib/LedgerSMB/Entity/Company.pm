@@ -81,11 +81,11 @@ has 'sic_code' => (is => 'rw', isa => 'Maybe[Str]', required => 0);
 
 Date when the company was entered into LedgerSMB
 
-=back
-
 =cut
 
-has 'created' => (is => 'rw', coerce => 1, isa => 'LedgerSMB::Moose::Date');
+has 'created' => (is => 'rw', isa => 'LedgerSMB::PGDate');
+
+=back
 
 =head1 METHODS
 
@@ -133,7 +133,6 @@ sub save {
     my ($self) = @_;
     my ($ref) = $self->call_dbmethod(funcname => 'company__save');
     $ref->{control_code} = $self->{control_code};
-    $ref->{entity_class} = $self->{entity_class};
     $ref->{country_id} = $self->{country_id};
     $ref->{name} = $ref->{legal_name};
     $self = $self->new(%$ref);
@@ -144,7 +143,7 @@ sub save {
 
 =head1 LICENSE AND COPYRIGHT
 
-Copyright (C) 2012 The LedgerSMB Core Team
+Copyright (C) 2012-2025 The LedgerSMB Core Team
 
 This file is licensed under the GNU General Public License version 2, or at your
 option any later version.  A copy of the license should have been included with

@@ -33,7 +33,7 @@ sub start_adjustment {
 sub set_date {
     my ($self, $date) = @_;
 
-    $self->find('*text', id => 'transdate')->send_keys($date);
+    $self->find('*text', id => 'report-date')->send_keys($date);
 }
 
 sub set_source {

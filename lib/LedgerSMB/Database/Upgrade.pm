@@ -13,13 +13,17 @@ use strict;
 use warnings;
 
 use LedgerSMB::I18N;
-use LedgerSMB::Sysconfig;
 use LedgerSMB::Upgrade_Tests;
 
+use Carp;
+use File::Spec;
 use File::Temp;
-use List::Util qw( first );
+use List::Util qw( any first );
+use Log::Any qw( $log );
 use Scope::Guard qw( guard );
 use Template;
+use XML::LibXML;
+use XML::LibXML::XPathContext;
 
 use Moose;
 use namespace::autoclean;
@@ -52,6 +56,18 @@ my %migration_upto = (
 
 =head1 ATTRIBUTES
 
+=head2 data_dir
+
+Indicates the path to the directory which holds the 'initial-data.xml' file
+containing the reference and static data to be loaded into the base schema.
+
+The default value is relative to the current directory, which is assumed
+to be the root of the LedgerSMB source tree.
+
+=cut
+
+has data_dir => (is => 'ro', default => './locale');
+
 =head2 database (required)
 
 
@@ -69,8 +85,18 @@ e.g. C<ledgersmb/1.2>.
 
 has type => (is => 'ro', required => 1);
 
+=head2 language (optional)
+
+=cut
+
+has language => (is => 'ro', default => 'en');
 
 
+=head2 logfiles
+
+=cut
+
+has logfiles => (is => 'ro', default => sub { {} });
 
 
 =head1 METHODS
@@ -169,8 +195,7 @@ my %migration_required_vars = (
 my %required_vars_values = (
     default_ar      => sub { _linked_accounts($_[1], 'AR') },
     default_ap      => sub { _linked_accounts($_[1], 'AP') },
-    default_country => sub {
-        LedgerSMB::I18N::get_country_list(LedgerSMB::Sysconfig::language()) },
+    default_country => sub { _filtered_languages($_[0]) },
     slschema        => sub { $migration_schema{$_[0]->type} },
     );
 
@@ -199,6 +224,31 @@ sub _linked_accounts {
     $sth->finish();
 
     return \@accounts;
+}
+
+sub _filtered_languages {
+    my $self = shift;
+    my $initial = File::Spec->catfile( $self->data_dir, 'initial-data.xml' );
+    my $langs = LedgerSMB::I18N::get_country_list($self->language);
+
+    open( my $fh, '<:bytes', $initial )
+        or croak "Failed to open schema seed data file ($initial): $!";
+    my $doc = XML::LibXML->load_xml( IO => $fh );
+    my $xpc = XML::LibXML::XPathContext->new( $doc->documentElement );
+    $xpc->registerNs( 'x', 'http://ledgersmb.org/xml-schemas/initial-data' );
+    close( $fh ) or carp "Failed to close seed data file ($initial): $!";
+
+    my @lang_codes = map {
+        my $atts = $_->attributes;
+        lc($atts->getNamedItem( 'code' )->nodeValue)
+    } $xpc->findnodes( './x:countries/x:country' );
+    return [
+        sort { $a->{text} cmp $b->{text} }
+        grep {
+            my $value = lc($_->{value});
+            any { $value eq $_ } @lang_codes
+        } @$langs
+    ];
 }
 
 sub required_vars {
@@ -232,8 +282,10 @@ sub run_upgrade_script {
 
     my $dbh = $self->database->connect({ PrintError => 0, AutoCommit => 0 });
     my $temp = $self->database->loader_log_filename();
+    $self->logfiles->{out} = $temp . '_stdout';
+    $self->logfiles->{err} = $temp . '_stderr';
 
-    my $schema =  LedgerSMB::Sysconfig::db_namespace();
+    my $schema = $self->database->schema;
     my $guard = Scope::Guard->new(
         sub {
             $dbh->rollback;
@@ -251,8 +303,8 @@ sub run_upgrade_script {
     $dbh->commit;
 
     $self->database->load_base_schema(
-        log     => $temp . '_stdout',
-        errlog  => $temp . '_stderr',
+        log     => $self->logfiles->{out},
+        errlog  => $self->logfiles->{err},
         upto_tag=> $upto
         );
 
@@ -286,8 +338,8 @@ sub run_upgrade_script {
 
     $self->database->run_file(
         file => $tempfile->filename,
-        stdout_log => $temp . '_stdout',
-        errlog => $temp . '_stderr'
+        stdout_log => $self->logfiles->{out},
+        errlog => $self->logfiles->{err},
         );
 
     my $sth = $dbh->prepare(q(select value='yes'

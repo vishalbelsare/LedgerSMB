@@ -21,16 +21,15 @@ Scenario: View the chart of accounts and change every property of an account
   When I navigate the menu and select the item at "General Journal > Chart of Accounts"
   Then I should see the Chart of Accounts screen
    And I expect the report to contain 78 rows
-   And I expect the 'Description' report column to contain 'Office Furniture & Equipment' for Account Number '1820'
-  When I click Account Number "1820"
+   And I expect the 'Description' report column to contain 'Allowance for doubtful accounts' for Account Number '1205'
+  When I click Account Number "1205"
   Then I should see the Account screen
-   And I expect the "Description" field to contain "Office Furniture & Equipment"
-   And I expect "1800--CAPITAL ASSETS" to be selected for "Heading"
+   And I expect the "Description" field to contain "Allowance for doubtful accounts"
+   And I expect "1000--CURRENT ASSETS" to be selected for "Heading"
    And I expect "Asset" to be selected for "Account Type"
    And I expect to see 0 selected checkboxes in "Options"
    And I expect to see 0 selected checkboxes in "Include in drop-down menus"
-  When I select checkbox "Obsolete"
-   And I enter "Chairs" into "Description"
+  When I enter "Chairs" into "Description"
    And I select "1000--CURRENT ASSETS" from the drop down "Heading"
    And I select "1234--Test GIFI" from the drop down "GIFI"
    And I select "Equity" from the drop down "Account Type"
@@ -44,7 +43,7 @@ Scenario: View the chart of accounts and change every property of an account
    And I expect "1000--CURRENT ASSETS" to be selected for "Heading"
    And I expect "1234--Test GIFI" to be selected for "GIFI"
    And I expect "Equity" to be selected for "Account Type"
-   And I expect to see 3 selected checkboxes in "Options"
+   And I expect to see 4 selected checkboxes in "Options"
    And I expect to see 2 selected checkboxes in "Custom Flags"
    And I expect to see 22 selected checkboxes in "Include in drop-down menus"
   When I select "Custom Summary" from the drop down "Summary account for"
@@ -60,7 +59,7 @@ Scenario: View the chart of accounts and change every property of an account
   When I navigate the menu and select the item at "General Journal > Chart of Accounts"
   Then I should see the Chart of Accounts screen
    And I expect the report to contain 78 rows
-   And I expect the 'Description' report column to contain 'Chairs' for Account Number '1820'
+   And I expect the 'Description' report column to contain 'Chairs' for Account Number '1205'
 
 Scenario: View the chart of accounts and change the description of an account heading
   When I navigate the menu and select the item at "General Journal > Chart of Accounts"

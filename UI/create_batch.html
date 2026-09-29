@@ -25,11 +25,10 @@
   </div>
 </div>
 <div class="labelledinput">
-  <label for="batch-date">[% text("Batch Date") %]</label>
+  <label for="batch-date">[% text("Default Posting Date") %]</label>
   <div class="inputgroup">
      [% PROCESS input element_data = {
             type = "date"
-            class = "date"
             name = "batch_date"
             required = "true"
             value = batch.batch_date } %]
@@ -37,10 +36,10 @@
 </div>
 <div id="buttons">
 [% PROCESS button element_data = {
-       value = "create_vouchers"
+       value = "save_batch"
        type = "submit"
        class = "submit"
-       name = "action"
+       name = "__action"
        text = text('Continue') } %]
 </div>
 [%
@@ -68,7 +67,7 @@ PROCESS dynatable
                tbody = {rows = batch.search_results}
                columns = [
         { col_id='control_code', type='href', name=text('Batch Number'), #'
-       href_base="vouchers.pl?action=add_vouchers" _
+       href_base="batches.pl?__action=add_transactions" _
                    hidden_url_base _ "&amp;batch_id=" }
         { col_id='description', type='text', name = text('Description') }
         { col_id='created_by', type='text', name = text('Created By') } #'

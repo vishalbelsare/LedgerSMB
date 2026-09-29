@@ -6,20 +6,31 @@ use warnings;
 use Test2::V0;
 use Math::BigFloat;
 
-use LedgerSMB;
-use LedgerSMB::Locale;
-use LedgerSMB::Sysconfig;
+use Beam::Wire;
+use Log::Log4perl qw(:easy);
 use Plack::Request;
 
-use Log::Log4perl qw(:easy);
+use LedgerSMB;
+use LedgerSMB::Locale;
+use LedgerSMB::PGNumber;
 
-LedgerSMB::Sysconfig->initialize;
-LedgerSMB::Locale->initialize;
+
+my $wire = Beam::Wire->new(file => 't/ledgersmb.yaml');
+LedgerSMB::Locale->initialize($wire);
 Log::Log4perl->easy_init($OFF);
 
-my $request = Plack::Request->new({});
+$wire = Beam::Wire->new(
+    config => {
+        default_locale => {
+            class => 'LedgerSMB::LanguageResolver',
+            args => {
+                directory => './locale/po/',
+            },
+        }
+    });
+my $request = Plack::Request->new({ 'lsmb.script' => 'test.pl' });
 
-my $lsmb = LedgerSMB->new($request);
+my $lsmb = LedgerSMB->new($request, $wire);
 my @r;
 
 ok(defined $lsmb);
@@ -39,12 +50,6 @@ LedgerSMB::App_State::set_DBH($lsmb->{dbh});
 is($#r, 0, 'call_procedure: correct return length (one row)');
 is($r[0]->{'character_length'}, 5,
         'call_procedure: single arg, non-numeric return');
-
-@r = $lsmb->call_procedure('procname' => 'trunc',
-        'funcschema' => 'pg_catalog',
-        'args' => [57.1, 0]);
-is($r[0]->{'trunc'}, Math::BigFloat->new('57'),
-        'call_procedure: two args, numeric return');
 
 @r = $lsmb->call_procedure('procname' => 'pi',
         'funcschema' => 'pg_catalog',

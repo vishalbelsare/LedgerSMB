@@ -9,8 +9,7 @@ and more.
 =head1 SYNPOSIS
 
   my $report = LedgerSMB::Report::Contact::History->new(%$request);
-  $report->run;
-  $report->render($request, $format);
+  $report->render();
 
 =head1 DESCRIPTION
 
@@ -66,7 +65,7 @@ sub columns {
       push @$cols,
          {col_id => 'invnumber',
             type => 'href',
-       #href_base => 'is.pl?action=edit&id=',
+       #href_base => 'is.pl?__action=edit&id=',
             name => $self->Text('Invoice Number') },
 
          {col_id => 'curr',
@@ -144,16 +143,16 @@ sub name {
 sub header_lines {
     my ($self) = @_;
      return [
-            {name => 'name',
-             text => $self->Text('Name')},
+            {value => $self->name_part,
+             text  => $self->Text('Name')},
 
-            {name => 'meta_number',
-             text => $self->Text('Account Number')},
-            {name => 'from_date',
-             text => $self->Text('Start Date')},
+            {value => $self->meta_number,
+             text  => $self->Text('Account Number')},
+            {value => $self->from_date,
+             text  => $self->Text('Start Date')},
 
-            {name => 'to_date',
-             text => $self->Text('End Date')},
+            {value => $self->to_date,
+             text  => $self->Text('End Date')},
 
 
       ];
@@ -283,7 +282,7 @@ Include only customers active starting this date.
 
 =cut
 
-has start_from => (is => 'ro', coerce => 1, isa => 'LedgerSMB::Moose::Date');
+has start_from => (is => 'ro', isa => 'LedgerSMB::PGDate');
 
 =item start_to
 
@@ -291,7 +290,7 @@ Include only customers becoming active no later than this date
 
 =cut
 
-has start_to => (is => 'ro', coerce => 1, isa => 'LedgerSMB::Moose::Date');
+has start_to => (is => 'ro', isa => 'LedgerSMB::PGDate');
 
 =item inc_open
 
@@ -344,7 +343,7 @@ sub run_report {
       $script = 'is.pl';
      }
      #$r->{invnumber_href_suffix} = $r->{invoice_id};
-     $r->{invnumber_href_suffix} = "$script?action=edit&id=$r->{inv_id}";
+     $r->{invnumber_href_suffix} = "$script?__action=edit&id=$r->{inv_id}";
     }
     return $self->rows(\@rows);
 }

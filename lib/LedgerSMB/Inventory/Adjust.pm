@@ -74,8 +74,7 @@ this date.  Required.
 
 =cut
 
-has transdate => (is => 'ro',      isa => 'LedgerSMB::Moose::Date',
-              coerce => '1',  required => '1');
+has report_date => (is => 'ro', isa => 'LedgerSMB::PGDate', required => '1');
 
 =item source text
 
@@ -163,7 +162,7 @@ sub save {
     my ($ref) = $self->call_dbmethod(funcname => 'save_info');
     $self->id($ref->{id});
     for my $row(@{$self->rows}){
-        $row->check_variance($self->transdate);
+        $row->check_variance($self->report_date);
         $row->save($self->id);
     }
     return;
@@ -204,9 +203,9 @@ a given date.
 =cut
 
 sub get_part_at_date {
-    my ($self, $transdate, $partnumber) = @_;
+    my ($self, $report_date, $partnumber) = @_;
     my ($ref) = $self->call_procedure(funcname => 'get_item_at_day',
-                                        args => [$transdate, $partnumber],
+                                        args => [$report_date, $partnumber],
                                     funcprefix => 'inventory_');
     return $ref;
 }

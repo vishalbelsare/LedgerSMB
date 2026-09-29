@@ -8,7 +8,7 @@ LedgerSMB::Report::Timecards - Time and materials reports for LedgerSMB
 =head1 SYNOPSIS
 
  my $report = LedgerSMB::Report::Timecards->new(%$request);
- $report->render($request);
+ $report->render();
 
 =head1 DESCRIPTION
 
@@ -96,7 +96,7 @@ sub columns {
     {col_id => 'id',
        name => $self->Text('ID'),
        type => 'href',
-  href_base => 'timecard.pl?action=get&id=',
+  href_base => 'timecard.pl?__action=get&id=',
      pwidth => '1', },
     {col_id => 'partnumber',
        name => $self->Text('Partnumber'),
@@ -143,12 +143,12 @@ sub columns {
 
 sub header_lines  {
     my ($self) = @_;
-    return [{ name => 'date_from',
-              text => $self->Text('From Date'), },
-            { name => 'date_to',
-              text => $self->Text('To Date'), },
-            { name => 'partnumber',
-              text => $self->Text('Partnumber'), },
+    return [{ value => $self->date_from,
+              text  => $self->Text('From Date'), },
+            { value => $self->date_to,
+              text  => $self->Text('To Date'), },
+            { value => $self->partnumber,
+              text  => $self->Text('Partnumber'), },
     ];
 }
 

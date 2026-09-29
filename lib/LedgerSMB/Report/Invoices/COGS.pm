@@ -88,7 +88,7 @@ sub columns {
           type => 'href',
         pwidth => 1,
           name => $self->Text('Invoice Number'),
-     href_base => 'ir.pl?action=edit&id=', },
+     href_base => 'ir.pl?__action=edit&id=', },
 
       { col_id => 'transdate',
           type => 'text',
@@ -99,7 +99,7 @@ sub columns {
           type => 'href',
         pwidth => 1,
           name => $self->Text('Part Number'),
-     href_base => 'ic.pl?action=edit&id=', },
+     href_base => 'ic.pl?__action=edit&id=', },
 
       { col_id => 'description',
           type => 'text',
@@ -154,14 +154,14 @@ sub columns {
 sub header_lines {
     my ($self) = @_;
     return [
-       { name => 'from_date',
-         text => $self->Text('Start Date'), },
-       { name => 'to_date',
-         text => $self->Text('End Date'), },
-       { name => 'partnumber',
-         text => $self->Text('Part Number'), },
-       { name => 'description',
-         text => $self->Text('Part Description'), },
+       { value => $self->from_date,
+         text  => $self->Text('Start Date'), },
+       { value => $self->to_date,
+         text  => $self->Text('End Date'), },
+       { value => $self->partnumber,
+         text  => $self->Text('Part Number'), },
+       { value => $self->description,
+         text  => $self->Text('Part Description'), },
     ];
 }
 
@@ -185,7 +185,7 @@ Populates and returns $report->rows.
 =cut
 
 sub run_report {
-    my $self = shift;
+    my ($self) = @_;
     my @rows = $self->call_dbmethod(funcname => 'report__incoming_cogs_line');
     for my $row (@rows){
         $row->{partnumber_href_suffix} = $row->{parts_id};

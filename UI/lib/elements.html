@@ -1,144 +1,111 @@
 [%
-  default_keys = ['id', 'class', 'title']  # Defaults for all attributes
+  default_keys = ['id', 'class', 'title'];  # Defaults for all attributes
 
   # Defaults for input attributes
   default_input_keys = default_keys.merge(
          ['type', 'name', 'disabled', 'size', 'value',
           'data-dojo-type','data-dojo-props', 'data-dojo-attach-point',
-          'required', 'tabindex'])
+          'required', 'tabindex']);
 
-  input_keys.hidden       = default_keys.merge(['type', 'name', 'value'])
-  input_keys.file         = default_input_keys.merge(['accept'])
-  input_keys.image        = default_input_keys.merge(['alt', 'src'])
-  input_keys.checkbox     = default_input_keys.merge(['checked'])
-  input_keys.toggle       = default_input_keys.merge(['checked'])
-  input_keys.radio        = default_input_keys.merge(['checked'])
-  input_keys.password     = default_input_keys
-  input_keys.date         = default_input_keys
-  input_keys.text         = default_input_keys.merge(['maxlength', 'readonly'])
+  input_keys.hidden       = default_keys.merge(['type', 'name', 'value']);
+  input_keys.checkbox     = default_input_keys.merge(['checked', 'topic', 'update-from']);
+  input_keys.date         = default_input_keys;
+  input_keys.file         = default_input_keys.merge(['accept']);
+  spin = 'number-spinner'
+  input_keys.$spin        = default_input_keys.merge(['min','max','places'])
+  input_keys.toggle       = default_input_keys.merge(['checked']);
+  input_keys.password     = default_input_key;
+  input_keys.radio        = default_input_keys.merge(['checked', 'topic']);
+  input_keys.text         = default_input_keys.merge(['maxlength', 'readonly']);
 
 
   textarea_keys           = default_input_keys.merge(['cols', 'rows',
-                                                      'readonly', 'accesskey',
-                                                      'style', 'wrap' ])
-  select_keys             = default_input_keys.merge(['multiple', 'accesskey'])
-  option_keys             = default_keys.merge(['tabindex', 'disabled', 'value', 'selected'])
-  button_keys             = default_input_keys.merge(['accesskey'])
-  toggle_keys             = default_input_keys.merge(['accesskey', 'showLabel', 'label'])
-  for_keys                = default_keys.merge(['for'])
+                                                      'readonly', 'style', 'wrap' ]);
+  select_keys             = default_input_keys.merge(['multiple', 'readonly']);
+  option_keys             = default_keys.merge(['tabindex', 'disabled', 'value', 'selected']);
+  button_keys             = default_input_keys.merge(['data-lsmb-doing',
+                                                      'data-lsmb-done']);
+  toggle_keys             = default_input_keys.merge(['showLabel', 'label']);
+  for_keys                = default_keys.merge(['for']);
 
   # ELEMENT DEFAULTS
-
-  element_defaults.checkbox = {
-    value = '1',
-    'data-dojo-type' = 'dijit/form/CheckBox'
-  }
-
-  #radio
-  element_defaults.radio = {
-         'data-dojo-type' = 'dijit/form/RadioButton'
-  }
-
-  #file
-  element_defaults.file = {
-    size = '60'
-  }
-
-  #password
-  element_defaults.password = {
-    size = '60',
-    "data-dojo-type" = "dijit/form/ValidationTextBox"
-  }
-
-  # text
-  element_defaults.text = {
-    size = '60',
-    maxlength = '255',
-    "data-dojo-type" = "dijit/form/ValidationTextBox"
-  }
-
-  # date
-  USER.dojo_dateformat = USER.dateformat.replace('mm','MM');
-  element_defaults.date = {
-    "data-dojo-type" = 'lsmb/DateTextBox',
-    'data-dojo-props' = "constraints: {datePattern: '$USER.dojo_dateformat'},placeholder: '$USER.dateformat'"
-    size = '8',
-  }
 
   # textarea
   element_defaults.textarea = {
     rows = '1',
     cols = '60',
     "data-dojo-type" = "lsmb/ResizingTextarea"
-  }
+  };
 
   #button
   element_defaults.button = {
     type = 'submit',
     "data-dojo-type" = "dijit/form/Button"
-  }
+  };
 
   #select
   element_defaults.select = {
     "data-dojo-type" = "dijit/form/Select"
-  }
+  };
 
   #multiselect
   element_defaults.multiselect = {
     "data-dojo-type" = "dijit/form/MultiSelect"
     "multiple" = "true"
-  }
+  };
 
   #toggle
   element_defaults.toggle = {
     type = 'submit',
     "data-dojo-type"  = "dijit/form/ToggleButton"
     "data-dojo-props" = "iconClass:'dijitCheckBoxIcon'"
-  }
+  };
 
-%]
-
-[% # INPUT ELEMENT %]
-[% BLOCK input %]
-  [% IF label_pos != 1 and label_pos != -1; label_pos = -1; END;
+ # INPUT ELEMENT
+ BLOCK input ;
+     IF label_pos != 1 and label_pos != -1; label_pos = -1; END;
      IF element_data;  # Only process element if one exists.
          DEFAULT
              element_data.title = element_data.label
              element_data.type = "text";
 
          input_type_keys = input_keys.${element_data.type} or default_input_keys;
-         input_defaults  = element_defaults.${element_data.type} or {};
 
          IF 'text' == element_data.type and 'date' == element_data.class;
-             input_type_keys = input_keys.date;
-             input_defaults = element_defaults.date;
-         END;
-         IF 'date' == element_data.type;
-             # we can't add 'type="date"' because HTML5 defines it,
-             # which conflicts with our use for Dojo
-             element_data.type = 'text';
+             THROW invalidinput "Invalid input: element specified of type 'text' with class 'date'";
          END;
 
-         PROCESS auto_id  element_type = 'input';;
+         PROCESS auto_id element_type = 'input';
+
+         type = element_data.type;
+         element_data.delete('type');
          PROCESS attributes
             attribute_data        = element_data,
-            attribute_defaults    = input_defaults,
+            attribute_defaults    = {},
             element_keys          = input_type_keys,
             custom_attribute_data = element_data.attributes;
 
-         IF label_pos == -1;
-            PROCESS auto_label;
+         atts = '';
+         IF element_data.label.defined() AND element_data.label != '_none_';
+           atts = atts _ ' label="' _ element_data.label _ '"';
+           IF label_pos == -1;
+              atts = atts _ ' label-position="before"';
+           ELSIF label_pos == 1;
+              atts = atts _ ' label-position="after"';
+           END;
          END;
-         "<input$all_attributes />";
-         IF label_pos == 1;
-           PROCESS auto_label;
-         END;
-     END; -%]
-[% END %]
 
-[% # TEXTAREA ELEMENT %]
-[% BLOCK textarea %]
-  [% IF element_data;
+         IF type == 'hidden';
+           "<input type=\"hidden\"$all_attributes />";
+         ELSE;
+           "<lsmb-$type $atts$all_attributes ></lsmb-$type>";
+         END;
+     END;
+  END;
+
+ # TEXTAREA ELEMENT
+ BLOCK textarea ;
+     IF element_data;
         DEFAULT element_data.title = element_data.label;
 
         PROCESS auto_id element_type = 'textarea';
@@ -151,12 +118,12 @@
         PROCESS auto_label;
 
         "<textarea$all_attributes >" _ element_data.text _ "</textarea>";
-     END %]
-[% END %]
+     END ;
+   END ;
 
-[% # SELECT ELEMENT %]
-[% BLOCK select %]
-   [% IF element_data;
+ # SELECT ELEMENT
+   BLOCK select ;
+      IF element_data;
         DEFAULT element_data.title = element_data.label;
 
         text_attr     = element_data.text_attr or 'text';
@@ -172,7 +139,8 @@
 
         PROCESS auto_label;
 
-        "<select$all_attributes >";
+        # wrap all SELECTs in SPANs so grids don't stretch the selects
+        "<span><select$all_attributes >";
         IF element_data.default_blank;
            # loop.count starts at 1, so using index 0 here is safe: it won't overlap below
            PROCESS option
@@ -194,13 +162,13 @@
                text_attr   = text_attr,
                value_attr  = value_attr;
         END;
-        "</select>";
-      END %]
-[% END %]
+        "</select></span>";
+      END ;
+   END ;
 
-[% # OPTION ELEMENT %]
-[% BLOCK option %]
-  [% # Selected is a special case
+ # OPTION ELEMENT
+   BLOCK option ;
+     # Selected is a special case
      # -- no attribute key, so it is handled here by looking for the option value in the default_values list.
      option_selected = "";
      FOREACH test_val IN element_data.default_values;
@@ -220,12 +188,11 @@
 
      "<option$all_attributes >" _ ((option_data.$text_attr == '_!lsmb!empty!_')
                            ? "" : option_data.$text_attr) _ "</option>";
-  %]
-[% END %]
+   END ;
 
-[% # BUTTON ELEMENT %]
-[% BLOCK button %]
-  [% IF element_data;
+ # BUTTON ELEMENT
+   BLOCK button ;
+     IF element_data;
 
         PROCESS auto_id element_type = 'button';
         PROCESS attributes
@@ -243,43 +210,12 @@
                 position => element_data.tooltip.position,
                 msg      => element_data.tooltip.msg };
         END;
-     END; %]
-[% END %]
+     END;
+   END ;
 
-[% # TOGGLE ELEMENT %]
-[% BLOCK toggle %]
-  [% IF element_data;
-
-        PROCESS auto_id element_type = 'toggle';
-        PROCESS attributes
-            attribute_data        = element_data,
-            attribute_defaults    = element_defaults.toggle,
-            element_keys          = toggle_keys,
-            custom_attribute_data = element_data.attributes;
-
-        PROCESS auto_label  # Process element label.
-        "<button$all_attributes >" _ element_data.text _ "</button>";
-     END; %]
-[% END %]
-
-[% # LABEL ELEMENT %]
-[% BLOCK label %]
-  [% IF element_data.text;
-
-        PROCESS auto_id element_type = 'label';
-        PROCESS attributes
-            attribute_data        = element_data,
-            attribute_defaults    = {},
-            element_keys          = for_keys,
-            custom_attribute_data = element_data.attributes;
-
-        "<label $all_attributes >" _ element_data.text _ "</label>";
-     END; %]
-[% END %]
-
-[% # REGULAR ATTRIBUTE PROCESSING -- all explicitly allowed attributes are processed here. %]
-[% BLOCK attributes %]
-  [% all_attributes = "";
+   # REGULAR ATTRIBUTE PROCESSING -- all explicitly allowed attributes are processed here.
+   BLOCK attributes ;
+     all_attributes = "";
      FOREACH element_attribute IN element_keys;  # Loop through each allowed attribute.
        IF attribute_data.item(element_attribute).defined() and (attribute_data.item(element_attribute) != "");
           all_attributes =
@@ -293,11 +229,10 @@
     FOREACH element_attribute IN custom_attribute_data;
        all_attributes = all_attributes _ " " _ element_attribute.key _ '="' _ element_attribute.value _ '"';
     END;
-%]
-[% END %]
+   END;
 
-[% BLOCK auto_id  # Automatically builds the id tag for the element if possible. %]
-  [% UNLESS element_data.id.defined();
+   BLOCK auto_id ; # Automatically builds the id tag for the element if possible.
+     UNLESS element_data.id.defined();
         # id attribute should always be set, so auto-set it if it is not defined.
         element_id = "";
         # Label ids default to [for]-label.
@@ -317,11 +252,11 @@
         IF element_id;
            element_data.id = element_id.replace('[^\p{IsAlnum}]', '-');
         END;
-     END %]
-[% END %]
+     END;
+   END;
 
-[% BLOCK auto_label  # Sets a label for a form element if the special 'label' key is passed. %]
-  [% IF element_data.label.defined() and element_data.label != '_none_';
+   BLOCK auto_label ; # Sets a label for a form element if the special 'label' key is passed.
+     IF element_data.label.defined() and element_data.label != '_none_';
         # Add a 'for' attribute for the label if possible.
         IF element_data.id.defined();
            label_id = ' id="' _ element_data.id _ '-label"';
@@ -337,17 +272,17 @@
         ELSE;
            label_class = "";
         END;
-     "<label $label_id $label_for $label_class >" _ text(element_data.label) _ "</label>";
-     END; %]
-[% END %]
+     "<label $label_id $label_for $label_class >" _ element_data.label _ "</label>";
+     END;
+   END;
 
-[% BLOCK decorated_text;
+   BLOCK decorated_text;
   IF element_data && element_data.msg.defined();
     element_data.msg.replace('&lt;((/?[ibup]|br))&gt;','<$1>');
   END;
-END %]
+END;
 
-[% BLOCK tooltip;
+   BLOCK tooltip;
    IF element_data && element_data.msg.defined();
       ref_if = element_data.ref_id;
       position = (element_data.position.defined() ?
@@ -357,20 +292,19 @@ END %]
       INCLUDE decorated_text element_data = { msg => element_data.msg };
       "</div>";
    END;
-END %]
+END;
 
-[% BLOCK select_language;
+   BLOCK select_language;
     IF ! element_data.default_values || element_data.default_values.size == 0 ;
        element_data.default_values = [ SETTINGS.default_language ] ;
     END ;
     PROCESS select element_data=element_data ;
   END ;
-   %]
 
-[% BLOCK select_country;
+   BLOCK select_country;
     IF ! element_data.default_values || element_data.default_values.size == 0 ;
        element_data.default_values = [ SETTINGS.default_country ] ;
     END ;
     PROCESS select element_data=element_data ;
   END ;
-   %]
+-%]

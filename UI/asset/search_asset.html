@@ -1,7 +1,7 @@
 [% PROCESS 'elements.html' %]
 <body class="lsmb [% dojo_theme %]">
 <div id="asset-search">
-<div class="listtop">[% asset.title %]</div>
+<div class="listtop">[% text('Search Asset') %]</div>
 <form data-dojo-type="lsmb/Form" action="[% request.script %]" method="get">
 <!-- These are for Javascript automation of defaults -CT -->
 [% PROCESS input element_data = {
@@ -63,9 +63,8 @@
 [% PROCESS input element_data = {
         label = text("Purchase Date:") #'
         name = "purchase_date"
-        class = "date"
+        type = "date"
         value = asset.purchase_date
-        type = "text"
         size = 12
 } %]
 </span>
@@ -107,9 +106,8 @@
         label = text("Depreciation Starts") #'
         name = "start_depreciation"
         value = asset.start_depreciation
-        type = "text"
         size = 12
-        class = "date"
+        type = "date"
 } %]
 </span>
 </div>
@@ -188,7 +186,7 @@
         text = text("Search")
         type = "submit"
         class = "submit"
-        name = "action"
+        name = "__action"
         value = "asset_results"
 } %]
 </div>

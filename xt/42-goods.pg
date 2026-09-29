@@ -119,8 +119,8 @@ BEGIN;
                 (-6, -8, 5),
                 (-9, -10, 7);
 
-    INSERT INTO entity (id, name, country_id, entity_class)
-    VALUES (-1000, 'Test act', 232, 1);
+    INSERT INTO entity (id, name, country_id)
+    VALUES (-1000, 'Test act', 232);
 
     INSERT INTO entity_credit_account
             (id, entity_class, meta_number, entity_id, curr, ar_ap_account_id)
@@ -139,17 +139,25 @@ BEGIN;
     --
 
 
-    INSERT INTO ap (id, invoice, invnumber, transdate, entity_credit_account, approved)
-    VALUES (-1102,  true, 'test1002', now() - '10 days'::interval, -1000, 't');
+    INSERT INTO transactions (id, transdate, trans_type_code, approved)
+    VALUES (-1102, now() - '10 days'::interval, 'ap', true);
+    INSERT INTO open_item (item_number, item_type, account_id)
+    VALUES ('test1002', 'ap', -1012);
+    INSERT INTO ap (trans_id, open_item_id, invoice, invnumber, entity_credit_account)
+    VALUES (-1102, currval('open_item_id_seq'), true, 'test1002', -1000);
     INSERT INTO invoice (id, trans_id, parts_id, qty, allocated, sellprice)
     VALUES (-1102, -1102, -1, -150, 50, 0.5);
 
-    INSERT INTO ap (id, invoice, invnumber, transdate, entity_credit_account, approved)
-    VALUES (-1103,  true, 'test1003', now() - '10 days'::interval, -1000, 't');
+    INSERT INTO transactions (id, transdate, trans_type_code, approved)
+    VALUES (-1103, now() - '10 days'::interval, 'ap', true);
+    INSERT INTO open_item (item_number, item_type, account_id)
+    VALUES ('test1003', 'ap', -1012);
+    INSERT INTO ap (trans_id, open_item_id, invoice, invnumber, entity_credit_account)
+    VALUES (-1103, currval('open_item_id_seq'), true, 'test1003', -1000);
     INSERT INTO invoice (id, trans_id, parts_id, qty, allocated, sellprice)
     VALUES (-1103, -1103, -2, -150, 75, 9);
 
-    INSERT INTO inventory_report (transdate) VALUES (now()::date);
+    INSERT INTO inventory_report (report_date) VALUES (now()::date);
 
     -- LedgerSMB::Inventory::Adjust_Line defines variance as:
     --   counted - expected
@@ -171,17 +179,17 @@ BEGIN;
                               'inventory adjustment, save adjustment lines');
     DEALLOCATE test;
 
-    PREPARE test AS SELECT transdate, trans_id
+    PREPARE test AS SELECT report_date, trans_id
                      FROM inventory_report
                     WHERE id = currval('inventory_report_id_seq');
-    SELECT results_eq('test', $$VALUES(now()::date, currval('id')::int)$$,
+    SELECT results_eq('test', $$VALUES(now()::date, currval('transactions_id_seq')::int)$$,
                               'inventory adjustment, adjustment transactions');
     DEALLOCATE test;
 
     SELECT is(
           ARRAY(SELECT count(*)
             FROM acc_trans
-           WHERE trans_id = currval('id')),
+           WHERE trans_id = currval('transactions_id_seq')),
            ARRAY[4]::bigint[],
            'There are 4 lines in acc_trans (correcting the inventory account)'
     );
@@ -189,28 +197,28 @@ BEGIN;
     SELECT is(
           (SELECT ARRAY[count(*), sum(amount_bc)]
             FROM acc_trans
-           WHERE trans_id = currval('id') AND chart_id = -1101),
+           WHERE trans_id = currval('transactions_id_seq') AND chart_id = -1101),
            ARRAY[1, -5]::numeric[],
            'There is 1 line on "series 1" inventory'
     );
     SELECT is(
           (SELECT ARRAY[count(*), sum(amount_bc)]
             FROM acc_trans
-           WHERE trans_id = currval('id') AND chart_id = -1102),
+           WHERE trans_id = currval('transactions_id_seq') AND chart_id = -1102),
            ARRAY[1, 5]::numeric[],
            'There is 1 line on "series 1" COGS'
     );
     SELECT is(
           (SELECT ARRAY[count(*), sum(amount_bc)]
             FROM acc_trans
-           WHERE trans_id = currval('id') AND chart_id = -2101),
+           WHERE trans_id = currval('transactions_id_seq') AND chart_id = -2101),
            ARRAY[1, 45]::numeric[],
            'There is 1 line on "series 2" inventory'
     );
     SELECT is(
           (SELECT ARRAY[count(*), sum(amount_bc)]
             FROM acc_trans
-           WHERE trans_id = currval('id') AND chart_id = -2102),
+           WHERE trans_id = currval('transactions_id_seq') AND chart_id = -2102),
            ARRAY[1, -45]::numeric[],
            'There is 1 line on "series 2" COGS'
     );
@@ -230,7 +238,7 @@ BEGIN;
 
     -- Above, we created a report with adjustments both ways.
     -- Create one which only goes one way (leaving out the ar or ap transaction)
-    INSERT INTO inventory_report (transdate) VALUES (now()::date);
+    INSERT INTO inventory_report (report_date) VALUES (now()::date);
     SELECT inventory_adjust__save_line(currval('inventory_report_id_seq')::int,
                                 -1, 100, 90, 10);
     SELECT inventory_adjust__approve(currval('inventory_report_id_seq')::int);
@@ -258,10 +266,12 @@ BEGIN;
                            'stock assembly without stock');
     DEALLOCATE test;
 
-    INSERT INTO ap (id, invoice, invnumber, transdate,
-                    entity_credit_account, approved)
-            VALUES (-7101, true, 'test1001', now() - '17 days'::interval,
-                    -1000, 't');
+    INSERT INTO transactions (id, transdate, trans_type_code, approved)
+    VALUES (-7101, now() - '17 days'::interval, 'ap', true);
+    INSERT INTO open_item (item_number, item_type, account_id)
+    VALUES ('test1001', 'ap', -1012);
+    INSERT INTO ap (trans_id, open_item_id, invoice, invnumber, entity_credit_account)
+            VALUES (-7101, currval('open_item_id_seq'), true, 'test1001', -1000);
     INSERT INTO invoice (id, trans_id, parts_id, qty, allocated, sellprice)
                  VALUES (-7101, -7101, -7, -100, 0, -3);
     INSERT INTO invoice (id, trans_id, parts_id, qty, allocated, sellprice)
@@ -291,10 +301,13 @@ BEGIN;
     --- First test: bought parts appear on the inventory report
 
     ---- Simulate bought parts: insert 'ap' and 'invoice' lines
-    INSERT INTO ap (id, invoice, invnumber, transdate,
-                    entity_credit_account, approved)
-            VALUES (-1101, true, 'test1001', now() - '10 days'::interval,
-                    -1000, 't');
+
+    INSERT INTO transactions (id, transdate, trans_type_code, approved)
+    VALUES (-1101, now() - '10 days'::interval, 'ap', true);
+    INSERT INTO open_item (item_number, item_type, account_id)
+    VALUES ('test1001/2', 'ap', -1012);
+    INSERT INTO ap (trans_id, open_item_id, invoice, invnumber, entity_credit_account)
+            VALUES (-1101, currval('open_item_id_seq'), true, 'test1001', -1000);
     INSERT INTO invoice (id, trans_id, parts_id, qty, allocated, sellprice)
                  VALUES (-1101, -1101, -3, -100, 0, 3);
 
@@ -399,10 +412,13 @@ BEGIN;
     --- Second test: sold parts appear on the inventory report
 
     ---- Simulate sold parts: insert 'ar' and 'invoice' lines
-    INSERT INTO ar (id, invoice, invnumber, transdate,
-                    entity_credit_account, approved)
-            VALUES (-1201, true, 'test1001', now() - '10 days'::interval,
-                    -2000, 't');
+
+    INSERT INTO transactions (id, transdate, trans_type_code, approved)
+    VALUES (-1201, now() - '10 days'::interval, 'ar', true);
+    INSERT INTO open_item (item_number, item_type, account_id)
+    VALUES ('test1001/ar', 'ar', -1011);
+    INSERT INTO ar (trans_id, open_item_id, invoice, invnumber, entity_credit_account)
+            VALUES (-1201, currval('open_item_id_seq'), true, 'test1001', -2000);
     INSERT INTO invoice (id, trans_id, parts_id, qty, allocated, sellprice)
                  VALUES (-1201, -1201, -4, 100, 0, -3);
 
@@ -505,10 +521,12 @@ BEGIN;
 
     --- Third test: stocked items should be on the inventory report
 
-    INSERT INTO ap (id, invoice, invnumber, transdate,
-                    entity_credit_account, approved)
-            VALUES (-8101, true, 'test1001', now() - '17 days'::interval,
-                    -1000, 't');
+    INSERT INTO transactions (id, transdate, trans_type_code, approved)
+    VALUES (-8101, now() - '17 days'::interval, 'ap', true);
+    INSERT INTO open_item (item_number, item_type, account_id)
+    VALUES ('test1001/3', 'ap', -1012);
+    INSERT INTO ap (trans_id, open_item_id, invoice, invnumber, entity_credit_account)
+            VALUES (-8101, currval('open_item_id_seq'), true, 'test1001', -1000);
     INSERT INTO invoice (id, trans_id, parts_id, qty, allocated, sellprice)
                  VALUES (-8101, -8101, -10, -100, 0, -10);
 

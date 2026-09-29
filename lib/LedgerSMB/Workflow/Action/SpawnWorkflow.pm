@@ -49,11 +49,10 @@ This action adds the following key to the workflow context:
 
 use strict;
 use warnings;
-use parent qw( Workflow::Action );
+use parent qw( LedgerSMB::Workflow::Action );
 
 use Log::Any qw($log);
 use Workflow::Context;
-use Workflow::Factory qw(FACTORY);
 
 my @PROPS = qw( spawn_type context_param description );
 __PACKAGE__->mk_accessors(@PROPS);
@@ -95,9 +94,9 @@ sub execute {
             $context->param( $key => $context_data->{$key} );
         }
     }
-    my $new_wf = FACTORY()->create_workflow( $self->spawn_type, $context );
+    my $new_wf = $wf->_factory->create_workflow( $self->spawn_type, $context );
     my $wf_id  = $new_wf->id;
-    $wf->context->param( spawned_workflow => $new_wf );
+    $wf->context->param( spawned_workflow => $wf_id );
     $wf->add_history(
         {
             action      => $self->name,
@@ -113,7 +112,7 @@ sub execute {
 
 =head1 LICENSE AND COPYRIGHT
 
-Copyright (C) 2020-2021 The LedgerSMB Core Team
+Copyright (C) 2020-2022 The LedgerSMB Core Team
 
 This file is licensed under the GNU General Public License version 2, or at your
 option any later version.  A copy of the license should have been included with

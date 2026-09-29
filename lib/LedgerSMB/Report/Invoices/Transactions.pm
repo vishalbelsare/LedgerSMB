@@ -9,7 +9,7 @@ LedgerSMB
 =head1 SYNOPSIS
 
   my $report = LedgerSMB::Report::Invoices::Transactions(%$request);
-  $report->render($request);
+  $report->render();
 
 =cut
 
@@ -19,7 +19,8 @@ extends 'LedgerSMB::Report';
 with
     'LedgerSMB::Report::Dates',
     'LedgerSMB::Report::Approval_Option',
-    'LedgerSMB::Report::OpenClosed_Option';
+    'LedgerSMB::Report::OpenClosed_Option',
+    'LedgerSMB::Report::Voided_Option';
 
 =head1 DESCRIPTION
 
@@ -92,7 +93,7 @@ Prefix search on noted order number
 
 =cut
 
-has ornumber => (is => 'ro', isa => 'Str', required => 0);
+has ordnumber => (is => 'ro', isa => 'Str', required => 0);
 
 =item ponumber string
 
@@ -187,7 +188,7 @@ has '+order_by' => (default => 'transdate');
 
 =back
 
-=head1 INTERNLS
+=head1 INTERNALS
 
 =head2 columns
 
@@ -222,8 +223,6 @@ This is the customer or vendor name
 =item due_date date
 
 =item notes text
-
-=item till text
 
 =item salesperson text
 
@@ -263,7 +262,7 @@ sub columns {
            type => 'text'},
        { col_id => 'entity_name',
            name => $entity_name_label,
-       href_base =>'contact.pl?action=get&entity_class='.$self->entity_class,
+       href_base =>'contact.pl?__action=get&entity_class='.$self->entity_class,
            type => 'href', },
        { col_id => 'invnumber',
            name => $self->Text('Invoice'),
@@ -279,19 +278,24 @@ sub columns {
            type => 'text'},
        { col_id => 'netamount',
            name => $self->Text('Amount'),
-           type => 'text'},
+           type => 'text',
+           money => 1},
        { col_id => 'tax',
            name => $self->Text('Tax'),
-           type => 'text'},
+           type => 'text',
+           money => 1},
        { col_id => 'amount',
            name => $self->Text('Total'),
-           type => 'text'},
+           type => 'text',
+           money => 1},
        { col_id => 'paid',
            name => $self->Text('Paid'),
-           type => 'text'},
+           type => 'text',
+           money => 1},
        { col_id => 'due',
            name => $self->Text('Due'),
-           type => 'text'},
+           type => 'text',
+           money => 1},
        { col_id => 'last_payment',
            name => $self->Text('Date Paid'),
            type => 'text'},
@@ -300,9 +304,6 @@ sub columns {
            type => 'text'},
        { col_id => 'notes',
            name => $self->Text('Notes'),
-           type => 'text'},
-       { col_id => 'till',
-           name => $self->Text('Till'),
            type => 'text'},
        { col_id => 'salesperson',
            name => $self->Text('Salesperson'),
@@ -342,7 +343,7 @@ This runs the report and sets the $report->rows.
 
 
 sub run_report {
-    my $self = shift;
+    my ($self) = @_;
     $self->approved;
     my @rows = $self->call_dbmethod(funcname => 'report__aa_transactions');
     for my $r(@rows){
@@ -354,8 +355,8 @@ sub run_report {
         }
         $r->{entity_name_href_suffix} =
                "&entity_id=$r->{entity_id}&meta_number=$r->{meta_number}";
-        $r->{invnumber_href_suffix} = "$script?action=edit&id=$r->{id}";
-        $r->{id_href_suffix} = "$script?action=edit&id=$r->{id}";
+        $r->{invnumber_href_suffix} = "$script?__action=edit&id=$r->{id}";
+        $r->{id_href_suffix} = "$script?__action=edit&id=$r->{id}";
     }
     return $self->rows(\@rows);
 }

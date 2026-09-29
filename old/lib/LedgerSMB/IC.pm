@@ -41,7 +41,6 @@ package IC;
 
 use Log::Any;
 use LedgerSMB::File;
-use LedgerSMB::Setting;
 
 my $logger = Log::Any->get_logger(category => 'IC');
 
@@ -420,7 +419,6 @@ sub save {
 
     my $partsgroup_id;
     ( $null, $partsgroup_id ) = split /--/, $form->{partsgroup};
-    $partsgroup_id *= 1;
 
 
     if ( !$form->{priceupdate} ) {
@@ -475,18 +473,31 @@ sub save {
 
     # insert makemodel records
     if ( $form->{item} =~ /(part|assembly)/ ) {
+        my $have_barcodes = 0;
         $query = qq|
             INSERT INTO makemodel (parts_id, make, model, barcode)
                  VALUES (?, ?, ?, ?)|;
         $sth = $dbh->prepare($query) || $form->dberror($query);
         foreach my $i ( 1 .. $form->{makemodel_rows} ) {
             if (   ( $form->{"make_$i"} ne "" )
-                || ( $form->{"model_$i"} ne "" ) )
-            {
+                   || ( $form->{"model_$i"} ne "" ) ) {
+                $have_barcodes ||= $form->{"barcode_$i"};
                 $sth->execute( $form->{id}, $form->{"make_$i"},
                     $form->{"model_$i"} , $form->{"barcode_$i"})
                   || $form->dberror($query);
             }
+        }
+        if ($have_barcodes) {
+            # If there's already a record, if it's "auto", there's nothing to do
+            # If it's "yes", we don't want to change it to "auto" and
+            # If it's "no", we don't want to enable it...
+            $query = q|
+            INSERT INTO defaults (setting_key, value)
+                  VALUES ('have_barcodes', 'auto')
+                  ON CONFLICT DO NOTHING
+|;
+            $sth = $dbh->prepare($query) || $form->dberror($query);
+            $sth->execute || $form->dberror($query);
         }
     }
 
@@ -616,7 +627,6 @@ sub save {
         }
     }
     $rc;
-
 }
 
 sub update_assembly {
@@ -889,7 +899,7 @@ sub delete {
     $sth   = $dbh->prepare($query);
     $sth->execute( $form->{id} ) || $form->dberror($query);
 
-    $query = qq|DELETE FROM translation WHERE trans_id = ?|;
+    $query = qq|DELETE FROM parts_translation WHERE trans_id = ?|;
     $sth   = $dbh->prepare($query);
     $sth->execute( $form->{id} ) || $form->dberror($query);
 
@@ -940,7 +950,7 @@ sub create_links {
     my $ref;
 
     my $query = qq|
-        SELECT a.accno, a.description, as_array(l.description) as link
+        SELECT a.accno, a.description, array_agg(l.description) as link
           FROM account a
           JOIN account_link l ON a.id = l.account_id
          WHERE l.description LIKE ?

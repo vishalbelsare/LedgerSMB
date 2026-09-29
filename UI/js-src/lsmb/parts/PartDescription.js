@@ -1,7 +1,5 @@
 /** @format */
 
-/* eslint no-template-curly-in-string:0 */
-
 define([
     "dijit/form/TextBox",
     "dijit/_HasDropDown",
@@ -30,7 +28,7 @@ define([
             channel: null,
             height: null,
             store: partRestStore,
-            /* eslint no-template-curly-in-string:0 */
+            // eslint-disable-next-line no-template-curly-in-string
             queryExpr: "*${0}*",
             autoComplete: false,
             highlightMatch: "all",
@@ -40,18 +38,16 @@ define([
             dropDownClass: _ComboBoxMenu,
             autoSizing: true,
             startup: function () {
-                var self = this;
                 this.inherited(arguments);
                 if (this.channel) {
                     this.own(
-                        topic.subscribe(this.channel, function (selected) {
-                            self.set("value", selected[self.searchAttr]);
+                        topic.subscribe(this.channel, (selected) => {
+                            this.set("value", selected[this.searchAttr]);
                         })
                     );
-                    // eslint-disable-next-line no-unused-vars
-                    this.on("change", function (newValue) {
-                        if (self.item) {
-                            topic.publish(self.channel, self.item);
+                    this.on("change", () => {
+                        if (this.item) {
+                            topic.publish(this.channel, this.item);
                         }
                     });
                 }

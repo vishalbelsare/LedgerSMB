@@ -17,7 +17,6 @@ use strict;
 use warnings;
 
 use HTTP::Status qw( HTTP_OK HTTP_SEE_OTHER );
-use Workflow::Factory qw(FACTORY);
 
 use LedgerSMB::Business_Unit;
 use LedgerSMB::Entity;
@@ -31,6 +30,9 @@ use LedgerSMB::Magic qw(CC_EMAIL_TO CC_EMAIL_CC CC_EMAIL_BCC
 use LedgerSMB::Report::Aging;
 use LedgerSMB::Scripts::reports;
 use LedgerSMB::Template;
+use LedgerSMB::Template::Sink::Email;
+use LedgerSMB::Template::Sink::Printer;
+use LedgerSMB::Template::Sink::Screen;
 
 our $VERSION = '1.0';
 
@@ -53,10 +55,214 @@ sub run_report{
                if $request->{"business_unit_$count"};
     }
     return $request->render_report(
-        LedgerSMB::Report::Aging->new(%$request)
-        );
+        LedgerSMB::Report::Aging->new(
+            %$request,
+            to_date   => $request->parse_date( $request->{to_date} ),
+            formatter_options => $request->formatter_options,
+            language => $request->{_user}->{language},
+            languages => $request->enabled_languages
+        ));
 }
 
+
+sub _billing_mail_addresses {
+    my ($contacts) = @_;
+
+    my (@to, @cc, @bcc);
+    # Select billing or regular addresses from the ECA
+    for my $class (CC_BILLING_EMAIL_TO, CC_EMAIL_TO) {
+        last if @to;
+        @to = map { $_->contact }
+        grep {
+            $_->class_id == $class and $_->credit_id
+        } $contacts->@*;
+    }
+    for my $class (CC_BILLING_EMAIL_CC, CC_EMAIL_CC) {
+        last if @cc;
+        @cc = map { $_->contact }
+        grep {
+            $_->class_id == $class and $_->credit_id
+        } $contacts->@*;
+    }
+    for my $class (CC_BILLING_EMAIL_BCC, CC_EMAIL_BCC) {
+        last if @bcc;
+        @bcc = map { $_->contact }
+        grep {
+            $_->class_id == $class and $_->credit_id
+        } $contacts->@*;
+    }
+    # Select billing or regular addresses from the entity
+    for my $class (CC_BILLING_EMAIL_TO, CC_EMAIL_TO) {
+        last if @to;
+        @to = map { $_->contact }
+        grep {
+            $_->class_id == $class and not $_->credit_id
+        } $contacts->@*;
+    }
+    for my $class (CC_BILLING_EMAIL_CC, CC_EMAIL_CC) {
+        last if @cc;
+        @cc = map { $_->contact }
+        grep {
+            $_->class_id == $class and not $_->credit_id
+        } $contacts->@*;
+    }
+    for my $class (CC_BILLING_EMAIL_BCC, CC_EMAIL_BCC) {
+        last if @bcc;
+        @bcc = map { $_->contact }
+        grep {
+            $_->class_id == $class and not $_->credit_id
+        } $contacts->@*;
+    }
+
+    return (to => \@to, cc => \@cc, bcc => \@bcc);
+}
+
+sub _render_statement_batch {
+    my ($request, $wf) = @_;
+    my $locale = $request->{_locale};
+    my $results = $wf->context->param( 'results' );
+    if (scalar($results->@*) == 1) {
+        my ($result) = $results->@*;
+        my $callback = 'callback=reports.pl%3Faction%3Dstart_report%26report_name%3Daging%26module_name%3Dgl%26entity_class%3D2';
+
+        return [ HTTP_SEE_OTHER,
+                 [ Location => 'email.pl?__action=render&' . $callback . '&id=' . $result->{id} ],
+                 [ '' ] ];
+    }
+
+    my $wf_id = $wf->id;
+    my @columns = (
+        {
+            col_id    => 'id',
+            name      => $locale->text('ID'),
+            type      => 'href',
+            href_base => "email.pl?__action=render&callback=report_aging.pl%3Faction%3Drender_statement_batch%26workflow_id%3D$wf_id&id=",
+        },
+        {
+            col_id => 'name',
+            name   => $locale->text('Entity'),
+            type   => 'text',
+        },
+        {
+            col_id => 'credit_account',
+            name   => $locale->text('Account'),
+            type   => 'text',
+        },
+        {
+            col_id => 'status',
+            name   => $locale->text('Status'),
+            type   => 'text',
+        },
+        );
+
+    my @buttons = ();
+
+    if (grep { $_ eq 'cancel' } $wf->get_current_actions) {
+        push @buttons, {
+            name => '__action',
+            type => 'submit',
+            text => $locale->text('Cancel'),
+            value => 'cancel',
+        };
+    }
+
+    if (grep { $_ eq 'complete' } $wf->get_current_actions) {
+        push @buttons, {
+            name => '__action',
+            type => 'submit',
+            text => $locale->text('Complete'),
+            value => 'mark_complete',
+        };
+    }
+
+    my $template = $request->{_wire}->get('ui');
+    my $rows = [ $results->@* ];
+    for my $row ($rows->@*) {
+        $row->{id_href_suffix} = $row->{id};
+        my $nested_wf = $request->conn->workflows->fetch( 'Email' => $row->{id} );
+        $row->{status} = $nested_wf->state;
+    }
+    return $template->render(
+        $request,
+        'Reports/aging_batch',
+        {
+            buttons => \@buttons,
+            callback => 'report_aging.pl?__action=render_statement_batch&workflow_id=' . $request->{workflow_id},
+            columns => \@columns,
+            HIDDENS => {
+                workflow_id => $wf_id,
+            },
+            SCRIPT  => $request->{script},
+            FORM_ID => $request->{form_id},
+            hlines => [
+                {
+                    text => $locale->text('Status'),
+                    value => $wf->state,
+                },
+            ],
+            rows    => $rows,
+            name    => $locale->text('E-mail aging reminder status'),
+        });
+}
+
+=item cancel
+
+Cancels the batch processing by cancelling all non-terminated
+sub-workflows and renders an overview page.
+
+=cut
+
+sub cancel {
+    my ($request) = @_;
+    my $wf = $request->conn->workflows->fetch(
+        'Aging statement batch' => $request->{workflow_id}
+        );
+
+    for my $result ($wf->context->param( 'results' )->@*) {
+        my $nested_wf = $request->conn->workflows->fetch('Email' => $result->{id});
+
+        if ($nested_wf and
+            grep { $_ eq 'Cancel' } $nested_wf->get_current_actions
+            ) {
+            $nested_wf->execute_action( 'cancel' );
+        }
+    }
+
+    $wf->execute_action( 'cancel' );
+    return _render_statement_batch( $request, $wf );
+}
+
+=item mark_complete
+
+Marks the batch processing completed and renders an overview page.
+
+=cut
+
+sub mark_complete {
+    my ($request) = @_;
+    my $wf = $request->conn->workflows->fetch(
+        'Aging statement batch' => $request->{workflow_id}
+        );
+
+    $wf->execute_action( 'complete' );
+    return _render_statement_batch( $request, $wf );
+}
+
+=item render_statement_batch
+
+This shows an overview of the batch of (e-mail) workflows associated with
+aging statements.
+
+=cut
+
+sub render_statement_batch {
+    my ($request) = @_;
+    my $wf = $request->conn->workflows->fetch(
+        'Aging statement batch' => $request->{workflow_id}
+        );
+
+    return _render_statement_batch( $request, $wf );
+}
 
 =item generate_statement
 
@@ -73,19 +279,22 @@ sub generate_statement {
 
     my @statements;
     my %filters;
+    my %languages;
     while ($request->{rowcount} > 0) {
         my $rc = $request->{rowcount};
         --$request->{rowcount};
-        next unless $request->{"select_$rc"};
+        my $row_id = $request->{"select_$rc"};
+        next unless $row_id;
 
-        my ($meta_number, $entity_id, $id) =
-            split /:/, $request->{"select_$rc"};
+        my ($meta_number, $entity_id, $id) = split /:/, $row_id;
+        my $eca = "$meta_number:$entity_id";
+        $languages{$eca} //= $request->{"language_${row_id}"};
         if (defined $id) {
-            $filters{"$meta_number:$entity_id"} //= [];
-            push $filters{"$meta_number:$entity_id"}->@*, $id;
+            $filters{$eca} //= [];
+            push $filters{$eca}->@*, $id;
         }
         else {
-            $filters{"$meta_number:$entity_id"} = 1;
+            $filters{$eca} = 1;
         }
     }
 
@@ -93,9 +302,10 @@ sub generate_statement {
         my ($meta_number, $entity_id) = split /:/, $eca;
         my $company = LedgerSMB::Entity::get($entity_id);
         my $credit_act =
-              LedgerSMB::Entity::Credit_Account->get_by_meta_number(
-                 $meta_number, $request->{entity_class}
-        );
+            LedgerSMB::Entity::Credit_Account->new(
+                dbh => $request->{dbh},
+                entity_class => $request->{entity_class})
+            ->get_by_meta_number($meta_number);
         my ($location) = LedgerSMB::Entity::Location->get_active(
              $request, {entity_id => $entity_id,
                         credit_id => $credit_act->{id},
@@ -109,135 +319,112 @@ sub generate_statement {
         my @contact_info = LedgerSMB::Entity::Contact->list(
                  {entity_id => $entity_id, credit_id => $credit_act->{id} }
         );
-        $request->{entity_id} = $entity_id;
         my $aging_report = LedgerSMB::Report::Aging->new(
+            %$request,
+            to_date   => $request->parse_date( $request->{to_date} ),
             (ref $filters{$eca}) ? (details_filter => $filters{$eca}) : (),
-            %$request);
-        $aging_report->run_report;
+            languages => $request->enabled_languages,
+            entity_id => $entity_id,
+            credit_id => $credit_act->id,
+            formatter_options => $request->formatter_options,
+            );
+        $aging_report->run_report($request);
+        $aging_report->format_money_columns;
         my $statement = {
               aging => $aging_report,
              entity => $company,
+     credit_account => $credit_act,
             address => $location,
-           contacts => \@contact_info
+           contacts => \@contact_info,
+           language => $languages{$eca}
         };
         push @statements, $statement;
-        last if $request->{media} eq 'email';
     }
-    $request->{report_type} = $rtype;
-    my $template = LedgerSMB::Template->new( # printed document
-        path => 'DB',
-        dbh  => $request->{dbh},
-        locale => $request->{_locale},
-        template => $request->{print_template},
-        #language => $language->{language_code}, #TODO
-        format => uc $request->{print_format},
-        method => $request->{media},
-    );
+
+    my $format    = uc $request->{print_format};
+    my $extension = lc $request->{print_format};
+    my $sink;
     if ($request->{media} eq 'email') {
-        my $statement = $statements[0];
-        $template->render(
-            {
-                statements => \@statements,
-                DBNAME     => $request->{company},
-            });
-
-        my (@to, @cc, @bcc);
-        # Select billing or regular addresses from the ECA
-        for my $class (CC_BILLING_EMAIL_TO, CC_EMAIL_TO) {
-            last if @to;
-            @to = grep {
-                $_->class_id == $class and $_->credit_id
-            } $statement->{contacts}->@*;
-        }
-        for my $class (CC_BILLING_EMAIL_CC, CC_EMAIL_CC) {
-            last if @cc;
-            @cc = grep {
-                $_->class_id == $class and $_->credit_id
-            } $statement->{contacts}->@*;
-        }
-        for my $class (CC_BILLING_EMAIL_BCC, CC_EMAIL_BCC) {
-            last if @bcc;
-            @bcc = grep {
-                $_->class_id == $class and $_->credit_id
-            } $statement->{contacts}->@*;
-        }
-        # Select billing or regular addresses from the entity
-        for my $class (CC_BILLING_EMAIL_TO, CC_EMAIL_TO) {
-            last if @to;
-            @to = grep {
-                $_->class_id == $class and not $_->credit_id
-            } $statement->{contacts}->@*;
-        }
-        for my $class (CC_BILLING_EMAIL_CC, CC_EMAIL_CC) {
-            last if @cc;
-            @cc = grep {
-                $_->class_id == $class and not $_->credit_id
-            } $statement->{contacts}->@*;
-        }
-        for my $class (CC_BILLING_EMAIL_BCC, CC_EMAIL_BCC) {
-            last if @bcc;
-            @bcc = grep {
-                $_->class_id == $class and not $_->credit_id
-            } $statement->{contacts}->@*;
-        }
-
-        my $wf  = FACTORY()->create_workflow('Email');
-        my $ctx = $wf->context;
-        $ctx->param( 'from' => $request->setting->get( 'default_email_from' ) );
-        $ctx->param( 'to'  => join(', ', map { $_->contact } @to) );
-        $ctx->param( 'cc'  => join(', ', map { $_->contact } @cc) );
-        $ctx->param( 'bcc' => join(', ', map { $_->contact } @bcc) );
-
-        my $body = $template->{output};
-        utf8::encode($body) if utf8::is_utf8($body);  ## no critic
-        my $att = {
-            content   => $body,
-            mime_type => $template->{mimetype},
-            file_name => 'aging-report.' . lc($request->{print_format}),
-        };
-        $ctx->param( attachment => $att );
-        $wf->execute_action( 'Attach' );
-
-        return [ HTTP_SEE_OTHER,
-                 [ Location =>
-                   'email.pl?id=' . $wf->id
-                   . '&action=render&callback=reports.pl%3F'
-                   . 'report_name%3Daging'
-                   . '%26module_name%3Dgl'
-                   . '%26action%3Dstart_report'
-                   . '%26entity_class%3D' . $request->{entity_class} ],
-                 [ '' ] ];
-    } elsif ($request->{media} eq 'screen'){
-        $template->render(
-            {
-                statements => \@statements,
-                DBNAME     => $request->{company},
-            });
-        my $body = $template->{output};
-        utf8::encode($body) if utf8::is_utf8($body);  ## no critic
-        my $filename = 'aging-report.' . lc($request->{print_format});
-        return
-            [ HTTP_OK,
-              [
-               'Content-Type' => $template->{mimetype},
-               'Content-Disposition' => qq{attachment; filename="$filename"},
-              ],
-              [ $body ] ];
-    } else {
-        $template->render({ statements => \@statements });
-        LedgerSMB::Legacy_Util::output_template($template, $request);
-        $request->{module_name}='gl';
-        $request->{report_name}='aging';
-        return LedgerSMB::Scripts::reports::start_report($request);
+        $sink = LedgerSMB::Template::Sink::Email->new(
+            wire => $request->{_wire},
+            from => $request->setting->get( 'default_email_from' ),
+            cc   => $request->setting->get( 'default_email_cc' ),
+            bcc  => $request->setting->get( 'default_email_bcc' ),
+            );
     }
-    # Unreachable
+    elsif ($request->{media} eq 'screen') {
+        $sink = LedgerSMB::Template::Sink::Screen->new(
+            wire         => $request->{_wire},
+            archive_name => 'aging-report.zip',
+            );
+    }
+    else {
+        my $cmd = $request->{_wire}->get( 'printers' )->get( $request->{media} );
+        unless ($cmd) {
+            die "No printer configured for '$request->{media}'";
+        }
+        $sink = LedgerSMB::Template::Sink::Printer->new(
+            wire    => $request->{_wire},
+            command => $cmd,
+            printer => $request->{media}
+            );
+    }
+
+    my @results = ();
+    for my $statement (@statements) {
+        my $template =
+            LedgerSMB::Template->new(
+                path            => 'DB',
+                dbh             => $request->{dbh},
+                locale          => $request->{_locale},
+                template        => $request->{print_template},
+                language        => $statement->{language},
+                method          => $request->{media},
+                format_plugin   => ($request->{_wire}->get( 'output_formatter' )
+                                    ->get( $request->{print_format})),
+                formatter_options => $request->formatter_options,
+                );
+
+        $template->render(
+            {
+                statements => [ $statement ],
+                DBNAME     => $request->{company},
+            });
+
+        my $wf = $sink->append(
+            $template,
+            callback       => 'reports.pl?__action=start_report&report_name=aging&module_name=gl&entity_class=2',
+            filename       => "aging-report.$extension",
+            name           => $statement->{entity}->name,
+            credit_account => $statement->{credit_account}->description,
+            _billing_mail_addresses($statement->{contacts}),
+            );
+
+        if ($wf) {
+            push @results, {
+                id             => $wf->id,
+                name           => $statement->{entity}->name,
+                credit_account => $statement->{credit_account}->description,
+            };
+        }
+    }
+
+    if (my $sink_output = $sink->render($request)) {
+        return $sink_output;
+    }
+
+    my $wf = $request->conn->workflows->create( 'Aging statement batch',
+                                                { results => \@results } );
+    $request->{workflow_id} = $wf->id;
+
+    return _render_statement_batch($request, $wf);
 }
 
 =back
 
 =head1 LICENSE AND COPYRIGHT
 
-Copyright (C) 2012 The LedgerSMB Core Team
+Copyright (C) 2012-2024 The LedgerSMB Core Team
 
 This file is licensed under the GNU General Public License version 2, or at your
 option any later version.  A copy of the license should have been included with

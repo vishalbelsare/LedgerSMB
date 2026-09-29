@@ -5,16 +5,12 @@ DIST_VER=$(shell git rev-parse --short HEAD)
 DIST_DIR=/tmp
 
 ifeq ($(CI),true)
-	NPM_COMMAND=ci
+	YARN_COMMAND=install --immutable
 else
-	NPM_COMMAND=install
+	YARN_COMMAND=install
 endif
 
-ifeq ($(DIST_VER),travis)
-DIST_DEPS=cached_dojo dbdocs
-else
-DIST_DEPS=dojo dbdocs
-endif
+DIST_DEPS=js dbdocs
 
 ifeq ("$(wildcard /.dockerenv)","")
 ifneq ($(origin CONTAINER),undefined)
@@ -22,7 +18,7 @@ DOCKER_CMD=docker exec -ti $(CONTAINER)
 endif
 endif
 
-PHERKIN_OPTS ?= --tags ~@wip $(PHERKIN_EXTRA_OPTS)
+PHERKIN_OPTS ?= --tags 'not @wip' $(PHERKIN_EXTRA_OPTS)
 
 
 
@@ -41,20 +37,28 @@ Help on using this Makefile
   The following make targets are available
     - help         : This help text
     - dist         : Builds the release distribution archive
-    - dojo         : Builds the minified dojo blob we serve to clients
+    - js           : Builds the minified javascript blob we serve to clients
+    - jsdev        : Builds JS assets with Vue debugger enabled
+    - jslint       : Runs 'eslint' on the JS code (FIX=1 reformats)
     - dbdocs       : Builds the PDF, SVG and PNG schema documentation
                      (without rebuilding the inputs)
     - pod          : Builds POD documentation
+    - api          : Builds API documentation
     - pot          : Builds LedgerSMB.pot translation lexicon
     - readme       : Builds the README.md
     - test         : Runs tests (TESTS='t/')
+    - serve        : Runs the 'webpack serve' command
     - devtest      : Runs all tests including development tests (TESTS='t/ xt/')
+    - jstest       : Runs all UI tests (TESTS='UI/tests')
+    - testdb       : Creates test database (TESTDB='test')
+                     with user (TESTUSER='test')
+                     and config (TESTCONF='locale/coa/us/General.xml')
     - pherkin      : Runs all BDD tests with 'pherkin' (instead of 'prove')
 
     - blacklist    : Builds sql blacklist (required after adding functions)
 
-The targets 'test', 'devtest' and 'pherkin' take a TESTS parameter which
-can be used to specify a subset of tests to be run.
+The targets 'test', 'devtest', 'jstest' and 'pherkin' take a TESTS parameter
+which can be used to specify a subset of tests to be run.
 
 endef
 export HELP
@@ -62,60 +66,60 @@ export HELP
 help:
 	@echo "$$HELP"
 
-# make dojo
-#   builds dojo for production/release
+# make js
+#   builds js assets for production/release
 SHELL := /bin/bash
-HOMEDIR := ~/dojo_archive
-SHA := $(shell find UI/js-src/lsmb node_modules/dojo node_modules/dojo-webpack-plugin node_modules/dijit package.json webpack.config.js -exec sha1sum {} + 2>&1 | sort | sha1sum | cut -d' ' -f 1)
-ARCHIVE := $(HOMEDIR)/UI_js_$(SHA).tar
-TEMP := $(HOMEDIR)/_UI_js_$(SHA).tar
-FLAG := $(HOMEDIR)/building_UI_js_$(SHA)
 
 dbdocs:
+ifneq ($(origin DBNAME),undefined)
+ifneq ($(origin DOCKER_CMD),undefined)
+	$(DOCKER_CMD) make dbdocs DBNAME="$(DBNAME)"
+else
+	-dropdb -h "$${PGHOST:-localhost}" -U "$${PGUSER:-postgres}" $(DBNAME)
+	perl -Ilib bin/ledgersmb-admin create $${PGUSER:-postgres}@$${PGHOST:-localhost}/$(DBNAME)
+	( cd doc/database ; postgresql_autodoc -h "$${PGHOST:-localhost}" -d "$(DBNAME)" -U "$${PGUSER:-postgres}" )
+endif
+endif
 	$(DOCKER_CMD) dot -Tsvg doc/database/ledgersmb.dot -o doc/database/ledgersmb.svg
 	$(DOCKER_CMD) dot -Tpdf doc/database/ledgersmb.dot -o doc/database/ledgersmb.pdf
 
-npm_install:
-	$(DOCKER_CMD) npm $(NPM_COMMAND) --no-save
+js_deps_install:
+	$(DOCKER_CMD) $(SHELL) -c 'cd UI && yarn $(YARN_COMMAND)'
 
-dojo: npm_install
-	$(DOCKER_CMD) npm run build
+js: js_deps_install
+	$(DOCKER_CMD) $(SHELL) -c 'cd UI && yarn run build'
 
-devdojo: npm_install
-	$(DOCKER_CMD) npm run build:dev
+jsdev: js_deps_install
+	$(DOCKER_CMD) $(SHELL) -c 'cd UI && yarn run build:dev'
 
-readme: npm_install
-	$(DOCKER_CMD) npm run readme
+lint:
+	$(DOCKER_CMD) $(SHELL) -c 'cd UI && yarn run lint'
 
-# TravisCI specific target -- need to find a way to get rid of it
-dojo_archive: dojo
-# TODO: Protect for concurrent invocations
-	mkdir -p $(HOMEDIR)
-	touch $(FLAG)
-	tar cf $(TEMP) UI/js
-	mv $(TEMP) $(ARCHIVE)
-	rm $(FLAG)
-
-# TravisCI specific target -- need to find a way to get rid of it
-cached_dojo:
-ifeq ($(wildcard $(ARCHIVE)),)
-	$(MAKE) dojo_archive
+jslint:
+ifneq ($(origin FIX),undefined)
+	$(DOCKER_CMD) $(SHELL) -c 'cd UI && yarn run lint:js:fix && yarn run lint:vue:fix'
+else
+	$(DOCKER_CMD) $(SHELL) -c 'cd UI && yarn run lint:js && yarn run lint:vue'
 endif
-	tar xf $(ARCHIVE)
 
+readme: js_deps_install
+	$(DOCKER_CMD) $(SHELL) -c 'cd UI && yarn run readme'
 
 blacklist:
 	$(DOCKER_CMD) perl -Ilib -Iold/lib utils/devel/makeblacklist.pl --regenerate
 
 dist: $(DIST_DEPS)
 	test -d $(DIST_DIR) || mkdir -p $(DIST_DIR)
-	find . | grep -vE '^.$$|^\./\.|^\./node_modules/|\.(uncompressed|consoleStripped)\.js$$|.js.map$$' | tar czf $(DIST_DIR)/ledgersmb-$(DIST_VER).tar.gz --transform 's,^./,ledgersmb/,' --no-recursion --files-from -
+	find . | grep -vE '^.$$|^\./\.|^\./UI/node_modules/|\.(uncompressed|consoleStripped)\.js$$|.js.map$$' | tar czf $(DIST_DIR)/ledgersmb-$(DIST_VER).tar.gz --transform 's,^./,ledgersmb/,' --no-recursion --files-from -
 
 pod:
 	rm -rf UI/pod
 	mkdir UI/pod
 	chmod 777 UI/pod
 	$(DOCKER_CMD) utils/devel/pod2projdocs.pl 2>&1 pod2projdocs.log
+
+api:
+	$(DOCKER_CMD) utils/devel/rebuild_api.sh 2>&1 rebuild_api.log
 
 pot:
 	chmod 666 locale/LedgerSMB.pot locale/po/*.po
@@ -124,26 +128,67 @@ pot:
 
 test: TESTS ?= t/
 test:
-	$(DOCKER_CMD) prove --time --recurse $(TESTS)
+	$(DOCKER_CMD) yath test --no-color $(TEST_OPTS) $(TESTS)
+
+testdb: TESTDB ?= test
+testdb: TESTUSER ?= test
+testdb: TESTCONF ?= locale/coa/us/General.xml
+testdb:
+	-$(DOCKER_CMD) dropdb --if-exists '$(TESTDB)'
+	$(DOCKER_CMD) bash -c "TESTUSER='$(TESTUSER)' utils/devel/create-test-db '${TESTDB}' '${TESTCONF}'"
 
 devtest: TESTS ?= t/ xt/
+devtest: PGTAP_OPTS ?= --pgtap-dbname=lsmb_test --pgtap-username=postgres \
+            --pgtap-psql=.circleci/psql-wrap
+devtest: BDD_OPTS ?= --Feature-tags='not (@wip or @extended)'
+
 devtest:
 ifneq ($(origin DOCKER_CMD),undefined)
 #       if there's a docker container, jump into it and run from there
-	$(DOCKER_CMD) make devtest TESTS="$(TESTS)"
+	$(DOCKER_CMD) make devtest TEST_OPTS="$(TEST_OPTS)" TESTS="$(TESTS)" \
+                           PGTAP_OPTS="$(PGTAP_OPTS)" BDD_OPTS="$(BDD_OPTS)"
 else
+	if [ -z "$${TEST_NO_VERIFY_SCHEMA}" ] && [ -z "$${PSGI_BASE_URL}" ]; then echo 'Missing environment variable $$PSGI_BASE_URL'; exit 1; fi
+	if [ -z "$${TEST_NO_VERIFY_SCHEMA}" ] && [ "$$(curl -s "$${PSGI_BASE_URL}/dev/status" | jq -r .schema)"  != "xyz" ]; then echo "Server misconfiguration; schema should be 'xyz'"; exit 1; fi
 #        the 'dropdb' command may fail, hence the prefix minus-sign
-	-dropdb lsmb_test
+	-PERL5OPT="" dropdb --if-exists lsmb_test
+	-PERL5OPT="" dropdb --if-exists lsmb_test_db_coa
+	-mkdir -p logs/screens
 	perl -Ilib bin/ledgersmb-admin create \
             $${PGUSER:-postgres}@$${PGHOST:-localhost}/$${PGDATABASE:-lsmb_test}#xyz
 	PGOPTIONS="-c search_path=xyz" yath test --no-color --retry=2 \
-            --pgtap-dbname=lsmb_test --pgtap-username=postgres \
-            --pgtap-psql=.circleci/psql-wrap \
-            --Feature-tags=~@wip \
-            --Feature-tags=~@extended \
-            $(TESTS)
+            $(PGTAP_OPTS) $(BDD_OPTS) $(TEST_OPTS) $(TESTS)
+endif
+
+jstest: TESTS ?=
+jstest: api
+ifneq ($(origin DOCKER_CMD),undefined)
+#       if there's a docker container, jump into it and run from there
+	$(DOCKER_CMD) make jstest TESTS="$(TESTS)"
+else
+# Test browser and API projects (API tests require a running server)
+	$(SHELL) -c 'cd UI && yarn vitest run $(TESTS)'
+endif
+
+serve:
+ifneq ($(origin DOCKER_CMD),undefined)
+#       if there's a docker container, jump into it and run from there
+	$(DOCKER_CMD) make serve
+else
+	$(SHELL) -c 'cd UI && yarn run webpack serve'
 endif
 
 pherkin: TESTS ?= xt/
 pherkin:
 	$(DOCKER_CMD) pherkin $(PHERKIN_OPTS) $(TESTS)
+
+docker-run:
+	$(DOCKER_CMD) bash
+
+docker-restart:
+ifneq ($(origin CONTAINER),undefined)
+	docker restart $(CONTAINER)
+else
+	echo No idea which container to restart...
+endif
+

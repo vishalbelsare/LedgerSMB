@@ -20,6 +20,16 @@ This method creates a new base request instance. It also validates the
 session/user credentials, as appropriate for the run mode.  Finally, it sets up
 the database connections for the user.
 
+=item verify_csrf()
+
+This method verifies the C<csrf_token> value in request parameters (held in
+C<$self->{csrf_token}>) against the value in the session object.  When one is
+not defined or they are not equal, this function returns a PSGI triplet to be
+used as the response resulting in a 400 -- Bad Request.
+
+When the CSRF token matches, C<undef> is returned indicating processing is to
+continue.
+
 =item open_form()
 
 This sets a $self->{form_id} to be used in later form validation (anti-XSRF
@@ -30,6 +40,10 @@ measure).
 This returns true if the form_id was associated with the session, and false if
 not and also removes the form_id from the
 session.
+
+=item conn()
+
+Returns a C<LedgerSMB::Company> instance.
 
 =item is_allowed_role({allowed_roles => @role_names})
 
@@ -84,7 +98,7 @@ Returns HTML errors in LedgerSMB. Needs refactored into a general Error class.
 
 =item get_user_info()
 
-Loads user configuration info from LedgerSMB::User
+Loads user configuration info from LedgerSMB::Company::User
 
 =item initialize_with_db
 
@@ -134,6 +148,41 @@ Month info in hashref format in 01 => January format
 
 =back
 
+=item enabled_languages()
+
+Returns arrayref of hashes with the following keys:
+
+=over
+
+=item value
+
+The code of the language as per the CLDR
+
+=item text
+
+The name of the language, translated into the user's selected language
+
+=back
+
+=item enabled_countries()
+
+Returns arrayref of hashes with the following keys:
+
+=over
+
+=item id
+
+The internal identifier for the country
+
+=item short_name
+
+The 2-leter iso code of the country
+
+=item name
+
+The country's full name translated into the user's selected language
+
+=back
 
 =item report_renderer_ui
 
@@ -141,7 +190,7 @@ Returns a code reference to render a report on the UI - pass as the
 named argument 'renderer' to the C<LedgerSMB::Report->render> method.
 
   my $report = LedgerSMB::Report
-  $report->render($request, renderer => $request->report_renderer_ui);
+  $report->render( renderer => $request->report_renderer_ui);
 
 
 =item report_renderer_doc
@@ -150,7 +199,7 @@ Returns a code reference to render a report as a document - pass as the
 named argument 'renderer' to the C<LedgerSMB::Report->render> method.
 
   my $report = LedgerSMB::Report
-  $report->render($request, renderer => $request->report_renderer_doc);
+  $report->render( renderer => $request->report_renderer_doc);
 
 
 =item render_report($report)
@@ -158,10 +207,32 @@ named argument 'renderer' to the C<LedgerSMB::Report->render> method.
 Renders the report as a document or UI element, depending on whether
 the request's C<format> property has a non-false value.
 
+
+=item parse_amount($amount)
+
+Parses the $amount given the session user's number formatting settings.
+
+=item parse_date($date)
+
+Parses the $date given the session user's date formatting settings.
+
+=item format_amount($amount, %args)
+
+formats the $amount given the session user's number formatting settings.
+
+=item format_date($date, %args)
+
+formats the $date given the session user's date formatting settings.
+
+=item formatter_options()
+
+Returns a hashref containing the session user's number and date formatting
+preferences for use in LedgerSMB::Report-s.
+
 =back
 
 
-=head1 Copyright (C) 2006-2017, The LedgerSMB core team.
+=head1 Copyright (C) 2006-2023, The LedgerSMB core team.
 
  # This work contains copyrighted information from a number of sources
  # all used with permission.
@@ -193,28 +264,30 @@ use Carp;
 use DateTime::Format::Duration::ISO8601;
 use Encode qw(perlio_ok);
 use HTTP::Headers::Fast;
-use HTTP::Status qw( HTTP_OK ) ;
+use HTTP::Status qw( HTTP_OK HTTP_BAD_REQUEST );
+use List::Util qw( pairgrep );
+use Locale::CLDR;
+use Locales unicode => 1;
 use Log::Any;
 use PGObject;
 use Plack;
-use URI::Escape;
+use URI;
 
-use LedgerSMB::Sysconfig;
-use LedgerSMB::App_State;
+use LedgerSMB::Company;
 use LedgerSMB::Locale;
-use LedgerSMB::User;
-use LedgerSMB::Company_Config;
+use LedgerSMB::PGDate;
+use LedgerSMB::PGNumber;
+use LedgerSMB::PSGI::Util qw( template_response );
 use LedgerSMB::Setting;
 use LedgerSMB::Template;
-use LedgerSMB::Template::UI;
 
-our $VERSION = '1.10.0-dev';
+our $VERSION = '1.14.0-dev';
 
 my $logger = Log::Any->get_logger(category => 'LedgerSMB');
 my $expiration_parser = DateTime::Format::Duration::ISO8601->new;
 
 sub new {
-    my ($class, $request) = @_;
+    my ($class, $request, $wire) = @_;
     my $self = {};
     bless $self, $class;
 
@@ -232,17 +305,39 @@ sub new {
     $self->{script} = $request->env->{'lsmb.script'};
     $self->{dbh} = $request->env->{'lsmb.app'};
     $self->{company} = $request->env->{'lsmb.session'}->{company};
+    $self->{_company_config} = $request->env->{'lsmb.settings'};
     $self->{_session_id} = $request->env->{'lsmb.session_id'};
     $self->{_create_session} = $request->env->{'lsmb.create_session_cb'};
     $self->{_logout} = $request->env->{'lsmb.invalidate_session_cb'};
     $self->{_setting} = $request->env->{'lsmb.setting'};
     $self->{_req} = $request;
+    $self->{_wire} = $wire;
+
+    my $q = $self->{query_string} // '';
+    $self->{_uri} = URI->new(
+        $request->env->{'lsmb.script'} . ($q ? "?$q" : ''),
+        $request->request_uri
+        );
 
     # Initialize ourselves from parameters in $self->{_req}
     $self->_process_args;
     $self->_set_default_locale();
 
     return $self;
+}
+
+
+sub verify_csrf {
+    my ($self) = @_;
+    my $got = $self->{csrf_token};
+    my $want = $self->{_req}->env->{'lsmb.session'}->{csrf_token};
+    if (not ($got and $want and $got eq $want)) {
+        $logger->debug( "CSRF have '$got'; want '$want'" );
+        return [ HTTP_BAD_REQUEST,
+                 [ 'Content-Type' => 'text/plain; charset=ascii' ],
+                 [ 'Bad request: CSRF token failure' ] ];
+    }
+    return undef;
 }
 
 sub open_form {
@@ -273,16 +368,11 @@ sub initialize_with_db {
     $sth->execute or die $sth->errstr;
     ($self->{warn_expire}) = $sth->fetchrow_array;
 
-    if ($self->{warn_expire}){
-        $sth = $self->{dbh}->prepare('SELECT user__check_my_expiration()')
-            or die $self->{dbh}->errstr;
-        $sth->execute or die $sth->errstr;
-        my ($pw_expires) = $sth->fetchrow_array;
-        $self->{pw_expires} = $expiration_parser->parse_duration($pw_expires);
-    }
-
-    $self->{_company_config} =
-        LedgerSMB::Company_Config::initialize($self);
+    $sth = $self->{dbh}->prepare('SELECT user__check_my_expiration()')
+        or die $self->{dbh}->errstr;
+    $sth->execute or die $sth->errstr;
+    my ($pw_expires) = $sth->fetchrow_array;
+    $self->{pw_expires} = $expiration_parser->parse_duration($pw_expires);
 
     $self->get_user_info;
 
@@ -297,18 +387,32 @@ sub initialize_with_db {
 }
 
 
+sub conn {
+    my $self = shift;
+    my $sess = $self->{_req}->env->{'lsmb.session'} // {};
+    return $self->{_conn} //= LedgerSMB::Company->new(
+        dbh      => $self->{dbh},
+        username => $sess->{username} || $sess->{login} || $self->{login},
+        wire     => $self->{_wire}
+        );
+}
+
+
 sub get_user_info {
     my ($self) = @_;
-    LedgerSMB::App_State::set_User(
-        $self->{_user} =
-        LedgerSMB::User->fetch_config($self));
+    $self->{_user} = $self->conn->current_user->preferences->fetch;
     return $self->{_user}->{language} ||= 'en';
 }
 
 sub _set_default_locale {
     my ($self) = @_;
 
-    my $lang = LedgerSMB::Sysconfig::language();
+    my $lang = $self->{_wire}->get( 'default_locale' )
+        ->from_header( $self->{_req}->header( 'Accept-Language' ) );
+
+    $self->{_user}->{language} = $lang;
+    $self->{_user}->{dateformat} = 'yyyy-mm-dd';
+    $self->{_user}->{numberformat} = '1000.00';
     $self->{_locale}=LedgerSMB::Locale->get_handle($lang);
     $self->error( __FILE__ . ':' . __LINE__
                   . ": Locale ($lang) not loaded: $!\n" )
@@ -339,16 +443,6 @@ sub _process_args {
         }
     }
     return;
-}
-
-sub get_relative_url {
-    my ($self) = @_;
-
-    return Encode::decode(
-        'utf8',
-        uri_unescape(
-            $self->{script} .
-            ($self->{query_string} ? "?$self->{query_string}" : '')));
 }
 
 sub upload {
@@ -404,11 +498,17 @@ sub upload {
             $encoding = 'UTF-32BE';
             $bom_length = 4;
         }
+        else { # no BOM
+            $encoding = 'UTF-8';
+            $bom_length = 0;
+        }
         sysseek $fh, 0, 0;
     }
 
-    if ($bom_length) {
+    if ($encoding) {
         binmode $fh, ':encoding(' . $encoding . ')';
+    }
+    if ($bom_length) {
         read($fh, my $unused, 1); # read the bom character
     }
 
@@ -418,7 +518,7 @@ sub upload {
 sub call_procedure {
     my $self = shift;
     my %args = @_;
-    $args{funcschema} ||= LedgerSMB::Sysconfig::db_namespace();
+    $args{funcschema} ||= $self->{_wire}->get( 'db' )->schema;
     $args{funcname} ||= $args{procname};
     $args{dbh} = $self->{dbh};
     $args{args} ||= [];
@@ -563,13 +663,57 @@ sub all_years {
                            } @years ] };
 }
 
+sub enabled_languages {
+    my ($self) = @_;
+
+    my $l = Locales->new( $self->{_user}->{language} );
+    return [
+        map {
+            +{
+                value => $_->{code},
+                text => ucfirst($l->get_language_from_code($_->{code})
+                                // $_->{description})
+            }
+        } $self->call_procedure(funcname => 'person__list_languages')
+        ];
+}
+
+sub enabled_countries {
+    my ($self) = @_;
+
+    my $regions = Locale::CLDR->new($self->{_user}->{language})->all_regions;
+    return [
+        map {
+            +{
+                $_->%*,
+                name => $regions->{$_->{short_name}} // $_->{name}
+            }
+        } $self->call_procedure(funcname => 'location_list_country')
+        ];
+}
 
 sub report_renderer_ui {
   my ($request) = @_;
-  my $ui = LedgerSMB::Template::UI->new_UI;
+  my $ui = $request->{_wire}->get('ui');
+  my $uri = $request->{_uri}->clone;
+  if (not pairgrep { $a eq 'company' } $uri->query_form) {
+      $uri->query_form(
+          $uri->query_form,
+          company => $request->{company},
+          );
+  }
 
   return sub {
       my ($template_name, $report, $vars, $cvars) = @_;
+      $vars->{REPORT_LINK} = $uri->as_string;
+      $vars->{SCRIPT} = $request->{script};
+      $vars->{SETTINGS} = {
+          papersize    => 'letter', # default paper size when not configured
+          (%{$request->{_company_config} // {}},)
+      };
+      $vars->{SETTINGS}->{company_name} ||= $request->{company};
+      $vars->{HIDDENS} = $request->{hiddens};
+      $vars->{FORM_ID} = $request->{form_id};
 
       return $ui->render($request, "Reports/$template_name", $vars, $cvars);
   };
@@ -577,45 +721,25 @@ sub report_renderer_ui {
 
 sub report_renderer_doc {
     my ($request) = @_;
+    my $renderer =
+        $request->{_wire}->get( 'output_formatter' )->report_doc_renderer(
+            $request->{_dbh},
+            uc($request->{format}) || 'HTML',
+            $request->formatter_options,
+            {
+                SETTINGS => {
+                     # default paper size when not configured
+                    papersize    => 'letter',
+                    (%{$request->{_company_config} // {}},)
+                }
+            });
 
     return sub {
         my ($template_name, $report, $vars, $cvars) = @_;
-        my $template = LedgerSMB::Template->new( # printed document
-            template => $template_name,
-            user     => $request->{_user},
-            path     => 'DB',
-            dbh      => $request->{dbh},
-            format   => uc($request->{format} || 'HTML'),
-            output_options => {
-                filename => $report->output_name($request),
-            },
-            );
 
-        $template->render($vars, $cvars);
-
-        my $charset = '';
-        $charset = '; charset=utf-8'
-                          if $template->{mimetype} =~ m!^text/!;
-
-        # $request->{mimetype} set by format
-        my $headers = [
-            'Content-Type' => "$template->{mimetype}$charset",
-            ];
-
-        # Use the same Content-Disposition criteria as _http_output()
-        my $name =
-            $template->{output_options}->{filename} . '.' . lc($request->{format});
-        if ($name) {
-            $name =~ s#^.*/##;
-            push @$headers,
-                ( 'Content-Disposition' =>
-                  qq{attachment; filename="$name"} );
-        }
-
-        my $body = $template->{output};
-        utf8::encode($body) if utf8::is_utf8($body); ## no critic
-
-        return [ HTTP_OK, $headers, [ $body ] ];
+        return template_response(
+            $renderer->( $template_name, $report, $vars, $cvars ),
+            disposition => 'attach' );
     };
 }
 
@@ -632,12 +756,64 @@ sub render_report {
         # render as UI element
         $renderer = $request->report_renderer_ui;
     }
-    return $report->render($request, renderer => $renderer);
+    return $report->render( renderer => $renderer);
+}
+
+
+sub parse_amount {
+    my ($request, $amount_str) = @_;
+    my $config = $request->{_user};
+
+    return LedgerSMB::PGNumber->from_input(
+        $amount_str,
+        format => $config->{numberformat}
+        );
+}
+
+sub parse_date {
+    my ($request, $date_str) = @_;
+    my $config = $request->{_user};
+
+    return LedgerSMB::PGDate->from_input(
+        $date_str,
+        format => $config->{dateformat}
+        );
+}
+
+sub format_amount {
+    my ($request, $amount, %args) = @_;
+    my $config = $request->{_user};
+
+    return $amount->to_output(
+        format => $config->{numberformat},
+        money_places => $request->{_company_config}->{decimal_places},
+        %args
+        );
+}
+
+sub format_date {
+    my ($request, $date, %args) = @_;
+    my $config = $request->{_user};
+
+    return $date->to_output(
+        format => $config->{dateformat},
+        %args
+        );
+}
+
+sub formatter_options {
+    my ($request) = @_;
+    my $config = $request->{_user};
+
+    return {
+        $config->%{ qw( numberformat dateformat ) },
+        money_places => $request->{_company_config}->{decimal_places},
+    };
 }
 
 =head1 LICENSE AND COPYRIGHT
 
-Copyright (C) 2006-2018 The LedgerSMB Core Team
+Copyright (C) 2006-2023 The LedgerSMB Core Team
 
 This file is licensed under the GNU General Public License version 2, or at your
 option any later version.  A copy of the license should have been included with

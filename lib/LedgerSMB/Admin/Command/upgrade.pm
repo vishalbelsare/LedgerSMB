@@ -1,4 +1,7 @@
 
+use v5.38;
+use experimental 'try';
+
 package LedgerSMB::Admin::Command::upgrade;
 
 =head1 NAME
@@ -7,23 +10,19 @@ LedgerSMB::Admin::Command::upgrade - ledgersmb-admin 'upgrade' command
 
 =cut
 
-use strict;
-use warnings;
-
 use Getopt::Long qw(GetOptionsFromArray);
 use LedgerSMB::Admin::Command;
 use LedgerSMB::Database;
 
 use Moose;
+use experimental 'try'; # Work around Moose re-enabling experimenal warnings
 extends 'LedgerSMB::Admin::Command';
 use namespace::autoclean;
 
-use Feature::Compat::Try;
-
 has modules_only => (is => 'ro');
 
-sub run {
-    my ($self, @args) = @_;
+sub run($self, @args) {
+
     my $logger = $self->logger;
 
     my $modules_only = 0;
@@ -33,8 +32,13 @@ sub run {
     GetOptionsFromArray(\@args, $options, 'modules-only');
     my $dbname = shift @args;
 
+    return $self->help('upgrade')
+        if !$dbname || $dbname eq 'help';
+
     if (!$modules_only) {
         die 'Non-modules-only modes not implemented yet!';
+        # TODO: When we *do* implement the regular upgrades,
+        # remember to '$db->run_postupgrade_hooks'
     }
     my $connect_data = {
         $self->config->get('connect_data')->%*,
@@ -63,8 +67,6 @@ sub run {
 
 
 __PACKAGE__->meta->make_immutable;
-
-1;
 
 __END__
 

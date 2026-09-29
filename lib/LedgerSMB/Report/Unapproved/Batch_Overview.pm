@@ -9,14 +9,13 @@ LedgerSMB
 =head1 SYNPOSIS
 
   my $report = LedgerSMB::Report::Unapproved::Batch_Overview->new(%$request);
-  $report->run;
-  $report->render($request, $format);
+  $report->render();
 
 =head1 DESCRIPTION
 
 This provides an ability to search for (and approve or delete) pending
 transactions grouped in batches.  This report only handles the batches
-themselves.  You cannot delete individual vouchers in this report.  For that,
+themselves.  You cannot delete individual transactions in this report.  For that,
 use LedgerSMB::Report::Unapproved::Batch_Detail instead.
 
 =head1 INHERITS
@@ -142,7 +141,7 @@ sub columns {
         {col_id => 'control_code',
          name => $self->_locale->text('Batch Number'),
          type => 'href',
-         href_base => 'vouchers.pl?action=get_batch&batch_id=',
+         href_base => 'batches.pl?__action=get_batch&batch_id=',
          pwidth => '3', },
 
         {col_id => 'description',
@@ -151,13 +150,7 @@ sub columns {
          pwidth => '6', },
 
         {col_id => 'transaction_total',
-         name => $self->_locale->text('AR/AP/GL Amount'),
-         type => 'text',
-         money => 1,
-         pwidth => '2', },
-
-        {col_id => 'payment_total',
-         name => $self->_locale->text('Payment Amount'),
+         name => $self->_locale->text('Batch total'),
          type => 'text',
          money => 1,
          pwidth => '2', },
@@ -186,14 +179,14 @@ Returns the inputs to display on header.
 sub header_lines {
     my ($self) = @_;
     return [
-            {name => 'class_name',
-             text => $self->_locale->text('Transaction Type')},
-            {name => 'description',
-             text => $self->_locale->text('Description')},
-            {name => 'amount_gt',
-             text => $self->_locale->text('Amount Greater Than')},
-            {name => 'amount_lt',
-             text => $self->_locale->text('Amount Less Than')},
+            {value => $self->class_name,
+             text  => $self->_locale->text('Transaction Type')},
+            {value => $self->description,
+             text  => $self->_locale->text('Description')},
+            {value => $self->amount_gt,
+             text  => $self->_locale->text('Amount Greater Than')},
+            {value => $self->amount_lt,
+             text  => $self->_locale->text('Amount Less Than')},
     ];
 }
 
@@ -217,7 +210,7 @@ Returns a list of buttons to be displayed at the bottom of the form.
 
 If the report includes 'approved' batches, no buttons are returned, as
 their actions are not possible once a batch has been approved (meaning its
-vouchers have been posted to the books).
+transactions have been posted to the books).
 
 =cut
 
@@ -233,21 +226,21 @@ sub set_buttons {
         # Results comprise only unapproved batches
         $buttons = [
             {
-                name  => 'action',
+                name  => '__action',
                 type  => 'submit',
                 text  => $self->_locale->text('Post'),
                 value => 'batch_approve',
                 class => 'submit',
             },
             {
-                name  => 'action',
+                name  => '__action',
                 type  => 'submit',
                 text  => $self->_locale->text('Delete'),
                 value => 'batch_delete',
                 class => 'submit',
             },
             {
-                name  => 'action',
+                name  => '__action',
                 type  => 'submit',
                 text  => $self->_locale->text('Unlock'),
                 value => 'batch_unlock',

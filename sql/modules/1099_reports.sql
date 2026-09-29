@@ -22,6 +22,15 @@ CREATE TYPE tax_form_report_item AS (
     entity_class integer,
     control_code text,
     meta_number character varying(32),
+    tax_id text,
+    sales_tax_id text,
+    line_one text,
+    line_two text,
+    line_three text,
+    city text,
+    state text,
+    mail_code text,
+    country_id integer,
     acc_sum numeric,
     invoice_sum numeric,
     total_sum numeric);
@@ -34,6 +43,15 @@ CREATE TYPE tax_form_report_detail_item AS (
     entity_class integer,
     control_code text,
     meta_number character varying(32),
+    tax_id text,
+    sales_tax_id text,
+    line_one text,
+    line_two text,
+    line_three text,
+    city text,
+    state text,
+    mail_code text,
+    country_id integer,
     acc_sum numeric,
     invoice_sum numeric,
     total_sum numeric,
@@ -41,43 +59,51 @@ CREATE TYPE tax_form_report_detail_item AS (
     duedate text,
     invoice_id int);
 
-CREATE OR REPLACE FUNCTION tax_form_summary_report(in_tax_form_id int, in_begin date, in_end date)
+CREATE OR REPLACE FUNCTION tax_form_summary_report(in_tax_form_id int, in_from_date date, in_to_date date)
 RETURNS SETOF tax_form_report_item AS $BODY$
               SELECT entity_credit_account.id,
                      company.legal_name, company.entity_id,
                      entity_credit_account.entity_class, entity.control_code,
                      entity_credit_account.meta_number,
-                     sum(CASE WHEN gl.amount_bc = 0 THEN 0
+                     company.tax_id, company.sales_tax_id,
+                     addr.line_one, addr.line_two, addr.line_three,
+                     addr.city, addr.state, addr.mail_code, addr.country_id,
+                     sum(CASE WHEN aa.amount_bc = 0 THEN 0
                               WHEN relation = 'acc_trans'
                           THEN ac.reportable_amount_bc * pmt.amount_bc
-                                / gl.amount_bc
+                                / aa.amount_bc
                           ELSE 0
-                      END * CASE WHEN gl.class = 'ap' THEN -1 else 1 end),
-                     sum(CASE WHEN gl.amount_bc = 0 THEN 0
+                      END * CASE WHEN aa.class = 'ap' THEN -1 else 1 end),
+                     sum(CASE WHEN aa.amount_bc = 0 THEN 0
                               WHEN relation = 'invoice'
                           THEN ac.reportable_amount_bc * pmt.amount_bc
-                               / gl.amount_bc
+                               / aa.amount_bc
                           ELSE 0
-                      END * CASE WHEN gl.class = 'ar' THEN -1 else 1 end),
-                     sum(CASE WHEN gl.amount_bc = 0 THEN 0
+                      END * CASE WHEN aa.class = 'ar' THEN -1 else 1 end),
+                     sum(CASE WHEN aa.amount_bc = 0 THEN 0
                           ELSE ac.reportable_amount_bc * pmt.amount_bc
-                                / gl.amount_bc
-                      END * CASE WHEN gl.class = 'ap' THEN -1 else 1 end
+                                / aa.amount_bc
+                      END * CASE WHEN aa.class = 'ap' THEN -1 else 1 end
                       * CASE WHEN ac.relation = 'invoice' then -1 else 1 end)
 
-                FROM (select id, transdate, entity_credit_account, invoice,
-                             amount_bc, 'ar' as class FROM ar
+                FROM (select txn.id, txn.transdate, entity_credit_account, invoice,
+                             amount_bc, 'ar' as class
+                        FROM ar JOIN transactions txn ON ar.trans_id = txn.id
+                       WHERE approved
                        UNION
-                      select id, transdate, entity_credit_account, invoice,
-                              amount_bc, 'ap' as class from ap
-                     ) gl
+                      select txn.id, txn.transdate, entity_credit_account, invoice,
+                             amount_bc, 'ap' as class
+                        FROM ap JOIN transactions txn ON ap.trans_id = txn.id
+                       WHERE approved
+                     ) aa
                JOIN (select trans_id, 'acc_trans' as relation,
                              sum(amount_bc) as amount_bc,
                              sum(case when atf.reportable then amount_bc else 0
                                  end) as reportable_amount_bc
-                        FROM  acc_trans
+                       FROM  acc_trans
                     LEFT JOIN ac_tax_form atf
                           ON (acc_trans.entry_id = atf.entry_id)
+                      WHERE acc_trans.approved
                        GROUP BY trans_id
                        UNION
                       select trans_id, 'invoice' as relation,
@@ -90,68 +116,106 @@ RETURNS SETOF tax_form_report_item AS $BODY$
                     LEFT JOIN invoice_tax_form itf
                           ON (invoice.id = itf.invoice_id)
                        GROUP BY trans_id
-                     ) ac ON (ac.trans_id = gl.id
-                             AND ((gl.invoice is true and ac.relation='invoice')
-                                  OR (gl.invoice is false
+                     ) ac ON (ac.trans_id = aa.id
+                             AND ((aa.invoice is true and ac.relation='invoice')
+                                  OR (aa.invoice is false
                                      and ac.relation='acc_trans')))
                 JOIN (SELECT ac.trans_id, sum(ac.amount_bc) as amount_bc,
-                             as_array(entry_id) as entry_ids,
-                             as_array(chart_id) as chart_ids,
+                             array_agg(entry_id) as entry_ids,
+                             array_agg(chart_id) as chart_ids,
                              count(*) as num
                         FROM acc_trans ac
-                       where chart_id in (select account_id
+                       WHERE approved
+                         AND chart_id in (select account_id
                                             from account_link
                                            where description like '%paid')
-                          AND transdate BETWEEN in_begin AND in_end
+                         AND transdate BETWEEN in_from_date AND in_to_date
                      group by ac.trans_id
-                     ) pmt ON  (pmt.trans_id = gl.id)
+                     ) pmt ON  (pmt.trans_id = aa.id)
                 JOIN entity_credit_account
-                  ON (gl.entity_credit_account = entity_credit_account.id)
+                  ON (aa.entity_credit_account = entity_credit_account.id)
                 JOIN entity ON (entity.id = entity_credit_account.entity_id)
                 JOIN company ON (entity.id = company.entity_id)
                 JOIN country_tax_form ON (entity_credit_account.taxform_id = country_tax_form.id)
-               WHERE country_tax_form.id = in_tax_form_id
-             GROUP BY legal_name, meta_number, company.entity_id, entity_credit_account.entity_class, entity.control_code, entity_credit_account.id
+  LEFT JOIN LATERAL (
+    SELECT * FROM (
+      select * from (
+        -- entity_credit_account.id ensures a 1-1 join with the left side
+        select entity_credit_account.id as eca_id, l.*
+          from eca_to_location eca2l
+                 join location_class lc on lc.id = eca2l.location_class
+                 join location l on l.id = eca2l.location_id
+         where eca2l.credit_id = entity_credit_account.id -- this is the LATERAL!
+           and lc.authoritative
+         order by lc.id, eca2l.created
+      ) y
+       union all
+      select * from (
+        -- entity_credit_account.id ensures a 1-1 join with the left side
+        -- and due to the join on the left side,
+        -- entity_credit_account.entity_id = entity.id
+        select entity_credit_account.id, l.*
+          from entity_to_location e2l
+                 join location_class lc on lc.id = e2l.location_class
+                 join location l on l.id = e2l.location_id
+         where e2l.entity_id = entity.id -- this is the LATERAL!
+           and lc.authoritative
+         order by lc.id, e2l.created
+      ) z
+    ) x
+    LIMIT 1
+  ) addr ON addr.eca_id = entity_credit_account.id
+  WHERE country_tax_form.id = in_tax_form_id
+  GROUP BY legal_name, meta_number, company.tax_id, company.sales_tax_id, company.entity_id,
+           entity_credit_account.entity_class, entity.control_code, entity_credit_account.id,
+           addr.line_one, addr.line_two, addr.line_three, addr.city, addr.state,
+           addr.mail_code, addr.country_id;
+
 $BODY$ LANGUAGE SQL;
 
 COMMENT ON FUNCTION tax_form_summary_report
-(in_tax_form_id int, in_begin date, in_end date) IS
+(in_tax_form_id int, in_from_date date, in_to_date date) IS
 $$This provides the total reportable value per vendor.  As per 1099 forms, these
 are cash-basis documents and show amounts paid.$$;
 
-CREATE OR REPLACE FUNCTION tax_form_details_report(in_tax_form_id int, in_begin date, in_end date, in_meta_number text)
+CREATE OR REPLACE FUNCTION tax_form_details_report(in_tax_form_id int, in_from_date date, in_to_date date, in_meta_number text)
 RETURNS SETOF tax_form_report_detail_item AS $BODY$
               SELECT entity_credit_account.id,
                      company.legal_name, company.entity_id,
                      entity_credit_account.entity_class, entity.control_code,
                      entity_credit_account.meta_number,
-                     sum(CASE WHEN gl.amount_bc = 0 then 0
+                     company.tax_id, company.sales_tax_id,
+                     addr.line_one, addr.line_two, addr.line_three,
+                     addr.city, addr.state, addr.mail_code, addr.country_id,
+                     sum(CASE WHEN aa.amount_bc = 0 then 0
                               when relation = 'acc_trans'
                           THEN ac.reportable_amount_bc * pmt.amount_bc
-                                / gl.amount_bc
+                                / aa.amount_bc
                           ELSE 0
-                      END * CASE WHEN gl.class = 'ap' THEN -1 else 1 end),
-                     sum(CASE WHEN gl.amount_bc = 0 then 0
+                      END * CASE WHEN aa.class = 'ap' THEN -1 else 1 end),
+                     sum(CASE WHEN aa.amount_bc = 0 then 0
                               WHEN relation = 'invoice'
                           THEN ac.reportable_amount_bc * pmt.amount_bc
-                               / gl.amount_bc
+                               / aa.amount_bc
                           ELSE 0
-                      END * CASE WHEN gl.class = 'ar' THEN -1 else 1 end),
-                     SUM(CASE WHEN gl.amount_bc = 0 THEN 0
+                      END * CASE WHEN aa.class = 'ar' THEN -1 else 1 end),
+                     SUM(CASE WHEN aa.amount_bc = 0 THEN 0
                               ELSE ac.reportable_amount_bc * pmt.amount_bc
-                               / gl.amount_bc
+                               / aa.amount_bc
                               END
-                         * CASE WHEN gl.class = 'ap' THEN -1 else 1 end
+                         * CASE WHEN aa.class = 'ap' THEN -1 else 1 end
                          * CASE WHEN relation = 'invoice' THEN -1 ELSE 1 END),
-                     gl.invnumber, gl.duedate::text, gl.id
-                FROM (select id, entity_credit_account, invnumber, duedate,
-                             amount_bc, transdate, 'ar' as class
-                        FROM ar
+                     aa.invnumber, aa.duedate::text, aa.id
+                FROM (select txn.id, entity_credit_account, invnumber, duedate,
+                             amount_bc, txn.transdate, 'ar' as class
+                        FROM ar JOIN transactions txn ON ar.trans_id = txn.id
+                       WHERE approved
                        UNION
-                      select id, entity_credit_account, invnumber, duedate,
-                             amount_bc, transdate, 'ap' as class
-                        FROM ap
-                     ) gl
+                      select txn.id, entity_credit_account, invnumber, duedate,
+                             amount_bc, txn.transdate, 'ap' as class
+                        FROM ap JOIN transactions txn ON ap.trans_id = txn.id
+                       WHERE approved
+                     ) aa
                 JOIN (select trans_id, 'acc_trans' as relation,
                              sum(amount_bc) as amount_bc,
                              sum(case when atf.reportable then amount_bc else 0
@@ -159,6 +223,7 @@ RETURNS SETOF tax_form_report_detail_item AS $BODY$
                         FROM  acc_trans
                    LEFT JOIN ac_tax_form atf
                           ON (acc_trans.entry_id = atf.entry_id)
+                       WHERE acc_trans.approved
                        GROUP BY trans_id
                        UNION
                       select trans_id, 'invoice' as relation,
@@ -171,69 +236,106 @@ RETURNS SETOF tax_form_report_detail_item AS $BODY$
                    LEFT JOIN invoice_tax_form itf
                           ON (invoice.id = itf.invoice_id)
                        GROUP BY trans_id
-                     ) ac ON (ac.trans_id = gl.id)
-                JOIN entity_credit_account ON (gl.entity_credit_account = entity_credit_account.id)
+                     ) ac ON (ac.trans_id = aa.id)
+                JOIN entity_credit_account ON (aa.entity_credit_account = entity_credit_account.id)
                 JOIN entity ON (entity.id = entity_credit_account.entity_id)
                 JOIN company ON (entity.id = company.entity_id)
                 JOIN country_tax_form ON (entity_credit_account.taxform_id = country_tax_form.id)
                 JOIN (SELECT ac.trans_id, sum(ac.amount_bc) as amount_bc,
-                             as_array(entry_id) as entry_ids,
-                             as_array(chart_id) as chart_ids,
+                             array_agg(entry_id) as entry_ids,
+                             array_agg(chart_id) as chart_ids,
                              count(*) as num
                         FROM acc_trans ac
-                       where chart_id in (select account_id
+                       WHERE approved
+                         AND chart_id in (select account_id
                                             from account_link
                                            where description like '%paid')
-                          AND transdate BETWEEN in_begin AND in_end
+                          AND transdate BETWEEN in_from_date AND in_to_date
                      group by ac.trans_id
-                     ) pmt ON  (pmt.trans_id = gl.id)
+                     ) pmt ON  (pmt.trans_id = aa.id)
+  LEFT JOIN LATERAL (
+    SELECT * FROM (
+      select * from (
+      select entity_credit_account.entity_id, l.*
+        from eca_to_location eca2l
+               join location_class lc on lc.id = eca2l.location_class
+               join location l on l.id = eca2l.location_id
+       where eca2l.credit_id = entity_credit_account.id -- this is the LATERAL!
+         and lc.authoritative
+       order by lc.id, eca2l.created
+      ) y
+       union all
+      select * from (
+      select entity.id, l.*
+        from entity_to_location e2l
+               join location_class lc on lc.id = e2l.location_class
+               join location l on l.id = e2l.location_id
+       where e2l.entity_id = entity.id -- this is the LATERAL!
+         and lc.authoritative
+       order by lc.id, e2l.created
+      ) z
+    ) x
+    LIMIT 1
+  ) addr ON addr.entity_id = entity.id
                 WHERE country_tax_form.id = in_tax_form_id AND meta_number = in_meta_number
-                GROUP BY legal_name, meta_number, company.entity_id, entity_credit_account.entity_class, entity.control_code, gl.invnumber, gl.duedate, gl.id, entity_credit_account.id
+  GROUP BY legal_name, meta_number, company.tax_id, company.sales_tax_id, company.entity_id,
+           entity_credit_account.entity_class, entity.control_code, entity_credit_account.id,
+           addr.line_one, addr.line_two, addr.line_three, addr.city, addr.state,
+           addr.mail_code, addr.country_id,
+           aa.invnumber, aa.duedate, aa.id
 $BODY$ LANGUAGE SQL;
 
 COMMENT ON FUNCTION tax_form_details_report
-(in_tax_form_id int, in_begin date, in_end date, in_meta_number text) IS
+(in_tax_form_id int, in_from_date date, in_to_date date, in_meta_number text) IS
 $$ This provides a list of invoices and transactions that a report hits.  This
 is intended to allow an organization to adjust what is reported on the 1099
 before printing them.$$;
 
 CREATE OR REPLACE FUNCTION tax_form_summary_report_accrual
-(in_tax_form_id int, in_begin date, in_end date)
+(in_tax_form_id int, in_from_date date, in_to_date date)
 RETURNS SETOF tax_form_report_item AS $BODY$
               SELECT entity_credit_account.id,
                      company.legal_name, company.entity_id,
                      entity_credit_account.entity_class, entity.control_code,
                      entity_credit_account.meta_number,
-                     sum(CASE WHEN gl.amount_bc = 0 THEN 0
+                     company.tax_id, company.sales_tax_id,
+                     addr.line_one, addr.line_two, addr.line_three,
+                     addr.city, addr.state, addr.mail_code, addr.country_id,
+                     sum(CASE WHEN aa.amount_bc = 0 THEN 0
                               WHEN relation = 'acc_trans'
                           THEN ac.reportable_amount_bc
                           ELSE 0
-                      END * CASE WHEN gl.class = 'ap' THEN -1 else 1 end),
-                     sum(CASE WHEN gl.amount_bc = 0 THEN 0
+                      END * CASE WHEN aa.class = 'ap' THEN -1 else 1 end),
+                     sum(CASE WHEN aa.amount_bc = 0 THEN 0
                               WHEN relation = 'invoice'
                           THEN ac.reportable_amount_bc
                           ELSE 0
-                      END * CASE WHEN gl.class = 'ar' THEN -1 else 1 end),
-                     sum(CASE WHEN gl.amount_bc = 0 THEN 0
+                      END * CASE WHEN aa.class = 'ar' THEN -1 else 1 end),
+                     sum(CASE WHEN aa.amount_bc = 0 THEN 0
                           ELSE ac.reportable_amount_bc
-                      END * CASE WHEN gl.class = 'ap' THEN -1 else 1 end
+                      END * CASE WHEN aa.class = 'ap' THEN -1 else 1 end
                       * CASE WHEN ac.relation = 'invoice' then -1 else 1 end)
 
-                FROM (select id, transdate, entity_credit_account, invoice,
-                             amount_bc, 'ar' as class FROM ar
-                       WHERE transdate BETWEEN in_begin AND in_end
+                FROM (select txn.id, txn.transdate, entity_credit_account, invoice,
+                             amount_bc, 'ar' as class
+                        FROM ar JOIN transactions txn ON ar.trans_id = txn.id
+                       WHERE approved
+                         AND txn.transdate BETWEEN in_from_date AND in_to_date
                        UNION
-                      select id, transdate, entity_credit_account, invoice,
-                              amount_bc, 'ap' as class from ap
-                       WHERE transdate BETWEEN in_begin AND in_end
-                     ) gl
+                      select txn.id, txn.transdate, entity_credit_account, invoice,
+                             amount_bc, 'ap' as class
+                        FROM ap JOIN transactions txn ON ap.trans_id = txn.id
+                       WHERE approved
+                         AND txn.transdate BETWEEN in_from_date AND in_to_date
+                     ) aa
                JOIN (select trans_id, 'acc_trans' as relation,
                              sum(amount_bc) as amount_bc,
                              sum(case when atf.reportable then amount_bc else 0
                                  end) as reportable_amount_bc
-                        FROM  acc_trans
+                       FROM  acc_trans
                     LEFT JOIN ac_tax_form atf
                           ON (acc_trans.entry_id = atf.entry_id)
+                      WHERE acc_trans.approved
                        GROUP BY trans_id
                        UNION
                       select trans_id, 'invoice' as relation,
@@ -246,65 +348,95 @@ RETURNS SETOF tax_form_report_item AS $BODY$
                     LEFT JOIN invoice_tax_form itf
                           ON (invoice.id = itf.invoice_id)
                        GROUP BY trans_id
-                     ) ac ON (ac.trans_id = gl.id
-                             AND ((gl.invoice is true and ac.relation='invoice')
-                                  OR (gl.invoice is false
+                     ) ac ON (ac.trans_id = aa.id
+                             AND ((aa.invoice is true and ac.relation='invoice')
+                                  OR (aa.invoice is false
                                      and ac.relation='acc_trans')))
                 JOIN entity_credit_account
-                  ON (gl.entity_credit_account = entity_credit_account.id)
+                  ON (aa.entity_credit_account = entity_credit_account.id)
                 JOIN entity ON (entity.id = entity_credit_account.entity_id)
                 JOIN company ON (entity.id = company.entity_id)
                 JOIN country_tax_form ON (entity_credit_account.taxform_id = country_tax_form.id)
-               WHERE country_tax_form.id = in_tax_form_id
-             GROUP BY legal_name, meta_number, company.entity_id, entity_credit_account.entity_class, entity.control_code, entity_credit_account.id
+  LEFT JOIN LATERAL (
+    SELECT * FROM (
+      select * from (
+      select entity_credit_account.entity_id, l.* from eca_to_location eca2l
+                        join location_class lc on lc.id = eca2l.location_class
+                        join location l on l.id = eca2l.location_id
+       where eca2l.credit_id = entity_credit_account.id and lc.authoritative
+       order by lc.id, eca2l.created
+      ) y
+       union all
+      select * from (
+      select entity.id, l.* from entity_to_location e2l
+                        join location_class lc on lc.id = e2l.location_class
+                        join location l on l.id = e2l.location_id
+       where e2l.entity_id = entity.id and lc.authoritative
+       order by lc.id, e2l.created
+      ) z
+    ) x
+    LIMIT 1
+  ) addr ON addr.entity_id = entity.id
+  WHERE country_tax_form.id = in_tax_form_id
+  GROUP BY legal_name, meta_number, company.tax_id, company.sales_tax_id, company.entity_id,
+           entity_credit_account.entity_class, entity.control_code, entity_credit_account.id,
+           addr.line_one, addr.line_two, addr.line_three, addr.city, addr.state,
+           addr.mail_code, addr.country_id;
+
 $BODY$ LANGUAGE SQL;
 
 COMMENT ON FUNCTION tax_form_summary_report_accrual
-(in_tax_form_id int, in_begin date, in_end date) IS
+(in_tax_form_id int, in_from_date date, in_to_date date) IS
 $$This provides the total reportable value per vendor.  As per 1099 forms, these
 are cash-basis documents and show amounts paid.$$;
 
 CREATE OR REPLACE FUNCTION tax_form_details_report_accrual
-(in_tax_form_id int, in_begin date, in_end date, in_meta_number text)
+(in_tax_form_id int, in_from_date date, in_to_date date, in_meta_number text)
 RETURNS SETOF tax_form_report_detail_item AS $BODY$
               SELECT entity_credit_account.id,
                      company.legal_name, company.entity_id,
                      entity_credit_account.entity_class, entity.control_code,
                      entity_credit_account.meta_number,
-                     sum(CASE WHEN gl.amount_bc = 0 then 0
+                     company.tax_id, company.sales_tax_id,
+                     addr.line_one, addr.line_two, addr.line_three,
+                     addr.city, addr.state, addr.mail_code, addr.country_id,
+                     sum(CASE WHEN aa.amount_bc = 0 then 0
                               when relation = 'acc_trans'
                           THEN ac.reportable_amount_bc
                           ELSE 0
-                      END * CASE WHEN gl.class = 'ap' THEN -1 else 1 end),
-                     sum(CASE WHEN gl.amount_bc = 0 then 0
+                      END * CASE WHEN aa.class = 'ap' THEN -1 else 1 end),
+                     sum(CASE WHEN aa.amount_bc = 0 then 0
                               WHEN relation = 'invoice'
                           THEN ac.reportable_amount_bc
                           ELSE 0
-                      END * CASE WHEN gl.class = 'ar' THEN -1 else 1 end),
-                     SUM(CASE WHEN gl.amount_bc = 0
+                      END * CASE WHEN aa.class = 'ar' THEN -1 else 1 end),
+                     SUM(CASE WHEN aa.amount_bc = 0
                                    THEN 0
                               ELSE ac.reportable_amount_bc
                               END
-                         * CASE WHEN gl.class = 'ap' THEN -1 else 1 end
+                         * CASE WHEN aa.class = 'ap' THEN -1 else 1 end
                          * CASE WHEN relation = 'invoice' THEN -1 ELSE 1 END),
-                     gl.invnumber, gl.duedate::text, gl.id
-                FROM (select id, entity_credit_account, invnumber, duedate,
-                             amount_bc, transdate, 'ar' as class
-                        FROM ar
-                       WHERE transdate BETWEEN in_begin AND in_end
+                     aa.invnumber, aa.duedate::text, aa.id
+                FROM (select txn.id, entity_credit_account, invnumber, duedate,
+                             amount_bc, txn.transdate, 'ar' as class
+                        FROM ar JOIN transactions txn ON ar.trans_id = txn.id
+                       WHERE approved
+                         AND txn.transdate BETWEEN in_from_date AND in_to_date
                        UNION
-                      select id, entity_credit_account, invnumber, duedate,
-                             amount_bc, transdate, 'ap' as class
-                        FROM ap
-                       WHERE transdate BETWEEN in_begin AND in_end
-                     ) gl
+                      select txn.id, entity_credit_account, invnumber, duedate,
+                             amount_bc, txn.transdate, 'ap' as class
+                        FROM ap JOIN transactions txn ON ap.trans_id = txn.id
+                       WHERE approved
+                         AND txn.transdate BETWEEN in_from_date AND in_to_date
+                     ) aa
                 JOIN (select trans_id, 'acc_trans' as relation,
                              sum(amount_bc) as amount_bc,
                              sum(case when atf.reportable then amount_bc else 0
                                  end) as reportable_amount_bc
                         FROM  acc_trans
-                   LEFT JOIN ac_tax_form atf
+                             LEFT JOIN ac_tax_form atf
                           ON (acc_trans.entry_id = atf.entry_id)
+                       WHERE acc_trans.approved
                        GROUP BY trans_id
                        UNION
                       select trans_id, 'invoice' as relation,
@@ -317,17 +449,41 @@ RETURNS SETOF tax_form_report_detail_item AS $BODY$
                    LEFT JOIN invoice_tax_form itf
                           ON (invoice.id = itf.invoice_id)
                        GROUP BY trans_id
-                     ) ac ON (ac.trans_id = gl.id)
-                JOIN entity_credit_account ON (gl.entity_credit_account = entity_credit_account.id)
+                     ) ac ON (ac.trans_id = aa.id)
+                JOIN entity_credit_account ON (aa.entity_credit_account = entity_credit_account.id)
                 JOIN entity ON (entity.id = entity_credit_account.entity_id)
                 JOIN company ON (entity.id = company.entity_id)
                 JOIN country_tax_form ON (entity_credit_account.taxform_id = country_tax_form.id)
-                WHERE country_tax_form.id = in_tax_form_id AND meta_number = in_meta_number
-                GROUP BY legal_name, meta_number, company.entity_id, entity_credit_account.entity_class, entity.control_code, gl.invnumber, gl.duedate, gl.id, entity_credit_account.id
+  LEFT JOIN LATERAL (
+    SELECT * FROM (
+      select * from (
+      select entity_credit_account.entity_id, l.* from eca_to_location eca2l
+                        join location_class lc on lc.id = eca2l.location_class
+                        join location l on l.id = eca2l.location_id
+       where eca2l.credit_id = entity_credit_account.id and lc.authoritative
+       order by lc.id, eca2l.created
+      ) y
+       union all
+      select * from (
+      select entity.id, l.* from entity_to_location e2l
+                        join location_class lc on lc.id = e2l.location_class
+                        join location l on l.id = e2l.location_id
+       where e2l.entity_id = entity.id and lc.authoritative
+       order by lc.id, e2l.created
+      ) z
+    ) x
+    LIMIT 1
+  ) addr ON addr.entity_id = entity.id
+  WHERE country_tax_form.id = in_tax_form_id AND meta_number = in_meta_number
+  GROUP BY legal_name, meta_number, company.tax_id, company.sales_tax_id, company.entity_id,
+           entity_credit_account.entity_class, entity.control_code, entity_credit_account.id,
+           addr.line_one, addr.line_two, addr.line_three, addr.city, addr.state,
+           addr.mail_code, addr.country_id,
+           aa.invnumber, aa.duedate, aa.id
 $BODY$ LANGUAGE SQL;
 
 COMMENT ON FUNCTION tax_form_details_report_accrual
-(in_tax_form_id int, in_begin date, in_end date, in_meta_number text) IS
+(in_tax_form_id int, in_from_date date, in_to_date date, in_meta_number text) IS
 $$ This provides a list of invoices and transactions that a report hits.  This
 is intended to allow an organization to adjust what is reported on the 1099
 before printing them.$$;

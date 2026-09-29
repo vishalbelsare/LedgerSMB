@@ -8,9 +8,8 @@ and more.
 
 =head1 SYNPOSIS
 
-  my $report = LedgerSMB::Report::GL->new(%$request);
-  $report->run;
-  $report->render($request, $format);
+  my $report = LedgerSMB::Report::Contact::Search->new(%$request);
+  $report->render();
 
 =head1 DESCRIPTION
 
@@ -58,17 +57,17 @@ sub columns {
     return [
        {col_id => 'name',
             type => 'href',
-       href_base => "contact.pl?action=get$entity_class_param",
+       href_base => "contact.pl?__action=get$entity_class_param",
             name => $self->Text('Name') },
 
        {col_id => 'entity_control_code',
             type => 'href',
-       href_base => "contact.pl?action=get$entity_class_param",
+       href_base => "contact.pl?__action=get$entity_class_param",
             name => $self->Text('Control Code') },
 
        {col_id => 'meta_number',
             type => 'href',
-       href_base => "contact.pl?action=get$entity_class_param",
+       href_base => "contact.pl?__action=get$entity_class_param",
             name => $self->Text('Credit Account Number') },
 
        {col_id => 'credit_description',
@@ -101,10 +100,10 @@ sub name {
 sub header_lines {
     my ($self) = @_;
      return [
-            {name => 'name_part',
-             text => $self->Text('Name')},
-            {name => 'meta_number',
-             text => $self->Text('Account Number')}
+            {value => $self->name_part,
+             text  => $self->Text('Name')},
+            {value => $self->meta_number,
+             text  => $self->Text('Account Number')}
        ];
 }
 
@@ -240,12 +239,10 @@ Active items only to this date.
 =cut
 
 has active_date_from => (is => 'ro',
-                        isa => 'LedgerSMB::Moose::Date',
-                     coerce => 1,
+                        isa => 'LedgerSMB::PGDate',
                    required => 0);
 has active_date_to => (is => 'ro',
-                      isa => 'LedgerSMB::Moose::Date',
-                   coerce => 1,
+                      isa => 'LedgerSMB::PGDate',
                  required => 0);
 
 =item users
@@ -290,7 +287,7 @@ sub run_report {
 
 =head1 LICENSE AND COPYRIGHT
 
-Copyright (C) 2012 The LedgerSMB Core Team
+Copyright (C) 2012-2023 The LedgerSMB Core Team
 
 This file is licensed under the GNU General Public License version 2, or at your
 option any later version.  A copy of the license should have been included with

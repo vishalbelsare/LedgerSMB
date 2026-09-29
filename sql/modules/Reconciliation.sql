@@ -1,45 +1,153 @@
 
 set client_min_messages = 'warning';
 
-
--- The reconciliation reports have the following state transition diagram:
-
-
--- +----------+    +--------+    +------------+    +------------+
--- | Initial  +--->+ Saved  +--->+ Submitted  +-+->+ Accepted   |
--- +----------+    +-+------+    +------+-----+ |  +------------+
---                   | ^                |       |
---                   | \---Rejecting----/       |  +------------+
---                   \--------------------------+->+ Deleted    |
---                                                 -------------+
-
--- lines from acc_trans are referenced in the report lines. The cr_report_lines
--- are marked 'cleared' as soon as they are marked reconciled (and saved) in
--- the reconciliation screen.
-
--- When a report is Rejected, it's returned to the saved state for correction.
-
--- Upon *approval*, the 'cleared' status is written to the 'acc_trans' table,
--- which means that rejected or deleted reports don't have any impact on
--- the reconciliation state of the actual transactions.
+/*
+The reconciliation reports have the following state transition diagram:
 
 
++----------+    +--------+    +------------+     +------------+
+| Initial  +--->+ Saved  +--->+ Submitted  +-+-->+ Approved   |
++----------+    +-+------+    +------+-----+ |   +------------+
+                  | ^                |       |
+                  | \---Rejecting----/       |   +------------+
+                  \-------------------------/ \->+ Deleted    |
+                                                 +------------+
+
+The state diagram is reflected in the various table columns as follows
+(excluding the 'deleted' state, which has no rows in the database):
+
+|------------------------------+---------+-------+-----------+----------|
+| table column                 | initial | saved | submitted | approved |
+|------------------------------+---------+-------+-----------+----------|
+| cr_report.submitted          | false   | false | true      | true     |
+| cr_report.approved           | false   | false | false     | true     |
+| cr_report_line.cleared       | false   | t/f   | t/f       | t/f      |
+| cr_report_line_links.cleared | false   | false | true (2)  | true (2) |
+| acc_trans.cleared            | false   | false | false     | true (1) |
+|------------------------------+---------+-------+-----------+----------|
+
+(1): Only for those lines which have a corresponding cr_report_line_link
+record which is also marked "cleared". Note that a reconciliation report
+can have both cleared and uncleared lines in all states.
+
+(2): For all rows where the cr_report_line.cleared column is marked "cleared".
+
+
+The reasoning behind the difference in definition of the "cleared" column
+between the cr_report_line, cr_report_line_link and acc_trans tables is as
+follows:
+
+ * cr_report_line.cleared indicates if the line on the report is considered
+   to have cleared
+ * cr_report_line_link.cleared indicates (the intention to mark) an acc_trans
+   line as being cleared; the 'submitted' state comes with this intention
+ * acc_trans.cleared indicates that the line actually has been cleared
+
+
+|------------+-----------+--------------------------------------|
+| From state | To state  | Function name                        |
+|------------+-----------+--------------------------------------|
+| <start>    | Initial   | reconciliation__new_report_id        |
+| Initial    | Saved     | reconciliation__save_set             |
+| Saved      | Submitted | reconciliation__submit_set           |
+| Submitted  | Approved  | reconciliation__report_approve       |
+| Submitted  | Saved     | reconciliation__reject_set           |
+| Iniitial   | Deleted   | reconciliation__delete_unapproved    |
+| Saved      | Deleted   | reconciliation__delete_unapproved    |
+| Submitted  | Deleted   | reconciliation__delete_unapproved    |
+| Initial    | Deleted   | reconciliation__delete_my_report     |
+| Saved      | Deleted   | reconciliation__delete_my_report     |
+| Initial    | Initial   | recenciliation__pending_transactions |
+| Saved      | Saved     | recenciliation__pending_transactions |
+| Initial    | Initial   | reconciliation__add_entry            |
+| Saved      | Saved     | reconciliation__add_entry            |
+|------------+-----------+--------------------------------------|
+
+
+
+
+
+*/
 
 BEGIN;
 
-CREATE OR REPLACE FUNCTION reconciliation__submit_set(
-        in_report_id int, in_line_ids int[]) RETURNS bool AS
+CREATE OR REPLACE FUNCTION cr_report_submitted_update()
+RETURNS trigger
+AS
+$$
+BEGIN
+  UPDATE cr_report_line_links rll
+     SET cleared = rl.cleared and NEW.submitted
+    FROM cr_report_line rl
+   WHERE rll.report_line_id = rl.id
+         AND rl.report_id = NEW.id;
+
+  RETURN NEW;
+END;
+$$ LANGUAGE PLPGSQL;
+
+CREATE OR REPLACE FUNCTION cr_report_line_cleared_update()
+RETURNS trigger
+AS
+$$
+BEGIN
+  UPDATE cr_report_line_links rll
+     SET cleared = NEW.cleared and r.submitted
+    FROM cr_report r
+   WHERE rll.report_line_id = NEW.id
+         AND r.id = NEW.report_id;
+
+  RETURN NEW;
+END;
+$$ LANGUAGE PLPGSQL;
+
+CREATE OR REPLACE FUNCTION cr_report_line_link_insert()
+RETURNS trigger
+AS
+$$
+BEGIN
+  NEW.cleared = (select r.submitted and rl.cleared
+                   from cr_report_line rl
+                   join cr_report r on rl.report_id = r.id
+                  where rl.id = NEW.report_line_id);
+
+  RETURN NEW;
+END;
+$$ LANGUAGE PLPGSQL;
+
+-- drop and create, because only Pg14+ support CREATE OR REPLACE
+DROP TRIGGER IF EXISTS cr_report_links_update ON cr_report;
+CREATE TRIGGER cr_report_links_update AFTER UPDATE OF submitted
+    ON cr_report
+    FOR EACH ROW
+    EXECUTE PROCEDURE cr_report_submitted_update();
+
+-- drop and create, because only Pg14+ support CREATE OR REPLACE
+DROP TRIGGER IF EXISTS cr_report_line_links_update ON cr_report_line;
+CREATE TRIGGER cr_report_line_links_update AFTER UPDATE OF cleared
+    ON cr_report_line
+    FOR EACH ROW
+    EXECUTE PROCEDURE cr_report_line_cleared_update();
+
+-- drop and create, because only Pg14+ support CREATE OR REPLACE
+DROP TRIGGER IF EXISTS cr_report_line_link_insert ON cr_report_line_links;
+CREATE TRIGGER cr_report_line_link_insert BEFORE INSERT
+    ON cr_report_line_links
+    FOR EACH ROW
+    EXECUTE PROCEDURE cr_report_line_link_insert();
+
+-- drop and recreate because of the signature change.
+CREATE OR REPLACE FUNCTION reconciliation__submit_set(in_report_id int)
+RETURNS bool AS
 $$
 BEGIN
         UPDATE cr_report set submitted = true where id = in_report_id;
-        PERFORM reconciliation__save_set(in_report_id, in_line_ids);
 
         RETURN FOUND;
 END;
 $$ LANGUAGE PLPGSQL;
 
-COMMENT ON FUNCTION reconciliation__submit_set(
-        in_report_id int, in_line_ids int[]) IS
+COMMENT ON FUNCTION reconciliation__submit_set(in_report_id int) IS
 $$Submits a reconciliation report for approval.
 in_line_ids is used to specify which report lines are cleared, finalizing the
 report.$$;
@@ -96,12 +204,10 @@ to reject approval.$$;
 CREATE OR REPLACE FUNCTION reconciliation__save_set(
         in_report_id int, in_line_ids int[]) RETURNS bool AS
 $$
-        UPDATE cr_report_line SET cleared = false
-        WHERE report_id = in_report_id;
+        UPDATE cr_report_line SET cleared = (id = ANY(in_line_ids))
+         WHERE report_id = in_report_id;
 
-        UPDATE cr_report_line SET cleared = true
-        WHERE report_id = in_report_id AND id = ANY(in_line_ids)
-        RETURNING TRUE;
+        SELECT TRUE;
 $$ LANGUAGE SQL;
 
 COMMENT ON FUNCTION reconciliation__save_set(
@@ -176,25 +282,48 @@ $$ This is a simple filter that prevents updating or deleting reconciliation
 reports that have already been approved.  To purge old reconciliations you must
 disable the block_change_when_approved trigger on cr_report.$$;
 
-DROP FUNCTION IF EXISTS reconciliation__get_cleared_balance(int);
-CREATE OR REPLACE FUNCTION reconciliation__get_cleared_balance(in_chart_id int,
-   in_report_date date DEFAULT date_trunc('second', now()))
+CREATE OR REPLACE FUNCTION reconciliation__get_cleared_balance(
+  in_chart_id int,
+  in_report_date date DEFAULT date_trunc('second', now()),
+  in_fx_balance boolean DEFAULT false
+)
 RETURNS numeric AS
 $$
-    SELECT sum(ac.amount_bc) * CASE WHEN c.category in('A', 'E') THEN -1 ELSE 1 END
-        FROM account c
-        JOIN acc_trans ac ON (ac.chart_id = c.id)
-    JOIN (select id from transactions where approved) g ON g.id = ac.trans_id
-    WHERE c.id = $1 AND cleared
-      AND ac.approved IS true
-      AND ac.transdate <= in_report_date
+  SELECT CASE WHEN in_fx_balance THEN sum(ac.amount_tc)
+         ELSE sum(ac.amount_bc)
+         END * CASE WHEN c.category in('A', 'E') THEN -1 ELSE 1 END
+    FROM account c
+           JOIN acc_trans ac ON ac.chart_id = c.id
+           JOIN transactions g ON g.id = ac.trans_id
+   WHERE g.approved
+     AND c.id = in_chart_id
+     AND ac.approved
+     -- cleared using a report on or before in_report_date:
+     AND EXISTS (select 1
+                   from cr_report cr
+                          join cr_report_line crl on cr.id = crl.report_id
+                          join cr_report_line_links crll on crl.id = crll.report_line_id
+                  where cr.approved
+                    and cr.chart_id = in_chart_id
+                    and cr.end_date <= in_report_date
+                    and crl.cleared
+                    and crll.entry_id = ac.entry_id)
     GROUP BY c.id, c.category;
 $$ LANGUAGE sql;
 
-COMMENT ON FUNCTION reconciliation__get_cleared_balance(in_chart_id int,in_report_date date) IS
-$$ Gets the cleared balance of the account specified by chart_id, as of in_report_date.
-This is specified in normal format (i.e. positive numbers for debits for asset
-and espense accounts, and positive numbers for credits in other accounts
+COMMENT ON FUNCTION reconciliation__get_cleared_balance(in_chart_id int,
+                                                        in_report_date date,
+                                                        in_fx_balance boolean) IS
+$$ Gets the cleared balance of the account specified by chart_id, as cleared by reports
+on and before in_report_date. Returns the foreign currency balance when 'in_fx_balance'
+is true.
+
+Please note that the cleared balance amount as at a sperific date may differ from the value
+returned by this function, if transactions prior to in_report_date are cleared using reports
+on a date later than in_report_date.
+
+The returned value is specified in normal format (i.e. positive numbers for debits for asset
+and expense accounts, and positive numbers for credits in other accounts.
 
 Note that currently contra accounts will show negative balances.$$;
 
@@ -226,23 +355,21 @@ COMMENT ON  FUNCTION reconciliation__report_approve (in_report_id INT) IS
 $$Marks the report approved and marks all cleared transactions in it cleared.$$;
 
 
--- XXX Badly named, rename for 1.4.  --CT
-CREATE OR REPLACE FUNCTION reconciliation__new_report_id(
+CREATE OR REPLACE FUNCTION reconciliation__new_report(
     in_chart_id int,
     in_total numeric,
     in_end_date date,
-    in_recon_fx bool
-) returns INT as $$
-
-    INSERT INTO cr_report(chart_id, their_total, end_date, recon_fx)
-    values (in_chart_id, in_total, in_end_date, in_recon_fx);
-    SELECT currval('cr_report_id_seq')::int;
-
+    in_recon_fx bool,
+    in_workflow_id bigint
+) returns bigint as $$
+    INSERT INTO cr_report(chart_id, their_total, end_date, recon_fx, workflow_id)
+    values (in_chart_id, in_total, in_end_date, in_recon_fx, in_workflow_id)
+    returning id;
 $$ language 'sql';
 
-COMMENT ON FUNCTION reconciliation__new_report_id
-(in_chart_id int, in_total numeric, in_end_date date, in_recon_fx bool)  IS
-$$ Inserts creates a new report and returns the id.$$;
+COMMENT ON FUNCTION reconciliation__new_report
+(in_chart_id int, in_total numeric, in_end_date date, in_recon_fx bool, in_workflow_id bigint)  IS
+$$ Creates a new report and returns the id.$$;
 
 CREATE OR REPLACE FUNCTION reconciliation__add_entry(
     in_report_id INT,
@@ -416,11 +543,6 @@ wrap it in another function which can operate on a set, perhaps in 1.4....
 It returns the ID of the inserted/updated entry$$;
 
 
-DROP FUNCTION IF EXISTS
-  reconciliation__pending_transactions(in_end_date date,
-                                       in_chart_id integer,
-                                       in_report_id integer,
-                                       in_their_total numeric);
 CREATE OR REPLACE FUNCTION reconciliation__pending_transactions(
     in_report_id integer,
     in_their_total numeric
@@ -500,16 +622,16 @@ $$
 
         -- step 2: add lines part of a payment one line per payment
         for t_row in
-           select payment_id, array_agg(ac.entry_id) as entries,
+           select p.id as payment_id, array_agg(ac.entry_id) as entries,
                   sum(case when t_recon_fx then amount_tc
                            else amount_bc end) as our_balance,
                   payment_date, source
-             from payment_links pl
-             join acc_trans ac on pl.entry_id = ac.entry_id
-             join payment p on p.id = pl.payment_id
+             from transactions txn
+             join acc_trans ac on txn.id = ac.trans_id
+             join payment p on txn.id = p.trans_id
             where ac.chart_id = t_chart_id
-                  and pl.entry_id in (select entry_id from lines_to_be_added)
-           group by payment_id, payment_date, source
+                  and ac.entry_id in (select entry_id from lines_to_be_added)
+           group by p.id, payment_date, source
         loop
             insert into cr_report_line (report_id, scn, their_balance,
                                        our_balance, post_date, "user")
@@ -530,7 +652,18 @@ $$
                         join acc_trans ac on ac.source = rl.scn
                                              and ac.transdate = rl.post_date
                        where la.entry_id = ac.entry_id
-                             and rl.report_id = in_report_id)
+                             and rl.report_id = in_report_id
+                             -- exclude 'scn' values associated with more than one
+                             -- report line: the gl line can't be unambiguously
+                             -- combined with a payment; hence it can't serve as
+                             -- a correction...
+                             and not exists (select 1 from cr_report_line rli
+                                              where rl.post_date = rli.post_date
+                                                    and rl.report_id = rli.report_id
+                                                    and rli.scn = rl.scn
+                                                    and rl.id <> rli.id)
+                             and not exists (select 1 from payment p
+                                              where p.trans_id = ac.trans_id))
             where la.report_line_id is null
            returning report_line_id, entry_id
         )
@@ -538,9 +671,20 @@ $$
            set our_balance = (select sum(case when t_recon_fx then ac.amount_tc
                                               else ac.amount_bc end)
                                 from (
+                                     -- lines that were already there
                                      select report_line_id, entry_id
                                        from cr_report_line_links
                                      union all
+                                     -- lines identified in step (2)
+                                     -- (does not include 'matched_entries', because
+                                     -- the default transaction isolation [read
+                                     -- committed] freezes our view at query start,
+                                     -- which means lines_to_be_added isn't updated
+                                     -- by 'matched_entries', as we see it)
+                                     select report_line_id, entry_id
+                                       from lines_to_be_added
+                                     union all
+                                     -- lines identidief in this step
                                      select report_line_id, entry_id
                                        from matched_entries
                                 ) rll
@@ -690,9 +834,9 @@ $$
                         IN ('A', 'E') THEN sum(a.amount_bc) * -1
                 ELSE sum(a.amount_bc) END
         FROM acc_trans a
-        JOIN ( SELECT id FROM transactions WHERE approved IS true
-             ) gl ON a.trans_id = gl.id
-        WHERE a.approved IS TRUE
+        JOIN transactions txn on a.trans_id = txn.id
+             WHERE txn.approved IS TRUE
+                AND a.approved IS TRUE
                 AND a.chart_id = in_account_id
                 AND a.transdate <= in_date;
 
@@ -706,23 +850,32 @@ this is the credit balance.$$;
 
 CREATE OR REPLACE VIEW recon_payee AS
  SELECT DISTINCT ON (rr.id)
-   n.name AS payee, rr.id, rr.report_id, rr.scn, rr.their_balance, rr.our_balance, rr.errorcode, rr."user", rr.clear_time, rr.insert_time, rr.trans_type, rr.post_date, rr.ledger_id, ac.voucher_id, rr.overlook, rr.cleared
+      n.name AS payee, rr.id, rr.report_id, rr.scn, rr.their_balance,
+      rr.our_balance, rr."user", rr.clear_time, rr.insert_time, rr.trans_type,
+      rr.post_date, rr.cleared
    FROM cr_report_line rr
    LEFT JOIN cr_report_line_links rll ON rr.id = rll.report_line_id
    LEFT JOIN acc_trans ac ON rll.entry_id = ac.entry_id
-   LEFT JOIN gl ON ac.trans_id = gl.id
-   LEFT JOIN (( SELECT ap.id, e.name
-   FROM ap
-   JOIN entity_credit_account eca ON ap.entity_credit_account = eca.id
-   JOIN entity e ON eca.entity_id = e.id
-UNION
- SELECT ar.id, e.name
-   FROM ar
-   JOIN entity_credit_account eca ON ar.entity_credit_account = eca.id
-   JOIN entity e ON eca.entity_id = e.id)
-UNION
- SELECT gl.id, gl.description
-   FROM gl) n ON n.id = ac.trans_id;
+   LEFT JOIN gl ON ac.trans_id = gl.id -- this is a bug? why join on GL when the fields aren't used above?
+   LEFT JOIN (
+     SELECT *
+       FROM (
+         SELECT ap.trans_id as id, e.name
+           FROM ap
+                  JOIN entity_credit_account eca ON ap.entity_credit_account = eca.id
+                  JOIN entity e ON eca.entity_id = e.id
+          UNION
+         SELECT ar.trans_id as id, e.name
+           FROM ar
+                  JOIN entity_credit_account eca ON ar.entity_credit_account = eca.id
+                  JOIN entity e ON eca.entity_id = e.id
+       ) aa
+      UNION
+     SELECT txn.id, txn.description
+       FROM gl
+            JOIN transactions txn
+                ON gl.id = txn.id
+   ) n ON n.id = ac.trans_id;
 
 CREATE OR REPLACE FUNCTION reconciliation__report_details_payee (in_report_id INT) RETURNS setof recon_payee as $$
                 select * from recon_payee where report_id = in_report_id

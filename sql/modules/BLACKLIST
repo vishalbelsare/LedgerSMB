@@ -6,9 +6,11 @@ account__get_by_link_desc
 account__get_from_accno
 account__get_taxes
 account__is_recon
+account__is_used
 account__list_by_heading
 account__list_translations
 account__obtain_balance
+account__obtain_balance_by_currency
 account__obtain_starting_balance
 account__save
 account__save_tax
@@ -18,6 +20,7 @@ account_has_transactions
 account_heading__check_tree
 account_heading__delete
 account_heading__delete_translation
+account_heading__is_used
 account_heading__list
 account_heading__list_translations
 account_heading__save_translation
@@ -39,7 +42,6 @@ admin__save_user
 admin__search_users
 ar_ap__transaction_search
 ar_ap__transaction_search_summary
-array_endswith
 array_splice_from
 array_splice_to
 assembly__stock
@@ -73,6 +75,7 @@ asset_report__dispose
 asset_report__generate
 asset_report__generate_gl
 asset_report__get
+asset_report__get_cash_accts
 asset_report__get_disposal
 asset_report__get_disposal_methods
 asset_report__get_expense_accts
@@ -85,6 +88,8 @@ asset_report__save
 asset_report__search
 asset_report_partial_disposal_details
 avgcost
+batch__get
+batch__list
 batch__lock
 batch__lock_for_update
 batch__search
@@ -121,6 +126,7 @@ business_unit_class__get_modules
 business_unit_class__save
 business_unit_class__save_modules
 business_unit_get
+cdc_update_last_updated
 chart_get_ar_ap
 chart_list_all
 chart_list_cash
@@ -135,11 +141,11 @@ cogs__add_for_ar_line
 cogs__reverse_ap
 cogs__reverse_ar
 company__get
-company__get_all_accounts
 company__get_by_cc
 company__next_id
 company__save
 company_get_billing_info
+compound_array
 config_currency__delete
 config_currency__save
 config_gifi__delete
@@ -150,6 +156,9 @@ contact__search
 contact_class__list
 cr_coa_to_account_save
 cr_report_block_changing_approved
+cr_report_line_cleared_update
+cr_report_line_link_insert
+cr_report_submitted_update
 credit_limit__used
 currency__delete
 currency__get
@@ -164,9 +173,11 @@ deduction__list_types
 deduction__save
 defaults__get_contra_accounts
 defaults_get_defaultcurrency
+draft__delete_lines
 draft__search
 draft_approve
 draft_delete
+eca__delete
 eca__delete_contact
 eca__delete_location
 eca__delete_pricematrix
@@ -177,6 +188,7 @@ eca__get_pricematrix_by_pricegroup
 eca__get_taxes
 eca__history
 eca__history_summary
+eca__is_used
 eca__list_contacts
 eca__list_locations
 eca__list_notes
@@ -195,11 +207,13 @@ employee__list_managers
 employee__save
 employee__search
 employee_search
+entity__delete
 entity__delete_bank_account
 entity__delete_contact
 entity__delete_location
 entity__get
 entity__get_bank_account
+entity__is_used
 entity__list_bank_account
 entity__list_classes
 entity__list_contacts
@@ -288,6 +302,7 @@ journal__save_recurring
 journal__save_recurring_print
 journal__search
 journal__validate_entry
+language__is_used
 lastcost
 leap_days
 list_taxforms
@@ -314,7 +329,6 @@ lsmb__role_prefix
 lsmb_module__get
 lsmb_module__list
 menu_generate
-menu_insert
 mfg_lot__commit
 months_passed
 next_leap_year_calc
@@ -327,7 +341,6 @@ parts__get_by_id
 parts__get_by_partnumber
 parts__search_lite
 partsgroup__search
-payment__get_gl
 payment__overpayments_list
 payment__reverse
 payment__search
@@ -394,7 +407,7 @@ reconciliation__delete_my_report
 reconciliation__delete_unapproved
 reconciliation__get_cleared_balance
 reconciliation__get_current_balance
-reconciliation__new_report_id
+reconciliation__new_report
 reconciliation__pending_transactions
 reconciliation__previous_report_date
 reconciliation__reject_set
@@ -410,7 +423,6 @@ report__aa_outstanding
 report__aa_outstanding_details
 report__aa_transactions
 report__balance_sheet
-report__cash_summary
 report__coa
 report__general_balance
 report__gl
@@ -460,11 +472,15 @@ timecard__report
 timecard__save
 timecard_type__get
 timecard_type__list
-track_global_sequence
 trial_balance__generate
 trial_balance__heading_accounts
 trial_balance__list_headings
+trigger_duplicate_account_accno
+trigger_duplicate_account_heading_accno
+trigger_invoice_prevent_allocation_delete
+trigger_open_item_maintenance
 trigger_parts_short
+trigger_workflow_user
 unlock
 unlock_all
 user__change_password
@@ -472,9 +488,7 @@ user__check_my_expiration
 user__get_all_users
 user__get_preferences
 user__save_preferences
-voucher__delete
-voucher__list
-voucher_get_batch
+util__array_endswith
 wage__list_for_entity
 wage__list_types
 wage__save

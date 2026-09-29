@@ -82,27 +82,28 @@
 
 [%
     INCLUDE button element_data={
-       name = 'action',
+       name = '__action',
        value = 'save'
        text = text('Save')
-       accesskey = 'S'
+       'data-lsmb-doing' = text('Saving...')
+       'data-lsmb-done' = text('Saved')
     };
 
     IF form.id;
         INCLUDE button element_data={
-           name = 'action',
+           name = '__action',
            value = 'save_as_new'
            text = text('Save as new')
-           accesskey = 'N'
         };
     END;
 
     IF form.orphaned;
         INCLUDE button element_data={
-           name = 'action',
+           name = '__action',
            value = 'delete'
            text = text('Delete')
-           accesskey = 'D'
+           'data-lsmb-doing' = text('Deleting...')
+           'data-lsmb-done' = text('Deleted')
         };
     END;
 %]
@@ -137,22 +138,6 @@
     } %]
   </div>
 </div>
-[% IF form.id %]
-<div  class="inputline" id="obsolete-line">
-<label class="line" for='obsolete'>[% text('Obsolete') %]</label>
-[%
-        IF form.obsolete;
-           obsolete = 'CHECKED';
-        END;
-        INCLUDE input element_data={
-               name = 'obsolete'
-               type = 'checkbox',
-            checked = obsolete
-              value = '1'
-        } %]
-
-</div>
-[% END #  IF ID %]
 <div class="inputline" id="desc-line2">
    <label class="line" for="desc-a">[% text('Description') %]</label>
    <div class="inputgroup">
@@ -167,44 +152,6 @@
     } %]
    </div>
 </div>
-<div class="inputline" id="heading-line2">
-   <label class="line" for="heading-a">[% text('Heading') %]</label>
-   <div class="inputgroup">
-      [%
-    INCLUDE select element_data = {
-                  name = 'heading'
-               options = form.all_headings
-        default_values = [form.heading]
-             text_attr = 'text'
-            value_attr = 'id'
-                 class = 'account'
-                    id = 'heading-a'
-    }; %]
-   </div>
-</div>
-<div id="accdetails">
-[% IF form.gifi_list.size > 0 -%]
-<div class="inputline" id="gifi-line">
-   <label class="line" for="gifi-a">[% text('GIFI') %]</label>
-   <div class="inputgroup">
-       [%
-          FOREACH g IN form.gifi_list;
-             g.text = g.accno _ '--' _ g.description;
-          END;
-
-          INCLUDE select element_data={
-              name = 'gifi_accno'
-              default_values = [form.gifi_accno]
-              default_blank = 1
-              options = form.gifi_list
-              text_attr = 'text'
-              value_attr = 'accno'
-              id = 'gifi-a'
-          };
-       %]
-   </div>
-</div>
-[% END -%]
 <div class="inputline" id="acctype-line">
    <label class="line" for="category-a">[% text('Account Type') %]</label>
    <div class="inputgroup">
@@ -225,6 +172,92 @@
     }; %]
   </div>
 </div>
+<div class="inputline" id="heading-line2">
+   <label class="line" for="heading-a">[% text('Heading') %]</label>
+   <div class="inputgroup">
+      [%
+    INCLUDE select element_data = {
+                  name = 'heading'
+               options = form.all_headings
+        default_values = [form.heading]
+             text_attr = 'text'
+            value_attr = 'id'
+                 class = 'account'
+                    id = 'heading-a'
+    }; %]
+   </div>
+</div>
+<div class="inputline" id="heading-line2">
+   <label class="line" for="heading-a" title="[% text('Heading for negative assets reclassified as (positive) liabilities or the other way around') %]">[% text('Negative balance heading') %]</label>
+   <div class="inputgroup">
+      [%
+    INCLUDE select element_data = {
+                  name = 'heading_negative_balance'
+               options = form.all_headings
+         default_blank = 1
+        default_values = [form.heading_negative_balance]
+             text_attr = 'text'
+            value_attr = 'id'
+                 class = 'account'
+    }; %]
+   </div>
+</div>
+<fieldset id="accdetails" style="border:1px solid lightgrey;border-radius:4px;margin-top:2em;padding:1em;width:max-content">
+  <legend style="padding-left:1em;padding-right:1em;font-size:120%;font-weight:bold">Configuration</legend>
+<div class="inputline" id="summary-line">
+    <label class="line" for="summary-a">[% text('Summary account for') %]</label>
+    <div class="inputgroup">
+    [%
+        summary = [];
+
+        # Localize summary account_link descriptions
+        FOREACH account_link IN form.summary_link_descriptions;
+            IF account_link.description == 'IC';
+                # Retain historic override for Inventory
+                account_link.text = text('Inventory');
+            ELSE;
+                account_link.text = maketext(account_link.description);
+            END;
+
+            IF form.${account_link.description};
+                summary = account_link.description;
+            END;
+        END;
+
+        INCLUDE select element_data = {
+                   name = "summary"
+                options = form.summary_link_descriptions
+         default_values = summary
+          default_blank = 'true'
+              text_attr = 'text',
+             value_attr = 'description'
+                     id = 'summary-a'
+        };
+    %]
+    </div>
+</div>
+[% IF gifis.size > 0 -%]
+<div class="inputline" id="gifi-line">
+   <label class="line" for="gifi-a">[% text('GIFI') %]</label>
+   <div class="inputgroup">
+       [%
+          FOREACH g IN gifis;
+             g.text = g.accno _ '--' _ g.description;
+          END;
+
+          INCLUDE select element_data={
+              name = 'gifi_accno'
+              default_values = [form.gifi_accno]
+              default_blank = 1
+              options = gifis
+              text_attr = 'text'
+              value_attr = 'accno'
+              id = 'gifi-a'
+          };
+       %]
+   </div>
+</div>
+[% END -%]
 <div class="inputline" id="acc-options-line">
    <label class="line">[% text('Options') %]</label>
    <div class="inputgroup">
@@ -260,6 +293,35 @@
             checked = tax,
               value = '1'} %]
    </div>
+   <div class="inputgroup">
+      [%
+        IF form.AR OR form.AP;
+            form.open_items = 1;
+            disabled = 'DISABLED';
+        ELSE;
+            disabled = '';
+        END;
+        IF form.open_items; open_items = 'CHECKED'; END;
+        INCLUDE input element_data={
+               name = 'open_items',
+               type = 'checkbox',
+              label = text('Open items'),
+            checked = open_items,
+           disabled = disabled,
+              value = '1'} %]
+   </div>
+[% IF form.id %]
+   <div  class="inputgroup">
+     [%
+        INCLUDE input element_data={
+               name = 'obsolete'
+               type = 'checkbox'
+              label = text('Obsolete')
+            checked = form.obsolete ? 'checked' : ''
+              value = '1'
+        } %]
+   </div>
+[% END #  IF ID %]
 </div>
 [% IF form.custom_link_descriptions.size %]
 <div class="inputline" id="acc-custom-flags-line">
@@ -277,43 +339,11 @@
     [% END %]
 </div>
 [% END %]
-<div class="inputline" id="summary-line">
-    <label class="line" for="summary-a">[% text('Summary account for') %]</label>
-    <div class="inputgroup">
-    [%
-        summary = [];
-
-        # Localize summary account_link descriptions
-        FOREACH account_link IN form.summary_link_descriptions;
-            IF account_link.description == 'IC';
-                # Retain historic override for Inventory
-                account_link.text = text('Inventory');
-            ELSE;
-                account_link.text = maketext(account_link.description);
-            END;
-
-            IF form.${account_link.description};
-                summary = account_link.description;
-            END;
-        END;
-
-        INCLUDE select element_data = {
-                   name = "summary"
-                options = form.summary_link_descriptions
-         default_values = summary
-          default_blank = 'true'
-              text_attr = 'text',
-             value_attr = 'description'
-                     id = 'summary-a'
-        };
-    %]
-    </div>
-</div>
-</div> <!-- account details div -->
-<div id="dropdowns">
-<div class="subsectionhead">
+</fieldset> <!-- account details div -->
+<fieldset id="dropdowns" style="border:1px solid lightgrey;border-radius:4px;margin-top:2em;padding:1em;width:max-content">
+<legend class="subsectionhead" style="padding-left:1em;padding-right:1em;font-size:120%;font-weight:bold">
    [% text('Include in drop-down menus') %]
-</div>
+</legend>
 <div class="inputline" id="ar-line">
    <label class="line">[% text('Receivables') %]</label>
    <div class="inputgroup">
@@ -533,7 +563,7 @@
              value = 'asset_loss'} %]
    </div>
 </div>
-</div> <!-- dropdown div -->
+</fieldset> <!-- dropdown div -->
 
 <hr size="3" noshade="noshade" />
 
@@ -545,27 +575,28 @@
     };
 
     INCLUDE button element_data={
-       name = 'action',
+       name = '__action',
        value = 'save'
        text = text('Save')
-       accesskey = 'S'
+       'data-lsmb-doing' = text('Saving...')
+       'data-lsmb-done' = text('Saved')
     };
 
     IF form.id;
         INCLUDE button element_data={
-           name = 'action',
+           name = '__action',
            value = 'save_as_new'
            text = text('Save as new')
-           accesskey = 'N'
         };
     END;
 
     IF form.orphaned;
         INCLUDE button element_data={
-           name = 'action',
+           name = '__action',
            value = 'delete'
            text = text('Delete')
-           accesskey = 'D'
+           'data-lsmb-doing' = text('Deleting...')
+           'data-lsmb-done' = text('Deleted')
         };
     END;
 %]
@@ -625,11 +656,13 @@
    value = form.id
 }; %]
 [% PROCESS button element_data = {
-    name = 'action',
+    name = '__action',
     value = 'update_translations',
     type = 'submit',
     class = 'submit',
     text = text('Save Translations'),
+    'data-lsmb-doing' = text('Saving Translations...')
+    'data-lsmb-done' = text('Saved Translations')
 } %]
 </form>
 </div>

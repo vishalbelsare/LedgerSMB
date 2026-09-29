@@ -4,7 +4,7 @@
 <div id="budgets">
 <form data-dojo-type="lsmb/Form" method="post" action="[% request.script %]">
 <div id="budget-header">
-<div class="listtop">[% title %]</div>
+<div class="listtop">[% IF id ; text('Edit budget'); ELSE ; text('Add budget') ; END %]</div>
 <div class="input_row" id = "reference_row">
 <div class="input_group">
        [% INCLUDE input element_data = {
@@ -32,9 +32,8 @@
         [% INCLUDE input element_data = {
                 name = "start_date"
                 value = start_date
-                type = "text"
                 size = "11"
-                class = 'date'
+                type = "date"
                 label = text('Start Date') #'
         } %]
 </div>
@@ -42,9 +41,8 @@
         [% INCLUDE input element_data = {
                 name = "end_date"
                 value = end_date
-                type = "text"
                 size = "11"
-                class = 'date'
+                type = "date"
                 label = text('End Date') #'
         } %]
 </div>
@@ -67,13 +65,10 @@
                 [% INDEX= loop.count %]
                   <td>
                         [% IF displayrow.accnoset == 0 %]
-                              [% PROCESS input element_data = {
-                                      type = 'text'
-                                      name = "accno_$INDEX"
-                                      initial_value = displayrow.accno
-                                      class = 'AccountBox'
-                                      "data-dojo-type" = "lsmb/accounts/AccountSelector"
-                              } %]
+                           <lsmb-account-select name="accno_[% INDEX %]"
+                                                id="accno-[% INDEX %]"
+                                                value="[% displayrow.accno %]">
+                          </lsmb-account-select>
 
                           [% ELSE %]
 
@@ -95,7 +90,6 @@
                                   name = "debit_$INDEX"
                                   type = "text"
                                   size = 12
-                                  accesskey = displayrow.index
                           }  %]
 
                    </td>
@@ -162,7 +156,7 @@
 </div></div>
 <div class="inputrow">
 [% PROCESS button element_data = {
-        name = "action"
+        name = "__action"
        value = 'add_note'
         type = "submit"
        class = "submit"

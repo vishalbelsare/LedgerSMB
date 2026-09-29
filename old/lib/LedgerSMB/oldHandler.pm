@@ -44,22 +44,22 @@
 #
 #######################################################################
 
+use experimental qw(try isa);
+
 package lsmb_legacy;
 
-use LedgerSMB::User;
 use LedgerSMB::Form;
 use LedgerSMB::Locale;
 use LedgerSMB::App_State;
+use LedgerSMB::Company;
 use LedgerSMB::Middleware::SessionStorage;
 use LedgerSMB::Middleware::RequestID;
 use LedgerSMB::PSGI::Util;
-use LedgerSMB::Sysconfig;
+use LedgerSMB::StopProcessing;
 
-use Cookie::Baker;
-use Digest::MD5;
 use HTML::Escape;
 use Log::Any;
-use Feature::Compat::Try;
+use Scalar::Util qw(blessed);
 
 our $logger;
 
@@ -74,7 +74,7 @@ sub handle {
     #
     # Note that this function can receive a PSGI environment, but
     # modifications aren't marshalled back to the fork()ing process!
-    my ($class, $script_module, $psgi_env) = @_;
+    my ($class, $script_module, $psgi_env, $wire) = @_;
     my $script = $script_module . '.pl';
 
 
@@ -93,11 +93,12 @@ sub handle {
     $form = Form->new($params);
     my $session = $psgi_env->{'lsmb.session'};
     $form->{_session} = $session;
+    $form->{_wire} = $wire;
     @{$form}{qw/ session_id company /} =
         @{$session}{qw/ session_id company /};
 
     #make logger available to other old programs
-    $logger = Log::Any->get_logger(category => "lsmb.$script_module.$form->{action}");
+    $logger = Log::Any->get_logger(category => "lsmb.$script_module.$form->{__action}");
 
     local $SIG{__WARN__} = sub {
         my $msg = shift;
@@ -108,7 +109,10 @@ sub handle {
     };
 
 
-    $locale = LedgerSMB::Locale->get_handle( LedgerSMB::Sysconfig::language() )
+    $locale = LedgerSMB::Locale
+        ->get_handle($wire->get( 'default_locale' )
+                     ->from_header( $ENV{HTTP_ACCEPT_LANGUAGE} )
+        )
         or $form->error( __FILE__ . ':' . __LINE__ .
                          ": Locale not loaded: $!\n" );
 
@@ -127,11 +131,19 @@ sub handle {
 
         $form->{session_id} = $psgi_env->{'lsmb.session'}->{session_id};
         $form->db_init( $psgi_env->{'lsmb.app'},  \%myconfig );
-        my $path = LedgerSMB::PSGI::Util::cookie_path($ENV{SCRIPT_NAME});
 
+        $form->{_conn} = LedgerSMB::Company->new(
+            dbh      => $LedgerSMB::App_State::DBH,
+            username => $form->{_session}->{username} // $form->{_session}->{login},
+            wire     => $wire
+            );
         # we get rid of myconfig and use User as a real object
-        %myconfig = %{ LedgerSMB::User->fetch_config( $form ) };
-        LedgerSMB::App_State::set_User(\%myconfig);
+        %myconfig = %{
+            $form->{_conn}->current_user->preferences->fetch
+        };
+        $form->{_user} = \%myconfig;
+        $form->{_req} = Plack::Request::WithEncoding->new($psgi_env);
+
         map { $form->{$_} = $myconfig{$_} } qw(stylesheet timeout)
             unless ( $form->{type} and $form->{type} eq 'preferences' );
 
@@ -146,35 +158,35 @@ sub handle {
         $logger->trace("requiring old/bin/$script");
         require "old/bin/$script";
 
-        if ( $form->{action}
-             && $form->{action} ne 'redirect'
-             && "lsmb_legacy"->can($form->{action}) ) {
-            $logger->trace("action $form->{action}");
+        if ( $form->{__action}
+             && $form->{__action} ne 'redirect'
+             && "lsmb_legacy"->can($form->{__action}) ) {
+            $logger->trace("__action $form->{__action}");
 
-            &{ $form->{action} }();
+            &{ $form->{__action} }();
             $form->{dbh}->commit;
         }
         else {
             $form->error( __FILE__ . ':' . __LINE__ . ': '
-                          . $locale->text('action not defined!'));
+                          . $locale->text('__action not defined!'));
         }
     }
     catch  ($err) {
-        # We have an exception here because otherwise we always get an exception
-        # when output terminates.  A mere 'die' will no longer trigger an automatic
-        # error, but die 'foo' will map to $form->error('foo')
-        # -- CT
         $form->{_error} = 1;
-        if ($err =~ /^Died/i or $err =~ /^exit at /) {
+
+        if ($err isa 'LedgerSMB::StopProcessing') {
             $form->{dbh}->commit if defined $form->{dbh};
         }
         else {
+            my $msg = (blessed $err and $err->can('message'))
+                ? $err->message
+                : "$err";
             $form->{dbh}->rollback if defined $form->{dbh};
-            _error($form, "'$err'");
+            _error($form, $msg);
         }
     }
 
-    $logger->trace("leaving after script=old/bin/$form->{script} action=$form->{action}");#trace flow
+    $logger->trace("leaving after script=old/bin/$form->{script} __action=$form->{__action}");#trace flow
 
     $form->{dbh}->disconnect() if defined $form->{dbh};
     return 1; # PSGI.pm expects a 'true' response

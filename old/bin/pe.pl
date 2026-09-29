@@ -24,233 +24,21 @@ use LedgerSMB::OE;
 
 # end of main
 
-sub add {
-
-    # construct callback
-    $form->{callback} = "$form->{script}?action=add&type=$form->{type}"
-      unless $form->{callback};
-
-    &{"prepare_$form->{type}"};
-
-    $form->{orphaned} = 1;
-    &display_form;
-
-}
-
-sub edit {
-
-    &{"prepare_$form->{type}"};
-    &display_form;
-
-}
-
-sub prepare_partsgroup {
-    PE->get_partsgroup(\%$form)
-      if $form->{id};
-}
-sub prepare_pricegroup {
-    PE->get_pricegroup( \%myconfig, \%$form )
-      if $form->{id};
-}
 
 
 sub save {
-
     if ( $form->{translation} ) {
         PE->save_translation( \%myconfig, \%$form );
         $form->redirect( $locale->text('Translations saved!') );
-        $form->finalize_request();
-    }
-
-    if ( $form->{type} eq 'partsgroup' ) {
-        $form->isblank( "partsgroup", $locale->text('Group missing!') );
-        PE->save_partsgroup( \%myconfig, \%$form );
-        $form->redirect( $locale->text('Group saved!') );
-    }
-
-    elsif ( $form->{type} eq 'pricegroup' ) {
-        $form->isblank( "pricegroup", $locale->text('Pricegroup missing!') );
-        PE->save_pricegroup( \%myconfig, \%$form );
-        $form->redirect( $locale->text('Pricegroup saved!') );
     }
 }
 
 sub delete {
-
     if ( $form->{translation} ) {
         PE->delete_translation( \%myconfig, \%$form );
         $form->redirect( $locale->text('Translation deleted!') );
 
     }
-    else {
-
-        if ( $form->{type} eq 'partsgroup' ) {
-            PE->delete_partsgroup( \%myconfig, \%$form );
-            $form->redirect( $locale->text('Group deleted!') );
-        }
-        elsif ( $form->{type} eq 'pricegroup' ) {
-            PE->delete_pricegroup( \%myconfig, \%$form );
-            $form->redirect( $locale->text('Pricegroup deleted!') );
-        }
-    }
-
-}
-
-sub partsgroup_header {
-
-    $form->{action} =~ s/_.*//;
-    # $locale->text('Add Group')
-    # $locale->text('Edit Group')
-    $form->{title} = $locale->maketext( ucfirst $form->{action} . " Group" );
-
-
-    $form->{partsgroup} = $form->quote( $form->{partsgroup} );
-    PE->partsgroups(\%myconfig, $form);
-
-    $form->header;
-
-    print qq|
-<body class="lsmb">
-
-<form method="post" data-dojo-type="lsmb/Form" action=$form->{script}>
-
-<input type=hidden name=id value=$form->{id}>
-<input type=hidden name=type value=$form->{type}>
-
-<table width=100%>
-  <tr>
-    <th class=listtop>$form->{title}</th>
-  </tr>
-  <tr height="5"></tr>
-  <tr>
-    <td>
-      <table width=100%>
-    <tr>
-          <th align="right">| . $locale->text('Parent') . qq|</th>
-          <td><select data-dojo-type="dijit/form/Select"
-                      id='parent' name='parent'>
-              <option>&nbsp;</option>|;
-              for my $pg (@{$form->{item_list}}){
-                  my $selected = '';
-                  $selected = 'SELECTED="SELECTED"'
-                         if $form->{parent} == $pg->{id};
-                  print qq|<option value='$pg->{id}' $selected>
-                                  $pg->{partsgroup} </option>|;
-              }
-      print qq|</select>
-          <th align="right">| . $locale->text('Group') . qq|</th>
-
-          <td><input data-dojo-type="dijit/form/TextBox" name=partsgroup size=30 value="$form->{partsgroup}"></td>
-    </tr>
-      </table>
-    </td>
-  </tr>
-  <tr>
-    <td colspan=2><hr size=3 noshade></td>
-  </tr>
-</table>
-|;
-
-}
-
-sub partsgroup_footer {
-
-    $form->hide_form(qw(callback path login sessionid));
-
-    if ( $myconfig{acs} !~ /Goods \& Services--Add Group/ ) {
-        print qq|
-<button data-dojo-type="dijit/form/Button" type="submit" class="submit" name="action" value="save">|
-          . $locale->text('Save')
-          . qq|</button>
-|;
-
-        if ( $form->{id} && $form->{orphaned} ) {
-            print qq|
-<button data-dojo-type="dijit/form/Button" type="submit" class="submit" name="action" value="delete">|
-              . $locale->text('Delete')
-              . qq|</button>|;
-        }
-    }
-
-    print qq|
-</form>
-
-</body>
-</html>
-|;
-
-}
-
-sub pricegroup_header {
-
-    $form->{action} =~ s/_.*//;
-    # $locale->text('Add Pricegroup')
-    # $locale->text('Edit Pricegroup')
-    $form->{title} = $locale->maketext(
-        ucfirst $form->{action} . " Pricegroup" );
-
-    $form->{pricegroup} = $form->quote( $form->{pricegroup} );
-
-    $form->header;
-
-    print qq|
-<body class="lsmb">
-
-<form method="post" data-dojo-type="lsmb/Form" action=$form->{script}>
-
-<input type=hidden name=id value=$form->{id}>
-<input type=hidden name=type value=$form->{type}>
-
-<table width=100%>
-  <tr>
-    <th class=listtop>$form->{title}</th>
-  </tr>
-  <tr height="5"></tr>
-  <tr>
-    <td>
-      <table width=100%>
-    <tr>
-      <th align=right>| . $locale->text('Pricegroup') . qq|</th>
-
-          <td><input data-dojo-type="dijit/form/TextBox" name=pricegroup size=30 value="$form->{pricegroup}"></td>
-    </tr>
-      </table>
-    </td>
-  </tr>
-  <tr>
-    <td colspan=2><hr size=3 noshade></td>
-  </tr>
-</table>
-|;
-
-}
-
-sub pricegroup_footer {
-
-    $form->hide_form(qw(callback path login sessionid));
-
-    if ( $myconfig{acs} !~ /Goods \& Services--Add Pricegroup/ ) {
-        print qq|
-<button data-dojo-type="dijit/form/Button" type="submit" class="submit" name="action" value="save">|
-          . $locale->text('Save')
-          . qq|</button>
-|;
-
-        if ( $form->{id} && $form->{orphaned} ) {
-            print qq|
-<button data-dojo-type="dijit/form/Button" type="submit" class="submit" name="action" value="delete">|
-              . $locale->text('Delete')
-              . qq|</button>|;
-        }
-    }
-
-    print qq|
-</form>
-
-</body>
-</html>
-|;
-
 }
 
 sub translation {
@@ -289,7 +77,7 @@ sub translation {
     print qq|
 <body class="lsmb">
 
-<form method="post" data-dojo-type="lsmb/Form" action=$form->{script}>
+<form method="post" data-dojo-type="lsmb/Form" action="$form->{script}">
 |;
 
     $form->hide_form(qw(translation title number));
@@ -322,7 +110,7 @@ $sort
     print qq|
 
 <br>
-<button data-dojo-type="dijit/form/Button" class="submit" type="submit" name="action" value="continue">|
+<button data-dojo-type="dijit/form/Button" class="submit" type="submit" name="__action" value="continue">|
       . $locale->text('Continue')
       . qq|</button>
 </form>
@@ -338,7 +126,7 @@ sub list_translations {
     $title = $form->escape( $form->{title}, 1 );
 
     $callback =
-"$form->{script}?action=list_translations&translation=$form->{translation}&number=$form->{number}&title=$title";
+"$form->{script}?__action=list_translations&translation=$form->{translation}&number=$form->{number}&title=$title";
 
     if ( $form->{"$form->{number}"} ) {
         $callback .= qq|&$form->{number}=$form->{"$form->{number}"}|;
@@ -432,7 +220,7 @@ sub list_translations {
         for (@column_index) { $column_data{$_} = "<td>$ref->{$_}&nbsp;</td>" }
 
         $column_data{description} =
-"<td><a href=$form->{script}?action=edit_translation&translation=$form->{translation}&number=$form->{number}&id=$ref->{id}&callback=$callback>$ref->{description}&nbsp;</a></td>";
+"<td><a href=$form->{script}?__action=edit_translation&translation=$form->{translation}&number=$form->{number}&id=$ref->{id}&callback=$callback>$ref->{description}&nbsp;</a></td>";
 
         $i++;
         $i %= 2;
@@ -459,7 +247,7 @@ sub list_translations {
 
 <br>
 
-<form method="post" data-dojo-type="lsmb/Form" action=$form->{script}>
+<form method="post" data-dojo-type="lsmb/Form" action="$form->{script}">
 
 <input name=callback type=hidden value="$form->{callback}">
 |;
@@ -530,7 +318,7 @@ sub translation_header {
     print qq|
 <body class="lsmb">
 
-<form method="post" data-dojo-type="lsmb/Form" action=$form->{script}>
+<form method="post" data-dojo-type="lsmb/Form" action="$form->{script}">
 
 <input type=hidden name=$form->{number} value="|
       . $form->quote( $form->{"$form->{number}"} ) . qq|">
@@ -642,13 +430,10 @@ sub update {
 
         &translation_header;
         &translation_footer;
-
-        $form->finalize_request();
-
     }
-
-    &display_form;
-
+    else {
+        &display_form;
+    }
 }
 
 sub select_name {
@@ -669,7 +454,7 @@ sub select_name {
     print qq|
 <body class="lsmb">
 
-<form method="post" data-dojo-type="lsmb/Form" action=$form->{script}>
+<form method="post" data-dojo-type="lsmb/Form" action="$form->{script}">
 
 <table width=100%>
   <tr>
@@ -734,14 +519,14 @@ qq|<td><input name="new_name_$i" type=hidden value="$ref->{name}">$ref->{name}</
 |;
 
     # delete variables
-    for (qw(action nextsub name_list)) { delete $form->{$_} }
+    for (qw(nextsub name_list)) { delete $form->{$_} }
 
     $form->hide_form;
 
     print qq|
 <input type="hidden" name="nextsub" value="name_selected">
 <br>
-<button data-dojo-type="dijit/form/Button" class="submit" type="submit" name="action" value="continue">|
+<button data-dojo-type="dijit/form/Button" class="submit" type="submit" name="__action" value="continue">|
       . $locale->text('Continue')
       . qq|</button>
 </form>
@@ -783,11 +568,6 @@ sub display_form {
 }
 
 sub continue { &{ $form->{nextsub} } }
-
-sub add_group      { &add }
-sub add_project    { &add }
-sub add_job        { &add }
-sub add_pricegroup { &add }
 
 sub project_sales_order {
 
@@ -873,7 +653,7 @@ qq|<option value="$_->{control_code}--$_->{id}">$_->{control_code}--$_->{descrip
     print qq|
 <body class="lsmb">
 
-<form id="timecard-generate-salesorders" method="post" data-dojo-type="lsmb/Form" action=$form->{script}>
+<form id="timecard-generate-salesorders" method="post" data-dojo-type="lsmb/Form" action="$form->{script}">
 
 <table width=100%>
   <tr>
@@ -911,7 +691,7 @@ qq|<option value="$_->{control_code}--$_->{id}">$_->{control_code}--$_->{descrip
     $form->hide_form(qw(path login sessionid nextsub type vc));
 
     print qq|
-<button data-dojo-type="dijit/form/Button" type="submit" class="submit" name="action" value="continue">|
+<button data-dojo-type="dijit/form/Button" type="submit" class="submit" name="__action" value="continue">|
       . $locale->text('Continue')
       . qq|</button>
 
@@ -930,7 +710,7 @@ sub project_jcitems_list {
 
     $form->{projectnumber} = $form->unescape( $form->{projectnumber} );
     $form->{employee}      = $form->unescape( $form->{employee} );
-    $form->{callback}      = "$form->{script}?action=project_jcitems_list";
+    $form->{callback}      = "$form->{script}?__action=project_jcitems_list";
     for (
         qw(month year interval summary transdatefrom transdateto login path sessionid nextsub type vc)
       )
@@ -998,7 +778,7 @@ sub project_jcitems_list {
         }
         for (qw(amount sellprice)) {
             $form->{"${_}_$i"} =
-              $form->format_amount( \%myconfig, $form->{"${_}_$i"}, LedgerSMB::Setting->new(%$form)->get('decimal_places') );
+              $form->format_amount( \%myconfig, $form->{"${_}_$i"}, $form->get_setting('decimal_places') );
         }
     }
 
@@ -1047,7 +827,7 @@ sub jcitems {
     print qq|
 <body class="lsmb">
 
-<form method="post" data-dojo-type="lsmb/Form" action=$form->{script}>
+<form method="post" data-dojo-type="lsmb/Form" action="$form->{script}">
 
 <table width=100%>
   <tr>
@@ -1128,12 +908,12 @@ qq|<td><input name="ndx_$i" class=checkbox type=checkbox data-dojo-type="dijit/f
 
     if ( $form->{rowcount} ) {
         print qq|
-<button data-dojo-type="dijit/form/Button" class="submit" type="submit" name="action" value="generate_sales_orders">|
+<button data-dojo-type="dijit/form/Button" class="submit" type="submit" name="__action" value="generate_sales_orders">|
           . $locale->text('Generate Sales Orders')
           . qq|</button>|;
 
         print qq|
-<button data-dojo-type="dijit/form/Button" class="submit" type="submit" name="action" value="select_customer">|
+<button data-dojo-type="dijit/form/Button" class="submit" type="submit" name="__action" value="select_customer">|
           . $locale->text('Select Customer')
           . qq|</button>|;
 
@@ -1166,19 +946,19 @@ sub select_customer {
     print qq|
 <body class="lsmb $form->{dojo_theme}" onLoad="document.forms[0].$form->{vc}.focus()" />
 
-<form method="post" data-dojo-type="lsmb/Form" action=$form->{script}>
+<form method="post" data-dojo-type="lsmb/Form" action="$form->{script}">
 
 <b>$label</b> <input data-dojo-type="dijit/form/TextBox" name=$form->{vc} size=40>
 
 |;
 
     $form->{nextsub} = "$form->{vc}_selected";
-    $form->{action}  = "$form->{vc}_selected";
+    $form->{__action}  = "$form->{vc}_selected";
 
     $form->hide_form;
 
     print qq|
-<button data-dojo-type="dijit/form/Button" class="submit" type="submit" name="action" value="continue">|
+<button data-dojo-type="dijit/form/Button" class="submit" type="submit" name="__action" value="continue">|
       . $locale->text('Continue')
       . qq|</button>
 
@@ -1202,23 +982,22 @@ sub customer_selected {
       )
     {
         &select_name( $form->{vc} );
-        $form->finalize_request();
-    }
-
-    if ( $rv == 1 ) {
-        $form->{"$form->{vc}"}    = $form->{name_list}[0]->{name};
-        $form->{"$form->{vc}_id"} = $form->{name_list}[0]->{id};
     }
     else {
-        $msg =
-          ( $form->{vc} eq 'customer' )
-          ? $locale->text('Customer not on file!')
-          : $locale->text('Vendor not on file!');
-        $form->error($msg);
+        if ( $rv == 1 ) {
+            $form->{"$form->{vc}"}    = $form->{name_list}[0]->{name};
+            $form->{"$form->{vc}_id"} = $form->{name_list}[0]->{id};
+        }
+        else {
+            $msg =
+                ( $form->{vc} eq 'customer' )
+                ? $locale->text('Customer not on file!')
+                : $locale->text('Vendor not on file!');
+            $form->error($msg);
+        }
+
+        &display_form;
     }
-
-    &display_form;
-
 }
 
 sub sales_order_header {
